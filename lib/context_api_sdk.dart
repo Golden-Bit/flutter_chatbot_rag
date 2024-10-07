@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 // Base URL per il server (modificabile per localhost o remoto)
-const String BASE_URL = 'http://127.0.0.1:8099';
+const String BASE_URL = 'http://127.0.0.1:8080';
 
 class ApiException implements Exception {
   final String message;

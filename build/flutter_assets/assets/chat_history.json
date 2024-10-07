@@ -1,0 +1,11 @@
+{
+    "chatHistory": [
+      { "title": "Conversazione 1", "date": "2024-01-01" },
+      { "title": "Conversazione 2", "date": "2024-01-02" },
+      { "title": "Conversazione 3", "date": "2024-01-03" },
+      { "title": "Conversazione 4", "date": "2024-01-04" },
+      { "title": "Conversazione 5", "date": "2024-01-05" },
+      { "title": "Conversazione 6", "date": "2024-01-06" }
+    ]
+  }
+  

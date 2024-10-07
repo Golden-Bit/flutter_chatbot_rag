@@ -82612,7 +82612,7 @@ A.J3.prototype={
 yH(a,b){return this.aiv(a,b)},
 aiv(a,b){var s=0,r=A.G(t.Lz),q,p,o,n
 var $async$yH=A.C(function(c,d){if(c===1)return A.D(d,r)
-while(true)switch(s){case 0:o=A.cV("http://127.0.0.1:8099/contexts")
+while(true)switch(s){case 0:o=A.cV("http://127.0.0.1:8080/contexts")
 n=t.N
 n=A.r(n,n)
 n.n(0,"context_name",a)
@@ -82629,7 +82629,7 @@ yQ(a){return this.aiQ(a)},
 aiQ(a){var s=0,r=A.G(t.H),q
 var $async$yQ=A.C(function(b,c){if(b===1)return A.D(c,r)
 while(true)switch(s){case 0:s=2
-return A.J(A.auZ(A.cV("http://127.0.0.1:8099/contexts/"+a),null,null),$async$yQ)
+return A.J(A.auZ(A.cV("http://127.0.0.1:8080/contexts/"+a),null,null),$async$yQ)
 case 2:q=c
 if(q.b!==200)throw A.c(A.rh("Errore durante l'eliminazione del contesto: "+q.gjV(0)))
 return A.E(null,r)}})
@@ -82637,7 +82637,7 @@ return A.F($async$yQ,r)},
 uy(){var s=0,r=A.G(t.AG),q,p,o
 var $async$uy=A.C(function(a,b){if(a===1)return A.D(b,r)
 while(true)switch(s){case 0:s=3
-return A.J(A.ay9(A.cV("http://127.0.0.1:8099/contexts"),null),$async$uy)
+return A.J(A.ay9(A.cV("http://127.0.0.1:8080/contexts"),null),$async$uy)
 case 3:o=b
 if(o.b===200){p=J.hO(B.aa.je(0,A.r4(A.r_(o.e).c.a.h(0,"charset")).dj(0,o.w),null),new A.a1a(),t.Lz)
 q=A.a7(p,!0,p.$ti.i("ax.E"))
@@ -82649,7 +82649,7 @@ vj(a,b,c,d){return this.apB(a,b,c,d)},
 apB(a,b,c,d){var s=0,r=A.G(t.H),q=1,p,o,n,m,l,k,j,i,h,g
 var $async$vj=A.C(function(e,f){if(e===1){p=f
 s=q}while(true)switch(s){case 0:q=3
-o=A.aNL("POST",A.cV("http://127.0.0.1:8099/upload"))
+o=A.aNL("POST",A.cV("http://127.0.0.1:8080/upload"))
 o.x.n(0,"contexts",B.b.b9(b,","))
 k=o.y
 j=A.ayq(new A.ju(A.awZ(a,t.Cm)))
@@ -82680,7 +82680,7 @@ return A.F($async$vj,r)},
 zS(a){return this.amf(a)},
 amf(a){var s=0,r=A.G(t.b5),q,p,o,n,m
 var $async$zS=A.C(function(b,c){if(b===1)return A.D(c,r)
-while(true)switch(s){case 0:n=A.cV("http://127.0.0.1:8099/files").Iv(0,A.ap(["contexts",B.b.b9(a,",")],t.N,t.z))
+while(true)switch(s){case 0:n=A.cV("http://127.0.0.1:8080/files").Iv(0,A.ap(["contexts",B.b.b9(a,",")],t.N,t.z))
 s=3
 return A.J(A.ay9(n,null),$async$zS)
 case 3:m=c
@@ -82695,7 +82695,7 @@ return A.F($async$zS,r)},
 yR(a){return this.aiR(a)},
 aiR(a){var s=0,r=A.G(t.H),q,p,o
 var $async$yR=A.C(function(b,c){if(b===1)return A.D(c,r)
-while(true)switch(s){case 0:p=A.cV("http://127.0.0.1:8099/files")
+while(true)switch(s){case 0:p=A.cV("http://127.0.0.1:8080/files")
 o=A.r(t.N,t.z)
 o.n(0,"file_id",a)
 s=2
@@ -82709,7 +82709,7 @@ ahE(a,b){var s=0,r=A.G(t.a),q,p,o
 var $async$yz=A.C(function(c,d){if(c===1)return A.D(d,r)
 while(true)switch(s){case 0:p=t.N
 s=3
-return A.J(A.Zt(A.cV("http://127.0.0.1:8099/configure_and_load_chain/?context="+a+"&model="+b),null,A.ap(["Content-Type","application/json"],p,p)),$async$yz)
+return A.J(A.Zt(A.cV("http://127.0.0.1:8080/configure_and_load_chain/?context="+a+"&model="+b),null,A.ap(["Content-Type","application/json"],p,p)),$async$yz)
 case 3:o=d
 if(o.b===200){q=B.aa.je(0,A.r4(A.r_(o.e).c.a.h(0,"charset")).dj(0,o.w),null)
 s=1

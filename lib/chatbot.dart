@@ -14,6 +14,8 @@ import 'package:flutter/services.dart' show rootBundle;  // Import necessario pe
 import 'dart:convert';  // Per il parsing JSON
 import 'context_api_sdk.dart';  // Importa lo script SDK
 import 'package:flutter_app/user_manager/user_model.dart';
+import 'databases_manager/database_service.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 /*void main() {
   runApp(MyApp());
@@ -44,7 +46,7 @@ class ChatBotPage extends StatefulWidget {
 }
 
 class _ChatBotPageState extends State<ChatBotPage> {
-  final List<Map<String, String>> messages = [];
+  List<Map<String, String>> messages = [];
   final TextEditingController _controller = TextEditingController();
   String fullResponse = "";
   bool showKnowledgeBase = false;
@@ -91,21 +93,89 @@ class _ChatBotPageState extends State<ChatBotPage> {
   
   String _selectedModel = "gpt-4o-mini";  // Variabile per il modello selezionato, di default GPT-4O
 
+int? _activeChatIndex; // Chat attiva (null se si sta creando una nuova chat)
+final DatabaseService _databaseService = DatabaseService();
 // Aggiungi questa variabile per contenere la chat history simulata
 List<dynamic> _chatHistory = [];
+String? _nlpApiUrl;
 
-// Metodo per caricare la chat history dal file JSON
-Future<void> _loadChatHistory() async {
+Future<void> _loadConfig() async {
   try {
-    final String response = await rootBundle.loadString('assets/chat_history.json');  // Assicurati che il file JSON sia in 'assets'
-    final data = await json.decode(response);
-    setState(() {
-      _chatHistory = data['chatHistory'];  // Assumi che il JSON abbia una chiave 'chatHistory'
-    });
+    final String response = await rootBundle.loadString('assets/config.json');
+    final data = jsonDecode(response);
+    _nlpApiUrl = data['nlp_api'];
+  } catch (e) {
+    print("Errore nel caricamento del file di configurazione: $e");
+  }
+}
+// Funzione di logout
+void _logout(BuildContext context) {
+  // Rimuove il token dal localStorage
+  html.window.localStorage.remove('token');
+  html.window.localStorage.remove('user');
+
+  // Reindirizza l'utente alla pagina di login
+  Navigator.pushReplacementNamed(context, '/login');
+}
+
+Future<void> __loadChatHistory() async {
+  try {
+    String? chatHistoryJson = html.window.localStorage['chatHistory'];
+    if (chatHistoryJson != null) {
+      final data = json.decode(chatHistoryJson);
+      setState(() {
+        _chatHistory = data['chatHistory'];
+      });
+      print('Chat history caricata: $_chatHistory');
+    } else {
+      print('Nessuna chat salvata trovata nel Local Storage');
+    }
   } catch (e) {
     print('Errore nel caricamento della chat history: $e');
   }
 }
+
+Future<void> _loadChatHistory() async {
+  try {
+    // Usa il nome del database basato sul nome utente
+    final dbName = "${widget.user.username}-database";  
+    final collectionName = 'chats';
+
+    // Prova a caricare le chat dalla collection 'chats'
+    final chats = await _databaseService.fetchCollectionData(dbName, collectionName, widget.token.accessToken);
+
+    if (chats.isNotEmpty) {
+      setState(() {
+        _chatHistory = chats;
+      });
+      print('Chat history loaded from database: $_chatHistory');
+    } else {
+      print('No chat history found in the database.');
+    }
+  } catch (e) {
+    // Gestisci l'errore 403 (collection non esistente)
+    if (e.toString().contains('403')) {
+      print("Collection 'chats' does not exist. Creating the collection...");
+
+      // Crea la collection "chats"
+      await _databaseService.createCollection(
+        "${widget.user.username}-database", 
+        'chats', 
+        widget.token.accessToken
+      );
+
+      // Inizializza _chatHistory come lista vuota
+      setState(() {
+        _chatHistory = [];
+      });
+
+      print("Collection 'chats' created successfully. No previous chat history found.");
+    } else {
+      print("Error loading chat history from database: $e");
+    }
+  }
+}
+
 
   @override
   void initState() {
@@ -113,7 +183,7 @@ Future<void> _loadChatHistory() async {
     _speech = stt.SpeechToText();
     _flutterTts = FlutterTts();  // Inizializza FlutterTTS
     _loadAvailableContexts();  // Carica i contesti esistenti al caricamento della pagina
- 
+      _loadChatHistory();  // Carica la chat history simulata
   }
 
   // Funzione per caricare i contesti dal backend
@@ -175,7 +245,7 @@ Future<void> _loadChatHistory() async {
             setState(() {
               isExpanded = !isExpanded;  // Alterna collasso ed espansione
               if (isExpanded) {
-                sidebarWidth = 500.0;  // Imposta la larghezza a 500 pixel alla prima espansione
+                sidebarWidth = 300.0;  // Imposta la larghezza a 500 pixel alla prima espansione
               } else {
                 sidebarWidth = 0.0;  // Collassa la barra laterale
               }
@@ -192,7 +262,7 @@ Future<void> _loadChatHistory() async {
                 setState(() {
                   sidebarWidth += details.delta.dx;  // Ridimensiona la barra laterale
                   if (sidebarWidth < 100) sidebarWidth = 100;  // Larghezza minima
-                  if (sidebarWidth > 500) sidebarWidth = 500;  // Larghezza massima
+                  if (sidebarWidth > 900) sidebarWidth = 900;  // Larghezza massima
                 });
               }
             },
@@ -213,9 +283,15 @@ Future<void> _loadChatHistory() async {
           SizedBox(height: 16.0),  // Spazio verticale tra la linea e le voci del menu
           
           // Sezione fissa con le voci principali
+  // Pulsante per creare una nuova chat
+ListTile(
+  leading: Icon(Icons.add, color: Colors.white),
+  title: Text('Nuova Chat', style: TextStyle(color: Colors.white)),
+  onTap: _startNewChat,  // Usa la nuova funzione
+),
          ListTile(
   leading: Icon(Icons.chat, color: Colors.white),
-  title: Text('Conversazioni', style: TextStyle(color: Colors.white)),
+  title: Text('Conversazione', style: TextStyle(color: Colors.white)),
   onTap: () {
     setState(() {
       showKnowledgeBase = false;  // Nascondi la pagina di gestione dei contesti
@@ -243,6 +319,53 @@ ListTile(
       showKnowledgeBase = false;
     });
   },
+),
+/*ListTile(
+  leading: Icon(Icons.history, color: Colors.white),
+  title: Text('Conversazioni salvate', style: TextStyle(color: Colors.white)),
+  onTap: () {
+    setState(() {
+      showKnowledgeBase = false;
+      showSettings = false;
+      // Carica la lista delle chat salvate
+      _loadChatHistory();
+    });
+  },
+),*/
+// Visualizza la lista delle chat salvate e rendila scrollabile
+SizedBox(height: 16.0),  // Spazio verticale di 16.0px
+
+// Rendi la lista delle chat espandibile
+Expanded(
+  child: ListView.builder(
+    itemCount: _chatHistory.length,
+    itemBuilder: (context, index) {
+      final chat = _chatHistory[index];
+      return ListTile(
+        title: Text(chat['name'], style: TextStyle(color: Colors.white)),
+        onTap: () => _loadMessagesForChat(index),  // Carica la chat selezionata
+      );
+    },
+  ),
+),
+
+// Mantieni il pulsante di logout in basso, senza Spacer
+Align(
+  alignment: Alignment.bottomCenter,
+  child: Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: ElevatedButton.icon(
+      icon: Icon(Icons.logout, color: Colors.red), // Icona rossa
+      label: Text(
+        'Logout',
+        style: TextStyle(color: Colors.red), // Testo rosso
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.white, // Riempimento bianco
+      ),
+      onPressed: () => _logout(context), // Chiama la funzione di logout
+    ),
+  ),
 ),
 
 // Aggiungi qui il Container con padding leggero, bordi bianchi e angoli arrotondati
@@ -322,107 +445,88 @@ Expanded(
           : Column(  // Altrimenti mostra la pagina del chatbot
               children: [
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final message = messages[index];
-                      final isUser = message['role'] == 'user';
+  child: ListView.builder(
+    itemCount: messages.length,
+    itemBuilder: (context, index) {
+      final message = messages[index];
+      final isUser = message['role'] == 'user';
 
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Row(
-                          mainAxisAlignment: isUser
-                              ? MainAxisAlignment.end
-                              : MainAxisAlignment.start,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (!isUser)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8.0),
-                                child: CircleAvatar(
-                                  backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
-                                  child: Icon(Icons.android, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
-                                ),
-                              ),
-                            Flexible(
-                              child: Container(
-                                padding: const EdgeInsets.all(12.0),
-                                decoration: BoxDecoration(
-                                  color: isUser
-                                      ? _userMessageColor.withOpacity(_userMessageOpacity)
-                                      : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
-                                  borderRadius: BorderRadius.circular(8.0),
-                                ),
-                                margin: isUser
-                                    ? const EdgeInsets.only(left: 50.0)
-                                    : const EdgeInsets.only(right: 50.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    MarkdownBody(data: message['content'] ?? ''),
-                                    if (!isUser && message['content'] != null && message['content']!.isNotEmpty) // Se è un messaggio del chatbot e c'è contenuto
-                                      Row(
-                                        children: [
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.volume_up,
-                                              size: 20.0, // Ridimensiona l'icona
-                                            ),
-                                            onPressed: () {
-                                              if (_isPlaying) {
-                                                _stopSpeaking();
-                                              } else {
-                                                _speak(message['content'] ?? ''); // Text-to-Speech
-                                              }
-                                            },
-                                          ),
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.thumb_up,
-                                              size: 20.0,
-                                            ),
-                                            onPressed: () {
-                                              // Placeholder per feedback positivo
-                                            },
-                                          ),
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.thumb_down,
-                                              size: 20.0,
-                                            ),
-                                            onPressed: () {
-                                              // Placeholder per feedback negativo
-                                            },
-                                          ),
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.copy,
-                                              size: 20.0,
-                                            ),
-                                            onPressed: () {
-                                              _copyToClipboard(message['content'] ?? '');
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            if (isUser)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 8.0),
-                                child: CircleAvatar(
-                                  backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
-                                  child: Icon(Icons.person, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
-                                ),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Row(
+          mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!isUser)
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: CircleAvatar(
+                  backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
+                  child: Icon(Icons.android, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
                 ),
+              ),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: isUser
+                      ? _userMessageColor.withOpacity(_userMessageOpacity)
+                      : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    MarkdownBody(data: message['content'] ?? ''),  // Mostra il contenuto del messaggio
+                    if (!isUser) // Solo per l'assistente
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          // Icona Text-to-Speech
+                          IconButton(
+                            icon: Icon(Icons.volume_up, size: 16),
+                            onPressed: () => _speak(message['content'] ?? ''),
+                          ),
+                          // Icona Pollice su
+                          IconButton(
+                            icon: Icon(Icons.thumb_up, size: 16),
+                            onPressed: () {
+                              // Gestisci azione "pollice su"
+                            },
+                          ),
+                          // Icona Pollice giù
+                          IconButton(
+                            icon: Icon(Icons.thumb_down, size: 16),
+                            onPressed: () {
+                              // Gestisci azione "pollice giù"
+                            },
+                          ),
+                          // Icona Copia
+                          IconButton(
+                            icon: Icon(Icons.copy, size: 16),
+                            onPressed: () => _copyToClipboard(message['content'] ?? ''),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (isUser)
+              Padding(
+                padding: const EdgeInsets.only(left: 8.0),
+                child: CircleAvatar(
+                  backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
+                  child: Icon(Icons.person, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  ),
+),
+
                Padding(
   padding: const EdgeInsets.all(8.0),
   child: Row(
@@ -492,10 +596,208 @@ Expanded(
         ],
       ),
     );
+}
+
+// Funzione per caricare una nuova chat
+void _startNewChat() {
+  setState(() {
+    _activeChatIndex = null; // Reset della chat attiva
+    messages.clear(); // Pulisci i messaggi per una nuova chat
+    showKnowledgeBase = false; // Nascondi KnowledgeBase
+    showSettings = false; // Nascondi Impostazioni
+  });
+}
+
+// Funzione per caricare i messaggi di una chat salvata
+void _loadMessagesForChat(int chatIndex) {
+  setState(() {
+    _activeChatIndex = chatIndex;
+    final chat = _chatHistory[chatIndex];
+    List<dynamic> chatMessages = chat['messages'];
+
+    // Debug: Verifica che i messaggi siano corretti
+    print('Messaggi caricati per ${chat['name']}: $chatMessages');
+
+    // Aggiorna `messages`
+    messages.clear();
+    messages.addAll(chatMessages.map((message) => Map<String, String>.from(message)).toList());
+
+    // Forza il passaggio alla schermata delle conversazioni
+    showKnowledgeBase = false; // Nascondi KnowledgeBase
+    showSettings = false; // Nascondi Impostazioni
+
+    // Debug: Verifica che la lista `messages` sia aggiornata
+    print('Messaggi aggiornati nella UI: $messages');
+  });
+}
+
+
+  
+Future<void> _handleUserInput(String input) async {
+  if (input.isEmpty) return;
+
+  setState(() {
+    messages.add({'role': 'user', 'content': input});
+    fullResponse = ""; // Reset della risposta completa
+  });
+
+  // Placeholder per la risposta del bot
+  setState(() {
+    messages.add({'role': 'assistant', 'content': ''});
+  });
+
+  _controller.clear(); // Pulisce il campo di input
+
+  await _sendMessageToAPI(input);
+
+  // Salva la conversazione (aggiorna se c'è una chat attiva)
+  _saveConversation(messages);
+}
+
+Future<void> __saveConversation(List<Map<String, String>> messages) async {
+  try {
+    if (_activeChatIndex != null) {
+      // Fai una copia profonda dei messaggi per evitare riferimenti condivisi
+      _chatHistory[_activeChatIndex!]['messages'] = List<Map<String, String>>.from(
+        messages.map((message) => Map<String, String>.from(message))
+      );
+    } else {
+      final currentTime = DateTime.now();
+      final chatName = 'Chat ${_chatHistory.length + 1}';
+
+      // Crea una nuova chat con copia profonda dei messaggi
+      final newChat = {
+        'name': chatName,
+        'date': currentTime.toIso8601String(),
+        'messages': List<Map<String, String>>.from(
+          messages.map((message) => Map<String, String>.from(message))
+        ),
+      };
+
+      _chatHistory.add(newChat);
+      _activeChatIndex = _chatHistory.length - 1;
+    }
+
+    // Salva la cronologia delle chat nel Local Storage
+    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+    html.window.localStorage['chatHistory'] = jsonString;
+
+    print('Chat salvata correttamente: $jsonString');
+  } catch (e) {
+    print('Errore durante il salvataggio della conversazione: $e');
   }
+}
+
+
+Future<void> _saveConversation(List<Map<String, String>> messages) async {
+  try {
+    final currentTime = DateTime.now();
+    final chatName = _activeChatIndex != null 
+        ? _chatHistory[_activeChatIndex!]['name'] 
+        : 'Chat ${_chatHistory.length + 1}';
+
+    // Crea o aggiorna la chat corrente
+    final currentChat = {
+      'name': chatName,
+      'date': currentTime.toIso8601String(),
+      'messages': List<Map<String, String>>.from(
+        messages.map((message) => Map<String, String>.from(message))
+      ),
+    };
+
+    if (_activeChatIndex != null) {
+      // Aggiorna la chat esistente nella lista locale
+      _chatHistory[_activeChatIndex!]['messages'] = currentChat['messages'];
+    } else {
+      // Aggiungi una nuova chat alla lista locale
+      _chatHistory.add(currentChat);
+      _activeChatIndex = _chatHistory.length - 1;
+    }
+
+    // Salva la cronologia delle chat nel Local Storage
+    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+    html.window.localStorage['chatHistory'] = jsonString;
+
+    print('Chat saved in local storage.');
+
+    // Salva o aggiorna la chat nel database
+    final dbName = "${widget.user.username}-database";  // Usa il nome utente per il db
+    final collectionName = 'chats';
+
+    // Controlla se la collection esiste, se non esiste, creala
+    try {
+      // Controlla se la collection esiste già
+      final existingChats = await _databaseService.fetchCollectionData(dbName, collectionName, widget.token.accessToken);
+
+      // Cerca la chat corrente nel database
+      final existingChat = existingChats.firstWhere(
+        (chat) => chat['name'] == chatName,
+        orElse: () => <String, dynamic>{}, // Ritorna una mappa vuota invece di null
+      );
+
+      // Verifica se la chat esistente ha un campo '_id'
+      if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
+        // La chat esiste, aggiorna i suoi messaggi
+        await _databaseService.updateCollectionData(
+          dbName, 
+          collectionName, 
+          existingChat['_id'],  // Usa l'ID della chat esistente
+          {'messages': currentChat['messages']},  // Aggiorna solo i messaggi
+          widget.token.accessToken,
+        );
+        print('Chat updated in database.');
+      } else {
+        // La chat non esiste nel database, aggiungi una nuova
+        await _databaseService.addDataToCollection(
+          dbName,
+          collectionName,
+          currentChat,  // Aggiungi tutta la chat come nuovo documento
+          widget.token.accessToken,
+        );
+        print('New chat added to database.');
+      }
+    } catch (e) {
+      if (e.toString().contains('Failed to load collection data')) {
+        // Errore 403 significa che la collection non esiste, quindi creala
+        print('Collection "chats" does not exist. Creating collection...');
+        print(dbName);
+        print(collectionName);
+        print(currentChat);
+        print(widget.token.accessToken);
+                // Crea la collection "chats"
+        await _databaseService.createCollection(dbName, collectionName, widget.token.accessToken);
+
+        // Aggiungi la nuova chat alla collection appena creata
+        await _databaseService.addDataToCollection(
+          dbName,
+          collectionName,
+          currentChat,
+          widget.token.accessToken,
+        );
+
+        print('Collection "chats" created and chat added to database.');
+      } else {
+        throw e;  // Propaga altri errori
+      }
+    }
+  } catch (e) {
+    print('Error saving conversation: $e');
+  }
+}
+
+
+Future<void> _writeToFile(String jsonString) async {
+  // Simulazione di scrittura (poiché non è possibile scrivere direttamente negli assets)
+  print("JSON aggiornato: $jsonString");
+  // In un'app reale, userebbe la memorizzazione locale o un backend per memorizzare i dati.
+}
+
 
 // Funzione per aprire il dialog di selezione del contesto e modello
-void _showContextDialog() {
+void _showContextDialog() async {
+  // Aggiorna i contesti dal backend prima di aprire il dialog
+  await _loadAvailableContexts();  // Carica di nuovo i contesti disponibili dal database
+
   showDialog(
     context: context,
     builder: (BuildContext context) {
@@ -521,9 +823,7 @@ void _showContextDialog() {
                         });
                       }),
                     ),
-                    //SizedBox(height: 16.0),  // Spaziatura tra la sezione contesto e la sezione modello
-                    //Text('Seleziona Modello', style: TextStyle(fontWeight: FontWeight.bold)),
-                    //_buildModelSelector(setState),  // Aggiungi il selettore di modelli
+                    // Spaziatura tra la sezione contesto e la sezione modello
                   ],
                 ),
               ),
@@ -551,7 +851,7 @@ void _showContextDialog() {
   );
 }
 
-// Funzione per creare il selettore di modelli
+
 // Funzione per creare il selettore di modelli
 Widget _buildModelSelector(StateSetter setState) {
   final List<String> models = ['gpt-4o', 'gpt-4o-mini', 'qwen2-7b'];
@@ -928,130 +1228,111 @@ void set_context(String context, String model) async {
     );
   }
 
-  Future<void> _handleUserInput(String input) async {
-    if (input.isEmpty) return;
+Future<void> _sendMessageToAPI(String input) async {
+  if (_nlpApiUrl == null) await _loadConfig();  // Assicurati di caricare l'URL se non è già stato caricato
 
-    setState(() {
-      messages.add({'role': 'user', 'content': input});
-      fullResponse = ""; // Reset della risposta completa
-    });
+final url = "$_nlpApiUrl/chains/stream_chain";  // Usa l'URL caricato dal JSON
+  final chainId = "${_selectedContext}_qa_chain";
 
-    // Placeholder per la risposta del bot
-    setState(() {
-      messages.add({'role': 'assistant', 'content': ''});
-    });
+  final payload = jsonEncode({
+    "chain_id": chainId,
+    "query": {
+      "input": input,
+      "chat_history": messages,
+    },
+    "inference_kwargs": {}
+  });
 
-    // Pulisce il campo di input dopo l'invio del messaggio
-    _controller.clear();
+  try {
+    final response = await js_util.promiseToFuture(js_util.callMethod(
+      html.window,
+      'fetch',
+      [
+        url,
+        js_util.jsify({
+          'method': 'POST',
+          'headers': {'Content-Type': 'application/json'},
+          'body': payload,
+        })
+      ],
+    ));
 
-    await _sendMessageToAPI(input);
-  }
+    final ok = js_util.getProperty(response, 'ok') as bool;
+    if (!ok) {
+      throw Exception('Network response was not ok');
+    }
 
-  Future<void> _sendMessageToAPI(String input) async {
+    final body = js_util.getProperty(response, 'body');
+    if (body == null) {
+      throw Exception('Response body is null');
+    }
 
-    final url = "http://34.140.110.56:8100/chains/stream_chain";
-    // Usa il contesto selezionato per configurare il chain_id
-    final chainId = "${_selectedContext}_qa_chain";  // Costruisce il chain_id basato sul contesto
+    final reader = js_util.callMethod(body, 'getReader', []);
 
-    final payload = jsonEncode({
-      "chain_id": chainId,
-      "query": {
-        "input": input,
-        "chat_history": messages,
-      },
-      "inference_kwargs": {}
-    });
+    String nonDecodedChunk = '';
+    fullResponse = '';
 
-    try {
-      final response = await js_util.promiseToFuture(js_util.callMethod(
-        html.window,
-        'fetch',
-        [
-          url,
-          js_util.jsify({
-            'method': 'POST',
-            'headers': {'Content-Type': 'application/json'},
-            'body': payload,
-          })
-        ],
-      ));
+    void readChunk() {
+      js_util
+          .promiseToFuture(js_util.callMethod(reader, 'read', []))
+          .then((result) {
+        final done = js_util.getProperty(result, 'done') as bool;
+        if (!done) {
+          final value = js_util.getProperty(result, 'value');
 
-      final ok = js_util.getProperty(response, 'ok') as bool;
-      if (!ok) {
-        throw Exception('Network response was not ok');
-      }
+          final bytes = _convertJSArrayBufferToDartUint8List(value);
+          final chunkString = utf8.decode(bytes);
+          nonDecodedChunk += chunkString;
 
-      final body = js_util.getProperty(response, 'body');
-      if (body == null) {
-        throw Exception('Response body is null');
-      }
+          try {
+            if (nonDecodedChunk.contains('"answer":')) {
+              final splitChunks = nonDecodedChunk.split('\n');
+              for (var line in splitChunks) {
+                if (line.contains('"answer":')) {
+                  line = '{' + line.trim() + '}';
+                  final decodedChunk = jsonDecode(line);
+                  final answerChunk = decodedChunk['answer'] as String;
 
-      final reader = js_util.callMethod(body, 'getReader', []);
-
-      String nonDecodedChunk = '';
-      fullResponse = '';
-
-      void readChunk() {
-        js_util
-            .promiseToFuture(js_util.callMethod(reader, 'read', []))
-            .then((result) {
-          final done = js_util.getProperty(result, 'done') as bool;
-          if (!done) {
-            final value = js_util.getProperty(result, 'value');
-
-            final bytes = _convertJSArrayBufferToDartUint8List(value);
-
-            final chunkString = utf8.decode(bytes);
-
-            nonDecodedChunk += chunkString;
-            print(nonDecodedChunk);
-
-            try {
-              if (nonDecodedChunk.contains('"answer":')) {
-                final splitChunks = nonDecodedChunk.split('\n');
-                for (var line in splitChunks) {
-                  if (line.contains('"answer":')) {
-                    line = '{' + line.trim() + '}';
-                    final decodedChunk = jsonDecode(line);
-                    final answerChunk = decodedChunk['answer'] as String;
-
-                    setState(() {
-                      fullResponse += answerChunk;
-                      messages[messages.length - 1]['content'] =
-                          fullResponse + "▌";
-                    });
-                  }
+                  setState(() {
+                    fullResponse += answerChunk;
+                    messages[messages.length - 1]['content'] =
+                        fullResponse + "▌";
+                  });
                 }
-                nonDecodedChunk = ''; // Pulisce il buffer
               }
-            } catch (e) {
-              print("Errore durante il parsing del chunk: $e");
+              nonDecodedChunk = ''; // Pulisce il buffer
             }
-
-            readChunk(); // Legge il chunk successivo
-          } else {
-            // Fine lettura
-            setState(() {
-              // Rimuove il cursore "▌" e finalizza la risposta
-              messages[messages.length - 1]['content'] = fullResponse;
-            });
+          } catch (e) {
+            print("Errore durante il parsing del chunk: $e");
           }
-        }).catchError((error) {
-          print('Errore durante la lettura del chunk: $error');
-          setState(() {
-            messages[messages.length - 1]['content'] = 'Errore: $error';
-          });
-        });
-      }
 
-      readChunk();
-    } catch (e) {
-      print('Errore durante il fetch dei dati: $e');
-      setState(() {
-        messages[messages.length - 1]['content'] = 'Errore: $e';
+          readChunk(); // Legge il chunk successivo
+        } else {
+          // Fine lettura: rimuove il cursore "▌" e finalizza la risposta
+          setState(() {
+            messages[messages.length - 1]['content'] = fullResponse;
+          });
+
+          // Salva la conversazione solo dopo che la risposta è stata completata
+          _saveConversation(messages);
+        }
+      }).catchError((error) {
+        print('Errore durante la lettura del chunk: $error');
+        setState(() {
+          messages[messages.length - 1]['content'] = 'Errore: $error';
+        });
       });
     }
+
+    readChunk();
+  } catch (e) {
+    print('Errore durante il fetch dei dati: $e');
+    setState(() {
+      messages[messages.length - 1]['content'] = 'Errore: $e';
+    });
   }
+}
+
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {
     final buffer = js_util.getProperty(jsArrayBuffer, 'buffer') as ByteBuffer;

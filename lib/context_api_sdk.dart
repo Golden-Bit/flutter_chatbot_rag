@@ -1,11 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:uuid/uuid.dart';
 
-// Base URL per il server (modificabile per localhost o remoto)
-const String BASE_URL = 'http://34.140.110.56:8080';
-
+// Eccezione personalizzata per errori API
 class ApiException implements Exception {
   final String message;
   ApiException(this.message);
@@ -45,12 +44,19 @@ class FileUploadResponse {
 
 // SDK per le API
 class ContextApiSdk {
-  final String baseUrl;
+  String? baseUrl;
 
-  ContextApiSdk({this.baseUrl = BASE_URL});
+  // Carica la configurazione dal file config.json
+  Future<void> loadConfig() async {
+    final String response = await rootBundle.loadString('assets/config.json');
+    final data = jsonDecode(response);
+    baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
+  }
 
   // Creare un nuovo contesto
   Future<ContextMetadata> createContext(String contextName, {String? description}) async {
+    if (baseUrl == null) await loadConfig();
+
     final uri = Uri.parse('$baseUrl/contexts');
     final response = await http.post(
       uri,
@@ -69,6 +75,8 @@ class ContextApiSdk {
 
   // Eliminare un contesto
   Future<void> deleteContext(String contextName) async {
+    if (baseUrl == null) await loadConfig();
+
     final uri = Uri.parse('$baseUrl/contexts/$contextName');
     final response = await http.delete(uri);
 
@@ -79,6 +87,8 @@ class ContextApiSdk {
 
   // Elencare tutti i contesti
   Future<List<ContextMetadata>> listContexts() async {
+    if (baseUrl == null) await loadConfig();
+
     final uri = Uri.parse('$baseUrl/contexts');
     final response = await http.get(uri);
 
@@ -92,6 +102,8 @@ class ContextApiSdk {
 
   // Caricare un file su più contesti
   Future<void> uploadFileToContexts(Uint8List fileBytes, List<String> contexts, {String? description, required String fileName}) async {
+    if (baseUrl == null) await loadConfig();
+
     try {
       var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
 
@@ -105,8 +117,8 @@ class ContextApiSdk {
 
       // Usa il nome reale del file selezionato
       request.files.add(http.MultipartFile.fromBytes(
-        'file', 
-        fileBytes, 
+        'file',
+        fileBytes,
         filename: fileName  // Qui passiamo il nome reale del file
       ));
 
@@ -126,6 +138,8 @@ class ContextApiSdk {
 
   // Elencare file per contesti
   Future<List<Map<String, dynamic>>> listFiles({List<String>? contexts}) async {
+    if (baseUrl == null) await loadConfig();
+
     Uri uri;
     if (contexts != null && contexts.isNotEmpty) {
       uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
@@ -161,52 +175,54 @@ class ContextApiSdk {
     }
   }
 
+  // Eliminare file tramite UUID o path
+  Future<void> deleteFile({String? fileId, String? filePath}) async {
+    if (baseUrl == null) await loadConfig();
 
-// Eliminare file tramite UUID o path
-Future<void> deleteFile({String? fileId, String? filePath}) async {
-  if (filePath != null) {
-    // Estrai gli ultimi due elementi del percorso
-    List<String> pathSegments = filePath.split('/');
-    if (pathSegments.length >= 2) {
-      filePath = '${pathSegments[pathSegments.length - 2]}/${pathSegments.last}';
-    } else {
-      throw ApiException('Errore: il percorso fornito non ha abbastanza segmenti.');
+    if (filePath != null) {
+      // Estrai gli ultimi due elementi del percorso
+      List<String> pathSegments = filePath.split('/');
+      if (pathSegments.length >= 2) {
+        filePath = '${pathSegments[pathSegments.length - 2]}/${pathSegments.last}';
+      } else {
+        throw ApiException('Errore: il percorso fornito non ha abbastanza segmenti.');
+      }
+    }
+
+    // Costruisci l'URI con i parametri di query
+    Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
+      if (fileId != null) 'file_id': fileId,
+      if (filePath != null) 'file_path': filePath,
+    });
+
+    // Effettua la richiesta DELETE con i parametri di query
+    final response = await http.delete(uri);
+
+    if (response.statusCode != 200) {
+      throw ApiException('Errore durante l\'eliminazione del file: ${response.body}');
     }
   }
 
-  // Costruisci l'URI con i parametri di query
-  Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
-    if (fileId != null) 'file_id': fileId,
-    if (filePath != null) 'file_path': filePath,
-  });
+  // Metodo per configurare e caricare una chain basata su un contesto
+  Future<Map<String, dynamic>> configureAndLoadChain(String context, String model) async {
+    if (baseUrl == null) await loadConfig();
 
-  // Effettua la richiesta DELETE con i parametri di query
-  final response = await http.delete(uri);
+    // Costruiamo l'URL con il parametro context nella query string
+    final uri = Uri.parse('$baseUrl/configure_and_load_chain/?context=$context&model=$model');
 
-  if (response.statusCode != 200) {
-    throw ApiException('Errore durante l\'eliminazione del file: ${response.body}');
+    final response = await http.post(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',  // Impostiamo l'header per l'invio di JSON
+      },
+    );
+
+    if (response.statusCode == 200) {
+      // Restituiamo la risposta in formato JSON se la richiesta ha successo
+      return jsonDecode(response.body);
+    } else {
+      // Gestiamo l'errore nel caso in cui lo stato della risposta non sia 200
+      throw ApiException('Errore durante la configurazione e il caricamento della chain: ${response.body}');
+    }
   }
-}
-
-// Metodo per configurare e caricare una chain basata su un contesto
-Future<Map<String, dynamic>> configureAndLoadChain(String context, String model) async {
-  // Costruiamo l'URL con il parametro context nella query string
-  final uri = Uri.parse('$BASE_URL/configure_and_load_chain/?context=$context&model=$model');
-  
-  final response = await http.post(
-    uri,
-    headers: {
-      'Content-Type': 'application/json',  // Impostiamo l'header per l'invio di JSON
-    },
-  );
-
-  if (response.statusCode == 200) {
-    // Restituiamo la risposta in formato JSON se la richiesta ha successo
-    return jsonDecode(response.body);
-  } else {
-    // Gestiamo l'errore nel caso in cui lo stato della risposta non sia 200
-    throw ApiException('Errore durante la configurazione e il caricamento della chain: ${response.body}');
-  }
-}
-
 }

@@ -4,6 +4,7 @@ import 'auth_service.dart';
 import 'user_model.dart';
 import '../main.dart'; // Importa main.dart per navigazione
 import 'package:flutter_app/chatbot.dart';
+import 'dart:html' as html;  // Importa per accedere a localStorage
 
 class RegisterPage extends StatefulWidget {
   @override
@@ -156,15 +157,64 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final AuthService _authService = AuthService();
+  bool _isLoading = true; // Stato per gestire il caricamento
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLoginStatus(); // Controlla se c'è un token valido all'avvio
+  }
+
+  // Controllo dello stato del login
+  Future<void> _checkLoginStatus() async {
+    String? token = html.window.localStorage['token'];
+    if (token != null) {
+      try {
+        // Verifica se il token è ancora valido
+        User user = await _authService.fetchCurrentUser(token);
+
+        // Se il token è valido, naviga alla ChatBotPage
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatBotPage(user: user, token: Token(accessToken: token, refreshToken: "")),
+          ),
+        );
+      } catch (e) {
+        // Token non valido o scaduto
+        setState(() {
+          _isLoading = false; // Mostra la pagina di login
+        });
+      }
+    } else {
+      // Nessun token, mostra la pagina di login
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   void _login() async {
     if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true; // Mostra lo stato di caricamento durante il login
+      });
+
       try {
+        // Ottieni il token di accesso dopo il login
         Token token = await _authService.login(
           _usernameController.text,
           _passwordController.text,
         );
+
+        // Memorizza il token nel localStorage
+        html.window.localStorage['token'] = token.accessToken;
+
+        // Ottieni e memorizza anche l'utente
         User user = await _authService.fetchCurrentUser(token.accessToken);
+        html.window.localStorage['user'] = user.toJson().toString();
+
+        // Naviga alla ChatBotPage
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -172,6 +222,9 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
       } catch (e) {
+        setState(() {
+          _isLoading = false; // Rimuovi lo stato di caricamento se c'è un errore
+        });
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Errore durante il login: $e'),
         ));
@@ -181,6 +234,16 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Mostra schermata di caricamento finché stiamo verificando il token
+    if (_isLoading) {
+      return Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(), // Schermata di caricamento
+        ),
+      );
+    }
+
+    // Mostra il form di login solo se non stiamo caricando
     return Scaffold(
       appBar: AppBar(
         title: Text('Login'),
@@ -258,6 +321,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
+
 
 class AccountSettingsPage extends StatefulWidget {
   final User user;

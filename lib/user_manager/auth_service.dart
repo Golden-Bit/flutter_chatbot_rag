@@ -1,13 +1,21 @@
 import 'dart:convert';
-//import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart' show rootBundle;
 import 'user_model.dart';
 
-
 class AuthService {
-  final String baseUrl = "http://34.140.110.56:8095";
+  String? baseUrl;
+
+  // Funzione per caricare la configurazione dal file config.json
+  Future<void> loadConfig() async {
+    final String response = await rootBundle.loadString('assets/config.json');
+    final data = jsonDecode(response);
+    baseUrl = data['backend_api'];
+  }
 
   Future<void> register(User user, String password) async {
+    if (baseUrl == null) await loadConfig();
+
     final userJson = user.toJson();
     userJson['hashed_password'] = password;
 
@@ -26,6 +34,8 @@ class AuthService {
   }
 
   Future<Token> login(String username, String password) async {
+    if (baseUrl == null) await loadConfig();
+
     final response = await http.post(
       Uri.parse("$baseUrl/login/"),
       headers: {
@@ -43,6 +53,8 @@ class AuthService {
   }
 
   Future<User> fetchCurrentUser(String token) async {
+    if (baseUrl == null) await loadConfig();
+
     final response = await http.get(
       Uri.parse("$baseUrl/users_collection/me/"),
       headers: {
@@ -58,6 +70,8 @@ class AuthService {
   }
 
   Future<void> updateUser(User user, String token) async {
+    if (baseUrl == null) await loadConfig();
+
     final response = await http.put(
       Uri.parse("$baseUrl/users_collection/me/"),
       headers: {
@@ -73,6 +87,8 @@ class AuthService {
   }
 
   Future<void> changePassword(String username, String oldPassword, String newPassword, String token) async {
+    if (baseUrl == null) await loadConfig();
+
     final response = await http.put(
       Uri.parse("$baseUrl/users_collection/me/change_password/"),
       headers: {
@@ -92,6 +108,8 @@ class AuthService {
   }
 
   Future<Token> refreshToken(String refreshToken) async {
+    if (baseUrl == null) await loadConfig();
+
     final response = await http.post(
       Uri.parse("$baseUrl/refresh_token/"),
       headers: {
@@ -109,6 +127,8 @@ class AuthService {
   }
 
   Future<void> deleteUser(String username, String password, String token, String email) async {
+    if (baseUrl == null) await loadConfig();
+
     final response = await http.delete(
       Uri.parse("$baseUrl/users_collection/me/delete"),
       headers: {

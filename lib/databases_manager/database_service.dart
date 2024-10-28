@@ -8,8 +8,12 @@ class DatabaseService {
 
   // Funzione per caricare la configurazione dal file config.json
   Future<void> loadConfig() async {
-    final String response = await rootBundle.loadString('assets/config.json');
-    final data = jsonDecode(response);
+    //final String response = await rootBundle.loadString('assets/config.json');
+    //final data = jsonDecode(response);
+    final data = {
+    "backend_api": "http://34.140.110.56:8095",
+    "nlp_api": "http://34.140.110.56:8100",
+    "chatbot_nlp_api": "http://34.140.110.56:8080"};
     baseUrl = data['backend_api'];
   }
 

@@ -4,6 +4,10 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:uuid/uuid.dart';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+//import 'package:http/http.dart' as http;
+import 'dart:html' as html;
+
 // Eccezione personalizzata per errori API
 class ApiException implements Exception {
   final String message;
@@ -48,8 +52,12 @@ class ContextApiSdk {
 
   // Carica la configurazione dal file config.json
   Future<void> loadConfig() async {
-    final String response = await rootBundle.loadString('assets/config.json');
-    final data = jsonDecode(response);
+    //final String response = await rootBundle.loadString('assets/config.json');
+    //final data = jsonDecode(response);
+    final data = {
+    "backend_api": "http://34.140.110.56:8095",
+    "nlp_api": "http://34.140.110.56:8100",
+    "chatbot_nlp_api": "http://34.140.110.56:8080"};
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }
 
@@ -225,4 +233,33 @@ class ContextApiSdk {
       throw ApiException('Errore durante la configurazione e il caricamento della chain: ${response.body}');
     }
   }
+
+  Future<void> downloadFile(String fileId) async {
+    if (baseUrl == null) await loadConfig();
+
+    // Costruisci l'URL di download
+    final uri = Uri.parse('$baseUrl/download?file_id=$fileId');
+
+    final response = await http.get(uri);
+
+    if (response.statusCode == 200) {
+      if (kIsWeb) {
+        final blob = html.Blob([response.bodyBytes]);
+        final url = html.Url.createObjectUrlFromBlob(blob);
+
+        // Crea un elemento di ancoraggio per simulare il download
+        final anchor = html.AnchorElement(href: url)
+          ..setAttribute('download', fileId)
+          ..click();
+
+        // Rilascia l'URL dell'oggetto
+        html.Url.revokeObjectUrl(url);
+      } else {
+        throw UnsupportedError('La funzione è supportata solo per il Web.');
+      }
+    } else {
+      throw ApiException('Errore durante il download del file: ${response.body}');
+    }
+  }
+  
 }

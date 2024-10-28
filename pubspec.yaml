@@ -57,6 +57,7 @@ dependencies:
   flutter_tts: ^4.0.2
   flutter_colorpicker: ^1.0.3
   dio: ^5.7.0
+  html: ^0.15.4
   #syncfusion_flutter_xlsio: ^26.2.10
   #open_file: ^3.4.0
   #excel: ^4.0.6

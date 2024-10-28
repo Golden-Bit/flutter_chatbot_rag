@@ -92,7 +92,7 @@ class _ChatBotPageState extends State<ChatBotPage> {
   double _avatarIconOpacity = 1.0;
   
   String _selectedModel = "gpt-4o-mini";  // Variabile per il modello selezionato, di default GPT-4O
-
+int? hoveredIndex; // Variabile di stato per tracciare l'hover
 int? _activeChatIndex; // Chat attiva (null se si sta creando una nuova chat)
 final DatabaseService _databaseService = DatabaseService();
 // Aggiungi questa variabile per contenere la chat history simulata
@@ -101,13 +101,19 @@ String? _nlpApiUrl;
 
 Future<void> _loadConfig() async {
   try {
-    final String response = await rootBundle.loadString('assets/config.json');
-    final data = jsonDecode(response);
+    //final String response = await rootBundle.loadString('assets/config.json');
+    //final data = jsonDecode(response);
+    final data = {
+    "backend_api": "http://34.140.110.56:8095",
+    "nlp_api": "http://34.140.110.56:8100",
+    "chatbot_nlp_api": "http://34.140.110.56:8080"};
+
     _nlpApiUrl = data['nlp_api'];
   } catch (e) {
     print("Errore nel caricamento del file di configurazione: $e");
   }
 }
+
 // Funzione di logout
 void _logout(BuildContext context) {
   // Rimuove il token dal localStorage
@@ -235,10 +241,10 @@ Future<void> _loadChatHistory() async {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'ChatBot',
+          'Teatek Assistant - Legal Department',
           style: TextStyle(color: Colors.white),
         ),
-        backgroundColor: Color(0xFF435566), // Imposta il colore personalizzato
+        backgroundColor: Color.fromARGB(255, 85, 107, 37), // Imposta il colore personalizzato
         leading: IconButton(
           icon: Icon(Icons.menu, color: Colors.white),
           onPressed: () {
@@ -269,7 +275,7 @@ Future<void> _loadChatHistory() async {
             child: AnimatedContainer(
               duration: Duration(milliseconds: 300),  // Animazione per l'espansione e il collasso
               width: sidebarWidth,
-              color: Color(0xFF435566), // Colonna laterale con colore personalizzato
+              color: Color.fromARGB(255, 85, 107, 37), // Colonna laterale con colore personalizzato
               child: sidebarWidth > 0
     ? Column(
         children: [
@@ -336,19 +342,58 @@ ListTile(
 SizedBox(height: 16.0),  // Spazio verticale di 16.0px
 
 // Rendi la lista delle chat espandibile
+// Widget per visualizzare la lista delle chat salvate con menù a tre pallini
+// Widget per visualizzare la lista delle chat salvate con menù a tre pallini
 Expanded(
-  child: ListView.builder(
-    itemCount: _chatHistory.length,
-    itemBuilder: (context, index) {
-      final chat = _chatHistory[index];
-      return ListTile(
-        title: Text(chat['name'], style: TextStyle(color: Colors.white)),
-        onTap: () => _loadMessagesForChat(index),  // Carica la chat selezionata
-      );
-    },
-  ),
-),
-
+      child: ListView.builder(
+        itemCount: _chatHistory.length,
+        itemBuilder: (context, index) {
+          final chat = _chatHistory[index];
+          return MouseRegion(
+            onEnter: (_) {
+              setState(() {
+                hoveredIndex = index; // Imposta l'indice dell'elemento in hover
+              });
+            },
+            onExit: (_) {
+              setState(() {
+                hoveredIndex = null; // Rimuove l'hover quando il mouse esce
+              });
+            },
+            child: ListTile(
+              title: Text(chat['name'], style: TextStyle(color: Colors.white)),
+              trailing: PopupMenuButton<String>(
+                icon: Icon(
+                  Icons.more_horiz,
+                  color: hoveredIndex == index ? Colors.white : Colors.transparent, // Bianco in hover, trasparente altrimenti
+                ),
+                padding: EdgeInsets.only(right: 4.0), // Margine a destra ridotto
+                onSelected: (String value) {
+                  if (value == 'delete') {
+                    _deleteChat(index);
+                  } else if (value == 'edit') {
+                    _showEditChatDialog(index);
+                  }
+                },
+                itemBuilder: (BuildContext context) {
+                  return [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Modifica'),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Elimina'),
+                    ),
+                  ];
+                },
+              ),
+              onTap: () => _loadMessagesForChat(index), // Carica la chat selezionata
+            ),
+          );
+        },
+      ),
+    ),
 // Mantieni il pulsante di logout in basso, senza Spacer
 Align(
   alignment: Alignment.bottomCenter,
@@ -411,7 +456,7 @@ Expanded(
             padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),  // Aggiungi padding orizzontale e verticale
             decoration: BoxDecoration(
               color: Colors.white,  // Sfondo bianco all'interno del riquadro
-              border: Border.all(color: Color(0xFF435566), width: 2.0),  // Bordi dello stesso colore dell'AppBar
+              border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi dello stesso colore dell'AppBar
               borderRadius: BorderRadius.circular(8.0),  // Arrotonda i bordi
             ),
             constraints: BoxConstraints(maxWidth: 800),  // Limita la larghezza del riquadro
@@ -433,7 +478,7 @@ Expanded(
               padding: const EdgeInsets.all(4.0),
               decoration: BoxDecoration(
                 color: Colors.white,  // Sfondo bianco
-                border: Border.all(color: Color(0xFF435566), width: 2.0),  // Bordi colorati
+                border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi colorati
                 borderRadius: BorderRadius.circular(8.0),
               ),
               constraints: BoxConstraints(maxWidth: 600),  // Limita la larghezza della pagina delle impostazioni
@@ -535,7 +580,7 @@ Expanded(
       GestureDetector(
         onTap: _showContextDialog,  // Apre il dialog di selezione del contesto
         child: CircleAvatar(
-          backgroundColor: Color(0xFF435566),
+          backgroundColor: Color.fromARGB(255, 85, 107, 37),
           child: Icon(
             Icons.book,  // Usa l'icona analoga alla base di conoscenza
             color: Colors.white,
@@ -552,7 +597,7 @@ Expanded(
             labelText: 'Say something...',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(30.0), // Smussa gli angoli
-              borderSide: BorderSide(color: Color(0xFF435566)), // Bordi colorati
+              borderSide: BorderSide(color: Color.fromARGB(255, 85, 107, 37)), // Bordi colorati
             ),
           ),
           onSubmitted: _handleUserInput,
@@ -564,7 +609,7 @@ Expanded(
       GestureDetector(
         onTap: _listen, // Attiva o disattiva la registrazione vocale
         child: CircleAvatar(
-          backgroundColor: Color(0xFF435566),
+          backgroundColor: Color.fromARGB(255, 85, 107, 37),
           child: Icon(
             _isListening ? Icons.mic_off : Icons.mic,
             color: Colors.white,
@@ -577,7 +622,7 @@ Expanded(
       GestureDetector(
         onTap: () => _handleUserInput(_controller.text),
         child: CircleAvatar(
-          backgroundColor: Color(0xFF435566),
+          backgroundColor: Color.fromARGB(255, 85, 107, 37),
           child: Icon(
             Icons.send,
             color: Colors.white,
@@ -596,6 +641,97 @@ Expanded(
         ],
       ),
     );
+}
+Future<void> _deleteChat(int index) async {
+  try {
+    final chatToDelete = _chatHistory[index];
+
+    // Rimuovi dal database, se la chat ha un ID esistente
+    if (chatToDelete.containsKey('_id')) {
+      await _databaseService.deleteCollectionData(
+        "${widget.user.username}-database",
+        'chats',
+        chatToDelete['_id'],
+        widget.token.accessToken,
+      );
+    }
+
+    // Rimuovi dalla lista locale e aggiorna il local storage
+    setState(() {
+      _chatHistory.removeAt(index);
+    });
+    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+    html.window.localStorage['chatHistory'] = jsonString;
+
+    print('Chat eliminata con successo.');
+  } catch (e) {
+    print('Errore durante l\'eliminazione della chat: $e');
+  }
+}
+
+void _showEditChatDialog(int index) {
+  final chat = _chatHistory[index];
+  final TextEditingController _nameController = TextEditingController(text: chat['name']);
+
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text('Modifica Nome Chat'),
+        content: TextField(
+          controller: _nameController,
+          decoration: InputDecoration(labelText: 'Nome della Chat'),
+        ),
+        actions: [
+          TextButton(
+            child: Text('Annulla'),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+          ),
+          TextButton(
+            child: Text('Salva'),
+            onPressed: () {
+              final newName = _nameController.text.trim();
+              if (newName.isNotEmpty) {
+                _editChatName(index, newName);
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<void> _editChatName(int index, String newName) async {
+  try {
+    final chatToUpdate = _chatHistory[index];
+    
+    // Aggiorna il nome nello stato locale
+    setState(() {
+      chatToUpdate['name'] = newName;
+    });
+    
+    // Aggiorna il nome nel localStorage
+    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+    html.window.localStorage['chatHistory'] = jsonString;
+
+    // Aggiorna il nome nel database
+    if (chatToUpdate.containsKey('_id')) {
+      await _databaseService.updateCollectionData(
+        "${widget.user.username}-database",
+        'chats',
+        chatToUpdate['_id'],
+        {'name': newName},
+        widget.token.accessToken,
+      );
+      print('Nome chat aggiornato con successo nel database.');
+    }
+  } catch (e) {
+    print('Errore durante l\'aggiornamento del nome della chat: $e');
+  }
 }
 
 // Funzione per caricare una nuova chat
@@ -870,7 +1006,7 @@ Widget _buildModelSelector(StateSetter setState) {
             set_context(_selectedContext, _selectedModel);
           });
         },
-        selectedColor: Color(0xFF435566),  // Colore selezionato
+        selectedColor: Color.fromARGB(255, 85, 107, 37),  // Colore selezionato
         backgroundColor: Colors.grey[200],  // Colore di default
         labelStyle: TextStyle(
           color: isSelected ? Colors.white : Colors.black,  // Cambia il colore del testo quando selezionato
@@ -906,7 +1042,7 @@ Widget _buildContextList(Function(String) onContextSelected) {
           padding: const EdgeInsets.all(12.0),
           decoration: BoxDecoration(
             border: Border.all(
-              color: isSelected ? Color(0xFF435566) : Colors.transparent,  // Bordi colorati solo se selezionato
+              color: isSelected ? Color.fromARGB(255, 85, 107, 37) : Colors.transparent,  // Bordi colorati solo se selezionato
               width: 2.0,
             ),
             borderRadius: BorderRadius.circular(8.0),
@@ -923,7 +1059,7 @@ Widget _buildContextList(Function(String) onContextSelected) {
             child: Text(
               contextMetadata.path,  // Mostra il nome del contesto
               style: TextStyle(
-                color: isSelected ? Color(0xFF435566) : Colors.black,  // Cambia colore del testo se selezionato
+                color: isSelected ? Color.fromARGB(255, 85, 107, 37) : Colors.black,  // Cambia colore del testo se selezionato
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,  // Grassetto se selezionato
               ),
             ),

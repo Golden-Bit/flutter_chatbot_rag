@@ -82618,7 +82618,7 @@ A.Dw.prototype={
 Em(){var s=0,r=A.E(t.H),q=this,p,o,n,m
 var $async$Em=A.A(function(a,b){if(a===1)return A.B(b,r)
 while(true)switch(s){case 0:try{n=t.N
-p=A.a9(["backend_api","http://127.0.0.15","nlp_api","http://127.0.0.1:8100","chatbot_nlp_api","http://127.0.0.1:8080"],n,n)
+p=A.a9(["backend_api","http://34.140.110.56:8095","nlp_api","http://34.140.110.56:8100","chatbot_nlp_api","http://34.140.110.56:8080"],n,n)
 q.R8=J.as(p,"nlp_api")}catch(l){o=A.aa(l)
 A.b2("Errore nel caricamento del file di configurazione: "+A.j(o))}return A.C(null,r)}})
 return A.D($async$Em,r)},
@@ -83318,7 +83318,7 @@ A.Js.prototype={
 cY(){var s=0,r=A.E(t.H),q=this,p
 var $async$cY=A.A(function(a,b){if(a===1)return A.B(b,r)
 while(true)switch(s){case 0:p=t.N
-q.a=A.a9(["backend_api","http://127.0.0.1:8095","nlp_api","http://127.0.0.1:8100","chatbot_nlp_api","http://127.0.0.1:8080"],p,p).h(0,"chatbot_nlp_api")
+q.a=A.a9(["backend_api","http://34.140.110.56:8095","nlp_api","http://34.140.110.560.560.560.56:8100","chatbot_nlp_api","http://34.140.110.56:8080"],p,p).h(0,"chatbot_nlp_api")
 return A.C(null,r)}})
 return A.D($async$cY,r)},
 u3(a,b){return this.ajl(a,b)},
@@ -83759,7 +83759,7 @@ A.JH.prototype={
 cY(){var s=0,r=A.E(t.H),q=this,p
 var $async$cY=A.A(function(a,b){if(a===1)return A.B(b,r)
 while(true)switch(s){case 0:p=t.N
-q.a=A.a9(["backend_api","http://127.0.0.1:8095","nlp_api","http://127.0.0.1:8100","chatbot_nlp_api","http://127.0.0.1:8080"],p,p).h(0,"backend_api")
+q.a=A.a9(["backend_api","http://34.140.110.56:8095","nlp_api","http://34.140.110.56:8100","chatbot_nlp_api","http://34.140.110.56:8080"],p,p).h(0,"backend_api")
 return A.C(null,r)}})
 return A.D($async$cY,r)},
 u4(a,b){return this.ajm(a,b)},
@@ -84354,7 +84354,7 @@ A.rA.prototype={
 cY(){var s=0,r=A.E(t.H),q=this,p
 var $async$cY=A.A(function(a,b){if(a===1)return A.B(b,r)
 while(true)switch(s){case 0:p=t.N
-q.a=A.a9(["backend_api","http://127.0.0.1:8095","nlp_api","http://127.0.0.1:8100","chatbot_nlp_api","http://127.0.0.1:8080"],p,p).h(0,"backend_api")
+q.a=A.a9(["backend_api","http://34.140.110.56:8095","nlp_api","http://34.140.110.56:8100","chatbot_nlp_api","http://34.140.110.56:8080"],p,p).h(0,"backend_api")
 return A.C(null,r)}})
 return A.D($async$cY,r)},
 mI(a,b,c){return this.aps(0,b,c)},

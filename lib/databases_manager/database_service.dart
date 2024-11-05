@@ -11,9 +11,9 @@ class DatabaseService {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
     final data = {
-    "backend_api": "http://34.140.110.56:8095",
-    "nlp_api": "http://34.140.110.56:8100",
-    "chatbot_nlp_api": "http://34.140.110.56:8080"};
+    "backend_api": "http://34.79.136.231:8095",
+    "nlp_api": "http://34.79.136.231:8100",
+    "chatbot_nlp_api": "http://34.79.136.231:8080"};
     baseUrl = data['backend_api'];
   }
 

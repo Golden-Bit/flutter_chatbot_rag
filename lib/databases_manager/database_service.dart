@@ -11,9 +11,9 @@ class DatabaseService {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
     final data = {
-    "backend_api": "http://34.79.136.231:8095",
-    "nlp_api": "http://34.79.136.231:8100",
-    "chatbot_nlp_api": "http://34.79.136.231:8080"};
+    "backend_api": "https://teatek-llm.theia-innovation.com/user-backend/",
+    "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core/",
+    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag/"};
     baseUrl = data['backend_api'];
   }
 

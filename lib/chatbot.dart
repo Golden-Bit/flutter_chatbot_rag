@@ -104,10 +104,10 @@ Future<void> _loadConfig() async {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
     final data = {
-    "backend_api": "https://teatek-llm.theia-innovation.com/user-backend/",
-    "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core/",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag/"};
-
+    "backend_api": "http://34.140.110.56:8095",
+    "nlp_api": "http://34.140.110.56:8100" ,
+    "chatbot_nlp_api": "http://34.140.110.56:8080",
+    };
     _nlpApiUrl = data['nlp_api'];
   } catch (e) {
     print("Errore nel caricamento del file di configurazione: $e");

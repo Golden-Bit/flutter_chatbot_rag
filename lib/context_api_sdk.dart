@@ -55,9 +55,10 @@ class ContextApiSdk {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
     final data = {
-    "backend_api": "https://teatek-llm.theia-innovation.com/user-backend/",
-    "nlp_api": "http://34.79.136.2310.560.560.56:8100",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag/"};
+    "backend_api": "http://34.140.110.56:8095",
+    "nlp_api": "http://34.140.110.56:8100" ,
+    "chatbot_nlp_api": "http://34.140.110.56:8080",
+    };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }
 

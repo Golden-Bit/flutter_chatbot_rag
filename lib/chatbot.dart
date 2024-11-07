@@ -241,7 +241,7 @@ Future<void> _loadChatHistory() async {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Teatek Assistant - Legal Department',
+          'Teatek Agent',
           style: TextStyle(color: Colors.white),
         ),
         backgroundColor: Color.fromARGB(255, 85, 107, 37), // Imposta il colore personalizzato

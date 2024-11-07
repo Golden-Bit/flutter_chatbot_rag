@@ -82691,7 +82691,7 @@ break
 case 5:return A.C(null,r)
 case 1:return A.B(p,r)}})
 return A.D($async$rT,r)},
-N(a){var s,r,q,p,o,n,m,l,k,j=this,i=null,h=A.aR("Teatek Assistant - Legal Department",i,i,i,A.cM(i,i,B.j,i,i,i,i,i,i,i,i,i,i,i,i,i,i,!0,i,i,i,i,i,i,i,i),i,i)
+N(a){var s,r,q,p,o,n,m,l,k,j=this,i=null,h=A.aR("Teatek Agent",i,i,i,A.cM(i,i,B.j,i,i,i,i,i,i,i,i,i,i,i,i,i,i,!0,i,i,i,i,i,i,i,i),i,i)
 h=A.a_N(A.U(255,85,107,37),A.l4(i,i,A.dC(B.iV,B.j,i,i),i,new A.amC(j),i,i,i,i),h)
 s=A.cd(0,300,0,0)
 r=j.Q

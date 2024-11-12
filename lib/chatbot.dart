@@ -103,10 +103,10 @@ Future<void> _loadConfig() async {
   try {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
-    final data = {
-    "backend_api": "http://127.0.0.1:8095",
-    "nlp_api": "http://127.0.0.1:8100" ,
-    "chatbot_nlp_api": "http://127.0.0.1:8080",
+     final data = {
+    "backend_api": "http://34.79.136.231:8095",
+    "nlp_api": "http://34.79.136.231:8100" ,
+    "chatbot_nlp_api": "http://34.79.136.231:8080",
     };
     _nlpApiUrl = data['nlp_api'];
   } catch (e) {

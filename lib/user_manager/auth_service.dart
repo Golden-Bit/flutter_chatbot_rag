@@ -10,10 +10,10 @@ class AuthService {
   Future<void> loadConfig() async {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
-       final data = {
-    "backend_api": "https://127.0.0.1:8095",
-    "nlp_api": "https://127.0.0.1:8100" ,
-    "chatbot_nlp_api": "https://127.0.0.1:8080",
+     final data = {
+    "backend_api": "http://34.79.136.231:8095",
+    "nlp_api": "http://34.79.136.231:8100" ,
+    "chatbot_nlp_api": "http://34.79.136.231:8080",
     };
     baseUrl = data['backend_api'];
   }

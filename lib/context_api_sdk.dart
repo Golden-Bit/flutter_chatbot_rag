@@ -55,9 +55,9 @@ class ContextApiSdk {
     //final String response = await rootBundle.loadString('assets/config.json');
     //final data = jsonDecode(response);
     final data = {
-    "backend_api": "http://127.0.0.1:8095",
-    "nlp_api": "http://127.0.0.1:8100" ,
-    "chatbot_nlp_api": "http://127.0.0.1:8080",
+    "backend_api": "https://127.0.0.1:8095",
+    "nlp_api": "https://127.0.0.1:8100" ,
+    "chatbot_nlp_api": "https://127.0.0.1:8080",
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }

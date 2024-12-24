@@ -48,6 +48,7 @@ class _RegisterPageState extends State<RegisterPage> {
       appBar: AppBar(
         title: Text('Register'),
       ),
+      backgroundColor: Colors.white, // Imposta lo sfondo bianco
       body: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 400),
@@ -57,6 +58,15 @@ class _RegisterPageState extends State<RegisterPage> {
               key: _formKey,
               child: IntrinsicHeight(
                 child: Card(
+                  color: Colors.white, // Imposta lo sfondo bianco
+                    elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
@@ -73,7 +83,18 @@ class _RegisterPageState extends State<RegisterPage> {
                         SizedBox(height: 20),
                         TextFormField(
                           controller: _usernameController,
-                          decoration: InputDecoration(labelText: 'Username'),
+                            decoration: InputDecoration(
+    labelText: 'Username',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Inserisci il tuo username';
@@ -81,9 +102,21 @@ class _RegisterPageState extends State<RegisterPage> {
                             return null;
                           },
                         ),
+                        SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                         TextFormField(
                           controller: _emailController,
-                          decoration: InputDecoration(labelText: 'Email'),
+                            decoration: InputDecoration(
+    labelText: 'Email',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Inserisci la tua email';
@@ -91,9 +124,21 @@ class _RegisterPageState extends State<RegisterPage> {
                             return null;
                           },
                         ),
+                        SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                         TextFormField(
                           controller: _fullNameController,
-                          decoration: InputDecoration(labelText: 'Full Name'),
+                            decoration: InputDecoration(
+    labelText: 'Full Name',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Inserisci il tuo nome completo';
@@ -101,9 +146,21 @@ class _RegisterPageState extends State<RegisterPage> {
                             return null;
                           },
                         ),
+                        SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                         TextFormField(
                           controller: _passwordController,
-                          decoration: InputDecoration(labelText: 'Password'),
+                            decoration: InputDecoration(
+    labelText: 'Password',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           obscureText: true,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
@@ -112,9 +169,21 @@ class _RegisterPageState extends State<RegisterPage> {
                             return null;
                           },
                         ),
+                        SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                         TextFormField(
                           controller: _confirmPasswordController,
-                          decoration: InputDecoration(labelText: 'Conferma Password'),
+                            decoration: InputDecoration(
+    labelText: 'Conferma Password',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           obscureText: true,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
@@ -237,6 +306,7 @@ class _LoginPageState extends State<LoginPage> {
     // Mostra schermata di caricamento finché stiamo verificando il token
     if (_isLoading) {
       return Scaffold(
+        backgroundColor: Colors.white, // Imposta lo sfondo bianco
         body: Center(
           child: CircularProgressIndicator(), // Schermata di caricamento
         ),
@@ -245,9 +315,10 @@ class _LoginPageState extends State<LoginPage> {
 
     // Mostra il form di login solo se non stiamo caricando
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Login'),
-      ),
+      //appBar: AppBar(
+      //  title: Text('Login'),
+      //),
+      backgroundColor: Colors.white, // Imposta lo sfondo bianco
       body: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 400),
@@ -257,6 +328,15 @@ class _LoginPageState extends State<LoginPage> {
               key: _formKey,
               child: IntrinsicHeight(
                 child: Card(
+                                    color: Colors.white, // Imposta lo sfondo bianco
+                                                        elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
@@ -273,7 +353,18 @@ class _LoginPageState extends State<LoginPage> {
                         SizedBox(height: 20),
                         TextFormField(
                           controller: _usernameController,
-                          decoration: InputDecoration(labelText: 'Username'),
+                            decoration: InputDecoration(
+    labelText: 'Username',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Inserisci il tuo username';
@@ -281,9 +372,21 @@ class _LoginPageState extends State<LoginPage> {
                             return null;
                           },
                         ),
+                        SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                         TextFormField(
                           controller: _passwordController,
-                          decoration: InputDecoration(labelText: 'Password'),
+                            decoration: InputDecoration(
+    labelText: 'Password',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                           obscureText: true,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
@@ -438,6 +541,15 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
 
         return AlertDialog(
           title: Text('Conferma Eliminazione Account'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -500,9 +612,10 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Impostazioni Account'),
-      ),
+      //appBar: AppBar(
+      //  title: Text('Impostazioni Account'),
+      //),
+      backgroundColor: Colors.white, // Imposta lo sfondo bianco
       body: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 600),
@@ -513,6 +626,15 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                 Form(
                   key: _profileFormKey,
                   child: Card(
+                                      color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
@@ -528,7 +650,18 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                           SizedBox(height: 20),
                           TextFormField(
                             controller: _emailController,
-                            decoration: InputDecoration(labelText: 'Email'),
+                              decoration: InputDecoration(
+    labelText: 'Email',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
                                 return 'Inserisci la tua email';
@@ -536,9 +669,21 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                               return null;
                             },
                           ),
+                          SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                           TextFormField(
                             controller: _fullNameController,
-                            decoration: InputDecoration(labelText: 'Nome Completo'),
+                              decoration: InputDecoration(
+    labelText: 'Full Name',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
                                 return 'Inserisci il tuo nome completo';
@@ -563,6 +708,15 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                 Form(
                   key: _passwordFormKey,
                   child: Card(
+                                      color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
@@ -578,7 +732,18 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                           SizedBox(height: 20),
                           TextFormField(
                             controller: _oldPasswordController,
-                            decoration: InputDecoration(labelText: 'Vecchia Password'),
+                              decoration: InputDecoration(
+    labelText: 'Vecchia Password',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                             obscureText: true,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
@@ -587,9 +752,21 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                               return null;
                             },
                           ),
+                          SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                           TextFormField(
                             controller: _newPasswordController,
-                            decoration: InputDecoration(labelText: 'Nuova Password'),
+                              decoration: InputDecoration(
+    labelText: 'Nuova Password',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                             obscureText: true,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
@@ -598,9 +775,21 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                               return null;
                             },
                           ),
+                          SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
                           TextFormField(
                             controller: _confirmNewPasswordController,
-                            decoration: InputDecoration(labelText: 'Conferma Nuova Password'),
+                              decoration: InputDecoration(
+    labelText: 'Conferma Nuova Password',
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+  ),
                             obscureText: true,
                             validator: (value) {
                               if (value == null || value.isEmpty) {

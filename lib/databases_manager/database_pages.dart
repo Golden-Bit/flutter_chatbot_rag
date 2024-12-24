@@ -64,6 +64,15 @@ class _DatabasePageState extends State<DatabasePage> {
       builder: (context) {
         return AlertDialog(
           title: Text('Crea nuova Collection'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: TextField(
             controller: _collectionNameController,
             decoration: InputDecoration(labelText: 'Nome Collection'),
@@ -109,6 +118,15 @@ class _DatabasePageState extends State<DatabasePage> {
       builder: (context) {
         return AlertDialog(
           title: Text('Conferma Eliminazione Database'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Text('Sei sicuro di voler eliminare il database $dbName?'),
           actions: [
             TextButton(
@@ -167,6 +185,15 @@ class _DatabasePageState extends State<DatabasePage> {
               ),
             ],
           ),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Container(
             width: double.maxFinite,
             child: ListView.builder(
@@ -241,6 +268,15 @@ class _DatabasePageState extends State<DatabasePage> {
               Text('Aggiungi Dato a $collectionName'),
             ],
           ),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -312,6 +348,15 @@ class _DatabasePageState extends State<DatabasePage> {
       builder: (context) {
         return AlertDialog(
           title: Text('Conferma Eliminazione Collection'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Text('Sei sicuro di voler eliminare la collection $collectionName?'),
           actions: [
             TextButton(
@@ -475,6 +520,15 @@ void _showCollectionData(String dbName, String collectionName) async {
                     ),
                   ],
                 ),
+                           backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -684,6 +738,15 @@ void _showCollectionData(String dbName, String collectionName) async {
       builder: (context) {
         return AlertDialog(
           title: Text('Modifica Dato in $collectionName'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -764,6 +827,15 @@ void _showCollectionData(String dbName, String collectionName) async {
     builder: (context) {
       return AlertDialog(
         title: Text('Conferma Eliminazione Dato'),
+                   backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
         content: Text('Sei sicuro di voler eliminare questo dato?'),
         actions: [
           TextButton(
@@ -823,7 +895,15 @@ Widget build(BuildContext context) {
                     return InkWell(
                       onTap: () => _showCollections(db.dbName), // Apre la lista delle collections al clic
                       child: Card(
-                        elevation: 4,
+                                      color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                         child: Padding(
                           padding: const EdgeInsets.all(8.0),
                           child: Column(
@@ -912,6 +992,15 @@ Widget build(BuildContext context) {
           builder: (BuildContext context) {
             return AlertDialog(
               title: Text('Crea Database'),
+                         backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

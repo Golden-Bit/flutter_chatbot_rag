@@ -212,6 +212,15 @@ Future<void> _loadChatHistory() async {
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text('Seleziona il colore'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: SingleChildScrollView(
             child: ColorPicker(
               pickerColor: currentColor,
@@ -247,18 +256,20 @@ Future<void> _loadChatHistory() async {
         ),
         backgroundColor: Color.fromARGB(255, 85, 107, 37), // Imposta il colore personalizzato
         leading: IconButton(
-          icon: Icon(Icons.menu, color: Colors.white),
-          onPressed: () {
-            setState(() {
-              isExpanded = !isExpanded;  // Alterna collasso ed espansione
-              if (isExpanded) {
-                sidebarWidth = 300.0;  // Imposta la larghezza a 500 pixel alla prima espansione
-              } else {
-                sidebarWidth = 0.0;  // Collassa la barra laterale
-              }
-            });
-          },
-        ),
+  icon: Icon(Icons.menu, color: Colors.white),
+  onPressed: () {
+    setState(() {
+      isExpanded = !isExpanded;  // Alterna collasso ed espansione
+      if (isExpanded) {
+        sidebarWidth = MediaQuery.of(context).size.width < 600 
+            ? MediaQuery.of(context).size.width // Su schermi piccoli, occupa l'intera larghezza
+            : 300.0;  // Imposta la larghezza normale su schermi grandi
+      } else {
+        sidebarWidth = 0.0;  // Collassa la barra laterale
+      }
+    });
+  },
+),
       ),
       body: Row(
         children: [
@@ -273,11 +284,11 @@ Future<void> _loadChatHistory() async {
                 });
               }
             },
-            child: AnimatedContainer(
-              duration: Duration(milliseconds: 300),  // Animazione per l'espansione e il collasso
-              width: sidebarWidth,
-              color: Color.fromARGB(255, 85, 107, 37), // Colonna laterale con colore personalizzato
-              child: sidebarWidth > 0
+            child:AnimatedContainer(
+  duration: Duration(milliseconds: 300), // Animazione per l'espansione e il collasso
+  width: sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
+  color: Color.fromARGB(255, 85, 107, 37), // Colonna laterale con colore personalizzato
+  child: MediaQuery.of(context).size.width < 600 || sidebarWidth > 0
     ? Column(
         children: [
           // Linea di separazione bianca tra AppBar e sidebar
@@ -294,7 +305,14 @@ Future<void> _loadChatHistory() async {
 ListTile(
   leading: Icon(Icons.add, color: Colors.white),
   title: Text('Nuova Chat', style: TextStyle(color: Colors.white)),
-  onTap: _startNewChat,  // Usa la nuova funzione
+  onTap: () {
+    _startNewChat(); // Esegui l'azione del pulsante
+    if (MediaQuery.of(context).size.width < 600) {
+      setState(() {
+        sidebarWidth = 0.0; // Collassa la barra laterale
+      });
+    }
+  },
 ),
          ListTile(
   leading: Icon(Icons.chat, color: Colors.white),
@@ -305,6 +323,11 @@ ListTile(
       showSettings = false;
       _loadChatHistory();  // Carica la chat history simulata
     });
+        if (MediaQuery.of(context).size.width < 600) {
+      setState(() {
+        sidebarWidth = 0.0; // Collassa la barra laterale
+      });
+    }
   },
 ),
 ListTile(
@@ -314,7 +337,13 @@ ListTile(
     setState(() {
       showKnowledgeBase = true;  // Visualizza la pagina di gestione dei contesti
       showSettings = false;
+      
     });
+        if (MediaQuery.of(context).size.width < 600) {
+      setState(() {
+        sidebarWidth = 0.0; // Collassa la barra laterale
+      });
+    }
   },
 ),
 ListTile(
@@ -325,6 +354,11 @@ ListTile(
       showSettings = true;
       showKnowledgeBase = false;
     });
+        if (MediaQuery.of(context).size.width < 600) {
+      setState(() {
+        sidebarWidth = 0.0; // Collassa la barra laterale
+      });
+    }
   },
 ),
 /*ListTile(
@@ -364,32 +398,40 @@ Expanded(
             child: ListTile(
               title: Text(chat['name'], style: TextStyle(color: Colors.white)),
               trailing: PopupMenuButton<String>(
-                icon: Icon(
-                  Icons.more_horiz,
-                  color: hoveredIndex == index ? Colors.white : Colors.transparent, // Bianco in hover, trasparente altrimenti
-                ),
-                padding: EdgeInsets.only(right: 4.0), // Margine a destra ridotto
-                onSelected: (String value) {
-                  if (value == 'delete') {
-                    _deleteChat(index);
-                  } else if (value == 'edit') {
-                    _showEditChatDialog(index);
-                  }
-                },
-                itemBuilder: (BuildContext context) {
-                  return [
-                    PopupMenuItem(
-                      value: 'edit',
-                      child: Text('Modifica'),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Elimina'),
-                    ),
-                  ];
-                },
-              ),
-              onTap: () => _loadMessagesForChat(index), // Carica la chat selezionata
+  icon: Icon(
+    Icons.more_horiz,
+    color: (hoveredIndex == index || _activeChatIndex == index) ? Colors.white : Colors.transparent,
+  ),
+  padding: EdgeInsets.only(right: 4.0), // Margine a destra ridotto
+  onSelected: (String value) {
+    if (value == 'delete') {
+      _deleteChat(index);
+    } else if (value == 'edit') {
+      _showEditChatDialog(index);
+    }
+  },
+  itemBuilder: (BuildContext context) {
+    return [
+      PopupMenuItem(
+        value: 'edit',
+        child: Text('Modifica'),
+      ),
+      PopupMenuItem(
+        value: 'delete',
+        child: Text('Elimina'),
+      ),
+    ];
+  },
+),
+
+              onTap: () {
+                _loadMessagesForChat(index);
+                    if (MediaQuery.of(context).size.width < 600) {
+      setState(() {
+        sidebarWidth = 0.0; // Collassa la barra laterale
+      });
+    }
+                }, // Carica la chat selezionata
             ),
           );
         },
@@ -457,8 +499,8 @@ Expanded(
             padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),  // Aggiungi padding orizzontale e verticale
             decoration: BoxDecoration(
               color: Colors.white,  // Sfondo bianco all'interno del riquadro
-              border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi dello stesso colore dell'AppBar
-              borderRadius: BorderRadius.circular(8.0),  // Arrotonda i bordi
+              //border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi dello stesso colore dell'AppBar
+              borderRadius: BorderRadius.circular(4.0),  // Arrotonda i bordi
             ),
             constraints: BoxConstraints(maxWidth: 800),  // Limita la larghezza del riquadro
             child: Column(
@@ -479,8 +521,8 @@ Expanded(
               padding: const EdgeInsets.all(4.0),
               decoration: BoxDecoration(
                 color: Colors.white,  // Sfondo bianco
-                border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi colorati
-                borderRadius: BorderRadius.circular(8.0),
+                //border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi colorati
+                borderRadius: BorderRadius.circular(2.0),
               ),
               constraints: BoxConstraints(maxWidth: 600),  // Limita la larghezza della pagina delle impostazioni
               child: AccountSettingsPage(
@@ -679,6 +721,15 @@ void _showEditChatDialog(int index) {
     builder: (BuildContext context) {
       return AlertDialog(
         title: Text('Modifica Nome Chat'),
+                   backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
         content: TextField(
           controller: _nameController,
           decoration: InputDecoration(labelText: 'Nome della Chat'),
@@ -943,6 +994,15 @@ void _showContextDialog() async {
           // Utilizziamo StateSetter per mantenere lo stato locale all'interno del dialog
           return AlertDialog(
             title: Text('Seleziona Contesto e Modello'),
+                       backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
             content: SingleChildScrollView(  // Aggiungi uno scroll se il contenuto eccede l'altezza
               child: Container(
                 width: double.maxFinite,  // Permette alla finestra di dialogo di adattarsi alla larghezza disponibile
@@ -1017,55 +1077,80 @@ Widget _buildModelSelector(StateSetter setState) {
   );
 }
 
-
- // Funzione per creare la lista di contesti visualizzati come schede
+// Funzione per creare la lista di contesti visualizzati come schede
+// Funzione per creare la lista di contesti visualizzati come schede
 Widget _buildContextList(Function(String) onContextSelected) {
-  return GridView.builder(
-    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: 6,  // Numero di colonne nel grid
-      mainAxisSpacing: 5.0,  // Spaziatura verticale tra le schede
-      crossAxisSpacing: 5.0,  // Spaziatura orizzontale tra le schede
-      childAspectRatio: 4.0,  // Rapporto tra larghezza e altezza delle schede
-    ),
-    itemCount: _availableContexts.length,
-    shrinkWrap: true,
-    itemBuilder: (context, index) {
-      final contextMetadata = _availableContexts[index];
-      final isSelected = _selectedContext == contextMetadata.path;
+  final double cardHeight = 80.0; // Altezza fissa per ogni scheda
 
-      return GestureDetector(
-        onTap: () {
-          // Quando si clicca su una scheda, aggiorna lo stato e chiama il callback
-          onContextSelected(contextMetadata.path);
-        },
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 200),
-          padding: const EdgeInsets.all(12.0),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: isSelected ? Color.fromARGB(255, 85, 107, 37) : Colors.transparent,  // Bordi colorati solo se selezionato
-              width: 2.0,
-            ),
-            borderRadius: BorderRadius.circular(8.0),
-            color: Colors.white,  // Sfondo bianco per tutte le schede
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.3),  // Aggiunge un'ombra leggera
-                blurRadius: 5.0,
-                spreadRadius: 2.0,
+  return LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) {
+      return Align(
+  alignment: Alignment.topLeft, // Allinea il contenuto a sinistra
+  child: Wrap(
+        spacing: 10.0, // Spaziatura orizzontale tra le schede
+        runSpacing: 10.0, // Spaziatura verticale tra le righe
+        children: _availableContexts.map((contextMetadata) {
+          final isSelected = _selectedContext == contextMetadata.path;
+
+          return GestureDetector(
+            onTap: () {
+              onContextSelected(contextMetadata.path); // Seleziona il contesto
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: isSelected
+                      ? Color.fromARGB(255, 85, 107, 37)
+                      : Colors.transparent,
+                  width: 2.0,
+                ),
+                borderRadius: BorderRadius.circular(4.0),
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.3),
+                    blurRadius: 5.0,
+                    spreadRadius: 2.0,
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Center(
-            child: Text(
-              contextMetadata.path,  // Mostra il nome del contesto
-              style: TextStyle(
-                color: isSelected ? Color.fromARGB(255, 85, 107, 37) : Colors.black,  // Cambia colore del testo se selezionato
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,  // Grassetto se selezionato
+              child: Text(
+                contextMetadata.path, // Testo completo del contesto
+                style: TextStyle(
+                  color: isSelected
+                      ? Color.fromARGB(255, 85, 107, 37)
+                      : Colors.black,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
+          );
+        }).toList(),
+      ));
+    },
+  );
+}
+
+
+// Funzione per mostrare il dialog con il nome completo
+void _showFullNameDialog(BuildContext context, String fullName) {
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text('Nome Completo'),
+        content: Text(fullName), // Mostra il nome completo
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Chiudi il dialog
+            },
+            child: Text('Chiudi'),
           ),
-        ),
+        ],
       );
     },
   );

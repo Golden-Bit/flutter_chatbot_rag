@@ -28,6 +28,15 @@ class _ExpandableCardState extends State<ExpandableCard> {
   @override
   Widget build(BuildContext context) {
     return Card(
+                                            color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
       margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Padding(
         padding: const EdgeInsets.all(16.0),

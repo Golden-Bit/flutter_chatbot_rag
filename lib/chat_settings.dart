@@ -37,6 +37,15 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text('Seleziona il colore'),
+           backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: SingleChildScrollView(
             child: ColorPicker(
               pickerColor: currentColor,
@@ -65,10 +74,15 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Card(
-      elevation: 4.0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0),
-      ),
+                                      color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(

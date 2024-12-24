@@ -152,6 +152,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
               title: Text('Carica File in Contesti Multipli'),
+                         backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -312,6 +321,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context) {
         return AlertDialog(
           title: Text('Crea Nuovo Contesto'),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -359,7 +377,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           title: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('File per il contesto: $contextPath'),
+              Text('$contextPath'),
               Row(
                 children: [
                   IconButton(
@@ -380,6 +398,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
+                     backgroundColor: Colors.white, // Sfondo del popup
+      elevation: 6, // Intensità dell'ombra
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        //side: BorderSide(
+        //  color: Colors.blue, // Colore del bordo
+        //  width: 2, // Spessore del bordo
+        //),
+      ),
           content: Container(
             width: double.maxFinite,
             child: filesForContext.isEmpty
@@ -405,7 +432,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           filesForContext[index]['custom_metadata']['file_uuid'] ?? 'Sconosciuto';
 
                       return Card(
-                        elevation: 2,
+                                      color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                         child: Padding(
                           padding: const EdgeInsets.all(8.0),
                           child: Column(
@@ -462,6 +497,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       //appBar: //AppBar(
         //title: Text('Context API Dashboard'),
       //),
+            backgroundColor: Colors.white, // Imposta lo sfondo bianco
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -472,10 +508,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
            Row(
   mainAxisAlignment: MainAxisAlignment.spaceBetween, // Cambia l'allineamento per separare il testo e il pulsante
   children: [
-    Text('Gestione dei Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+    Text('Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
     ElevatedButton(
       onPressed: _showCreateContextDialog,
-      child: Text('+ Crea Nuovo Contesto'),
+      child: Text('+ Nuovo Contesto'),
     ),
   ],
 ),
@@ -515,7 +551,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _showFilesForContextDialog(_contexts[index].path);
                     },
                     child: Card(
-                      elevation: 2,
+                                      color: Colors.white, // Imposta lo sfondo bianco
+                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+    //side: BorderSide(
+    //  color: Colors.grey, // Colore dei bordi
+    //  width: 0, // Spessore dei bordi
+    //),
+  ),
                       child: Stack(
                         children: [
                           Padding(

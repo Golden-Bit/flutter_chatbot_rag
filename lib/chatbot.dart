@@ -246,6 +246,36 @@ Future<void> _loadChatHistory() async {
     );
   }
 
+  Widget _buildMessageContent(String content, bool isUser) {
+  return Stack(
+    children: [
+      // Markdown renderer (sotto)
+      MarkdownBody(
+        data: content, // Mostra il contenuto Markdown
+        styleSheet: MarkdownStyleSheet(
+          p: TextStyle(
+            fontSize: 14.0,
+            color: isUser ? Colors.black : Colors.black,
+          ),
+        ),
+      ),
+      // Selectable layer (sopra)
+      IgnorePointer(
+        ignoring: false, // Permette la selezione del testo
+        child: SelectableText(
+          content, // Testo selezionabile
+          style: TextStyle(
+            fontSize: 14.0,
+            color: Colors.transparent, // Rende invisibile per non coprire Markdown
+          ),
+          enableInteractiveSelection: true, // Abilita la selezione
+        ),
+      ),
+    ],
+  );
+}
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -554,52 +584,17 @@ Expanded(
                 ),
               ),
             Flexible(
-              child: Container(
-                padding: const EdgeInsets.all(12.0),
-                decoration: BoxDecoration(
-                  color: isUser
-                      ? _userMessageColor.withOpacity(_userMessageOpacity)
-                      : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
-                  borderRadius: BorderRadius.circular(8.0),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    MarkdownBody(data: message['content'] ?? ''),  // Mostra il contenuto del messaggio
-                    if (!isUser) // Solo per l'assistente
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          // Icona Text-to-Speech
-                          IconButton(
-                            icon: Icon(Icons.volume_up, size: 16),
-                            onPressed: () => _speak(message['content'] ?? ''),
-                          ),
-                          // Icona Pollice su
-                          IconButton(
-                            icon: Icon(Icons.thumb_up, size: 16),
-                            onPressed: () {
-                              // Gestisci azione "pollice su"
-                            },
-                          ),
-                          // Icona Pollice giù
-                          IconButton(
-                            icon: Icon(Icons.thumb_down, size: 16),
-                            onPressed: () {
-                              // Gestisci azione "pollice giù"
-                            },
-                          ),
-                          // Icona Copia
-                          IconButton(
-                            icon: Icon(Icons.copy, size: 16),
-                            onPressed: () => _copyToClipboard(message['content'] ?? ''),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
+  child: Container(
+    padding: const EdgeInsets.all(12.0),
+    decoration: BoxDecoration(
+      color: isUser
+          ? _userMessageColor.withOpacity(_userMessageOpacity)
+          : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
+      borderRadius: BorderRadius.circular(8.0),
+    ),
+    child: _buildMessageContent(message['content'] ?? '', isUser),
+  ),
+),
             if (isUser)
               Padding(
                 padding: const EdgeInsets.only(left: 8.0),

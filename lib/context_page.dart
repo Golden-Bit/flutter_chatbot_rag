@@ -366,130 +366,120 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
 
-  // Funzione per mostrare il dialog con la lista dei file di un contesto specifico
-  void _showFilesForContextDialog(String contextPath) async {
-    List<Map<String, dynamic>> filesForContext = await _loadFilesForContext(contextPath);
+void _showFilesForContextDialog(String contextPath) async {
+  List<Map<String, dynamic>> filesForContext = await _loadFilesForContext(contextPath);
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('$contextPath'),
-              Row(
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.upload_file),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _uploadFileForContext(contextPath);
-                    },
-                  ),
-                  //IconButton(
-                  //  icon: Icon(Icons.delete),
-                  //  onPressed: () async {
-                  //    Navigator.of(context).pop();
-                   //   await _deleteContext(contextPath);
-                    //},
-                 // ),
-                ],
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                contextPath,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                maxLines: 2, // Consenti un massimo di due righe
+                overflow: TextOverflow.ellipsis, // Troncamento se necessario
               ),
-            ],
-          ),
-                     backgroundColor: Colors.white, // Sfondo del popup
-      elevation: 6, // Intensità dell'ombra
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
-        //side: BorderSide(
-        //  color: Colors.blue, // Colore del bordo
-        //  width: 2, // Spessore del bordo
-        //),
-      ),
-          content: Container(
-            width: double.maxFinite,
-            child: filesForContext.isEmpty
-                ? Text('Nessun file trovato per questo contesto.')
-                : ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: filesForContext.length,
-                    itemBuilder: (context, index) {
-                      String filePath = filesForContext[index]['path'];
-                      List<String> pathSegments = filePath.split('/');
-                      String fileName = pathSegments.isNotEmpty ? pathSegments.last : 'Sconosciuto';
-                      String contextName = pathSegments.length > 1
-                          ? pathSegments[pathSegments.length - 2]
-                          : 'Sconosciuto';
-                      String fileSize =
-                          filesForContext[index]['custom_metadata']['size'] ?? 'Sconosciuto';
-                      String fileType =
-                          filesForContext[index]['custom_metadata']['type'] ?? 'Sconosciuto';
-                      String uploadDate =
-                          filesForContext[index]['custom_metadata']['upload_date'] ??
-                              'Sconosciuto';
-                      String fileUUID =
-                          filesForContext[index]['custom_metadata']['file_uuid'] ?? 'Sconosciuto';
-
-                      return Card(
-                                      color: Colors.white, // Imposta lo sfondo bianco
-                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
-    //side: BorderSide(
-    //  color: Colors.grey, // Colore dei bordi
-    //  width: 0, // Spessore dei bordi
-    //),
-  ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                fileName,
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                              SizedBox(height: 5),
-                              Text('Contesto di appartenenza: $contextName'),
-                              //Text('Peso del file: $fileSize'),
-                              //Text('Tipologia: $fileType'),
-                              //Text('Data di caricamento: $uploadDate'),
-                              Text('ID del file: $fileUUID'),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: IconButton(
-                                  icon: Icon(Icons.delete),
-                                  onPressed: () async {
-                                    await _deleteFile(fileUUID);
-                                    setState(() {
-                                      filesForContext.removeAt(index);
-                                    });
-                                    Navigator.of(context).pop();
-                                    _showFilesForContextDialog(contextPath);
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          actions: [
-            TextButton(
+            ),
+            IconButton(
+              icon: Icon(Icons.upload_file),
               onPressed: () {
                 Navigator.of(context).pop();
+                _uploadFileForContext(contextPath);
               },
-              child: Text('Chiudi'),
             ),
           ],
-        );
-      },
-    );
-  }
+        ),
+        backgroundColor: Colors.white, // Sfondo del popup
+        elevation: 6, // Intensità dell'ombra
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        ),
+        content: Container(
+          width: double.maxFinite,
+          child: filesForContext.isEmpty
+              ? Text('Nessun file trovato per questo contesto.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: filesForContext.length,
+                  itemBuilder: (context, index) {
+                    String filePath = filesForContext[index]['path'];
+                    List<String> pathSegments = filePath.split('/');
+                    String fileName = pathSegments.isNotEmpty
+                        ? pathSegments.last
+                        : 'Sconosciuto';
+                    String fileUUID = filesForContext[index]['custom_metadata']
+                            ['file_uuid'] ??
+                        'Sconosciuto';
+                    String fileType = filesForContext[index]['custom_metadata']
+                            ['type'] ??
+                        'Sconosciuto';
+                    String uploadDate = filesForContext[index]
+                            ['custom_metadata']['upload_date'] ??
+                        'Sconosciuto';
+                    String fileSize = filesForContext[index]['custom_metadata']
+                            ['size'] ??
+                        'Sconosciuto';
+
+                    return Card(
+                      color: Colors.white,
+                      elevation: 6,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              fileName,
+                              style: TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.bold),
+                            ),
+                            SizedBox(height: 5),
+                            Text('Tipo: $fileType'),
+                            Text('Dimensione: $fileSize'),
+                            Text('Data di caricamento: $uploadDate'),
+                            Text('ID: $fileUUID'),
+                            Align(
+                              alignment: Alignment.bottomRight,
+                              child: IconButton(
+                                icon: Icon(Icons.delete),
+                                onPressed: () async {
+                                  await _deleteFile(fileUUID);
+                                  setState(() {
+                                    filesForContext.removeAt(index);
+                                  });
+                                  Navigator.of(context).pop();
+                                  _showFilesForContextDialog(contextPath);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text('Chiudi'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -523,7 +513,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   maxCrossAxisExtent: 300,  // Dimensione massima per ciascuna scheda
   crossAxisSpacing: 10,     // Spaziatura tra le colonne
   mainAxisSpacing: 10,      // Spaziatura tra le righe
-  childAspectRatio: 2,      // Proporzione larghezza/altezza delle schede
+  childAspectRatio: 1.5,      // Proporzione larghezza/altezza delle schede
 ),
                 itemCount: _contexts.length,
                 itemBuilder: (context, index) {
@@ -546,80 +536,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     });
                   }
 
-                  return GestureDetector(
-                    onTap: () {
-                      _showFilesForContextDialog(_contexts[index].path);
-                    },
-                    child: Card(
-                                      color: Colors.white, // Imposta lo sfondo bianco
-                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
-    //side: BorderSide(
-    //  color: Colors.grey, // Colore dei bordi
-    //  width: 0, // Spessore dei bordi
-    //),
+return GestureDetector(
+  onTap: () {
+    _showFilesForContextDialog(_contexts[index].path);
+  },
+  child: Card(
+    color: Colors.white,
+    elevation: 6,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.all(10.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calcola il massimo spazio disponibile per il titolo
+                    double maxWidth = constraints.maxWidth;
+
+                    return Text(
+                      _contexts[index].path,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                    );
+                  },
+                ),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'delete') {
+                    _deleteContext(_contexts[index].path);
+                  } else if (value == 'upload') {
+                    _uploadFileForContext(_contexts[index].path);
+                  }
+                },
+                itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: 'upload',
+                    child: Text('Carica File'),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Text('Elimina'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          SizedBox(height: 5),
+          ...metadataWidgets,
+          if (_isLoadingMap[_contexts[index].path] == true) ...[
+            SizedBox(height: 10),
+            Row(
+              children: [
+                SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 10),
+                Text(
+                  _loadingFileNamesMap[_contexts[index].path] ?? '',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    ),
   ),
-                      child: Stack(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(10.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _contexts[index].path,
-                                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                                ),
-                                SizedBox(height: 5),
-                                ...metadataWidgets,
-                                // Mostra l'indicatore di caricamento solo se questo contesto sta caricando
-                                if (_isLoadingMap[_contexts[index].path] == true) ...[
-                                  SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
-                                      ),
-                                      SizedBox(width: 10),
-                                      Text(
-                                        _loadingFileNamesMap[_contexts[index].path] ?? '',
-                                        style: TextStyle(fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          Positioned(
-                            right: 0,
-                            child: PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value == 'delete') {
-                                  _deleteContext(_contexts[index].path);
-                                } else if (value == 'upload') {
-                                  _uploadFileForContext(_contexts[index].path);
-                                }
-                              },
-                              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                                PopupMenuItem<String>(
-                                  value: 'upload',
-                                  child: Text('Carica File'),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'delete',
-                                  child: Text('Elimina'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
+);
                 },
               ),
             ),

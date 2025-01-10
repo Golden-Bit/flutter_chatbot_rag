@@ -251,7 +251,7 @@ Future<void> _loadChatHistory() async {
     children: [
       // Markdown renderer (sotto)
       MarkdownBody(
-        data: content, // Mostra il contenuto Markdown
+        data: content, // Mostra il contenuto Markdown2
         styleSheet: MarkdownStyleSheet(
           p: TextStyle(
             fontSize: 14.0,

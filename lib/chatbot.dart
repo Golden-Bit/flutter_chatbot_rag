@@ -979,43 +979,80 @@ Future<void> _writeToFile(String jsonString) async {
 // Funzione per aprire il dialog di selezione del contesto e modello
 void _showContextDialog() async {
   // Aggiorna i contesti dal backend prima di aprire il dialog
-  await _loadAvailableContexts();  // Carica di nuovo i contesti disponibili dal database
+  await _loadAvailableContexts(); // Carica di nuovo i contesti disponibili dal database
 
   showDialog(
     context: context,
     builder: (BuildContext context) {
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter setState) {
-          // Utilizziamo StateSetter per mantenere lo stato locale all'interno del dialog
           return AlertDialog(
             title: Text('Seleziona Contesto e Modello'),
-                       backgroundColor: Colors.white, // Sfondo del popup
-      elevation: 6, // Intensità dell'ombra
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
-        //side: BorderSide(
-        //  color: Colors.blue, // Colore del bordo
-        //  width: 2, // Spessore del bordo
-        //),
-      ),
-            content: SingleChildScrollView(  // Aggiungi uno scroll se il contenuto eccede l'altezza
+            backgroundColor: Colors.white,
+            elevation: 6, // Intensità dell'ombra
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+            ),
+            content: SingleChildScrollView( // Rende l'intero contenuto scrollabile
               child: Container(
-                width: double.maxFinite,  // Permette alla finestra di dialogo di adattarsi alla larghezza disponibile
+                width: double.maxFinite, // Permette alla finestra di dialogo di adattarsi alla larghezza disponibile
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,  // Imposta le dimensioni minime in base al contenuto
+                  mainAxisSize: MainAxisSize.min, // Imposta le dimensioni minime in base al contenuto
                   children: [
-                    // Sezione per la selezione del contesto
-                    SizedBox(
-                      height: 200,  // Limita l'altezza per evitare overflow
-                      child: _buildContextList((String selected) {
-                        setState(() {
-                          _selectedContext = selected;  // Aggiorna immediatamente il contesto selezionato
-                          // Passa anche il modello selezionato ogni volta che cambia il contesto
-                          set_context(_selectedContext, _selectedModel);
-                        });
-                      }),
+                    // Lista scrollabile con schede distribuite verticalmente
+                    Container(
+                      height: 300, // Altezza massima per la sezione scrollabile
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _availableContexts.length,
+                        itemBuilder: (context, index) {
+                          final contextMetadata = _availableContexts[index];
+                          final isSelected = _selectedContext == contextMetadata.path;
+
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedContext = contextMetadata.path; // Aggiorna immediatamente il contesto selezionato
+                                set_context(_selectedContext, _selectedModel); // Passa il contesto e il modello selezionati
+                              });
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.all(4.0), // Spaziatura tra le schede
+                              padding: const EdgeInsets.all(12.0),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Color.fromARGB(255, 85, 107, 37) // Colore del bordo se selezionato
+                                      : Colors.transparent,
+                                  width: 1.0,
+                                ),
+                                borderRadius: BorderRadius.circular(4.0), // Bordi arrotondati
+                                color: Colors.white,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.withOpacity(0.3),
+                                    blurRadius: 2.5,
+                                    spreadRadius: 1.0,
+                                  ),
+                                ],
+                              ),
+                              width: 300, // Larghezza fissa per ogni scheda
+                              child: Text(
+                                contextMetadata.path,
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Color.fromARGB(255, 85, 107, 37) // Colore del testo se selezionato
+                                      : Colors.black,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                    // Spaziatura tra la sezione contesto e la sezione modello
+                    SizedBox(height: 16.0), // Spaziatura tra la lista e il resto del contenuto
                   ],
                 ),
               ),
@@ -1024,15 +1061,14 @@ void _showContextDialog() async {
               ElevatedButton(
                 child: Text('Annulla'),
                 onPressed: () {
-                  Navigator.of(context).pop();  // Chiudi il dialog senza salvare
+                  Navigator.of(context).pop(); // Chiudi il dialog senza salvare
                 },
               ),
               ElevatedButton(
                 child: Text('Conferma'),
                 onPressed: () {
-                  // Salva il contesto e il modello selezionato
-                  set_context(_selectedContext, _selectedModel);  // Invoca la funzione set_context con entrambi i valori aggiornati
-                  Navigator.of(context).pop();  // Chiudi il dialog
+                  set_context(_selectedContext, _selectedModel); // Salva il contesto e il modello selezionato
+                  Navigator.of(context).pop(); // Chiudi il dialog
                 },
               ),
             ],

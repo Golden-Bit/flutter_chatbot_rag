@@ -16,6 +16,7 @@ import 'context_api_sdk.dart';  // Importa lo script SDK
 import 'package:flutter_app/user_manager/user_model.dart';
 import 'databases_manager/database_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:uuid/uuid.dart'; // Importa il pacchetto UUID (assicurati di averlo aggiunto a pubspec.yaml)
 
 /*void main() {
   runApp(MyApp());
@@ -47,6 +48,9 @@ class ChatBotPage extends StatefulWidget {
 
 class _ChatBotPageState extends State<ChatBotPage> {
   List<Map<String, String>> messages = [];
+  
+final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
+
   final TextEditingController _controller = TextEditingController();
   String fullResponse = "";
   bool showKnowledgeBase = false;
@@ -144,44 +148,63 @@ Future<void> __loadChatHistory() async {
 
 Future<void> _loadChatHistory() async {
   try {
-    // Usa il nome del database basato sul nome utente
+    // Definisci il nome del database e della collection
     final dbName = "${widget.user.username}-database";  
     final collectionName = 'chats';
 
-    // Prova a caricare le chat dalla collection 'chats'
-    final chats = await _databaseService.fetchCollectionData(dbName, collectionName, widget.token.accessToken);
+    print('chats:');
+
+    // Carica le chat dalla collection 'chats' nel database
+    final chats = await _databaseService.fetchCollectionData(
+      dbName,
+      collectionName,
+      widget.token.accessToken,
+    );
+
+    print('$chats');
 
     if (chats.isNotEmpty) {
+      // Ordina le chat in base al campo 'updatedAt' (dalla più recente alla meno recente)
+      chats.sort((a, b) {
+        final updatedAtA = DateTime.parse(a['updatedAt'] as String);
+        final updatedAtB = DateTime.parse(b['updatedAt'] as String);
+        return updatedAtB.compareTo(updatedAtA); // Ordinamento discendente
+      });
+
+      // Aggiorna lo stato locale con la lista ordinata di chat
       setState(() {
         _chatHistory = chats;
       });
-      print('Chat history loaded from database: $_chatHistory');
+
+      print('Chat history loaded and sorted from database: $_chatHistory');
     } else {
       print('No chat history found in the database.');
     }
   } catch (e) {
-    // Gestisci l'errore 403 (collection non esistente)
+    // Gestisci gli errori di accesso al database, inclusi errori 403 (collection non trovata)
     if (e.toString().contains('403')) {
       print("Collection 'chats' does not exist. Creating the collection...");
 
-      // Crea la collection "chats"
+      // Crea la collection 'chats' se non esiste
       await _databaseService.createCollection(
         "${widget.user.username}-database", 
         'chats', 
         widget.token.accessToken
       );
 
-      // Inizializza _chatHistory come lista vuota
+      // Imposta lo stato locale per indicare che non ci sono chat
       setState(() {
         _chatHistory = [];
       });
 
       print("Collection 'chats' created successfully. No previous chat history found.");
     } else {
+      // Log degli altri errori
       print("Error loading chat history from database: $e");
     }
   }
 }
+
 
 
   @override
@@ -279,7 +302,10 @@ Future<void> _loadChatHistory() async {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        shadowColor: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
+        elevation: 8.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
         title: Text(
           'Teatek Agent',
           style: TextStyle(color: Colors.white),
@@ -317,7 +343,16 @@ Future<void> _loadChatHistory() async {
             child:AnimatedContainer(
   duration: Duration(milliseconds: 300), // Animazione per l'espansione e il collasso
   width: sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
-  color: Color.fromARGB(255, 85, 107, 37), // Colonna laterale con colore personalizzato
+  decoration: BoxDecoration(
+    color: Color.fromARGB(255, 85, 107, 37), // Colonna laterale con colore personalizzato
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
+        blurRadius: 8.0, // Sfocatura dell'ombra
+        offset: Offset(2, 0), // Posizione dell'ombra (x, y)
+      ),
+    ],
+  ),
   child: MediaQuery.of(context).size.width < 600 || sidebarWidth > 0
     ? Column(
         children: [
@@ -410,63 +445,79 @@ SizedBox(height: 16.0),  // Spazio verticale di 16.0px
 // Widget per visualizzare la lista delle chat salvate con menù a tre pallini
 // Widget per visualizzare la lista delle chat salvate con menù a tre pallini
 Expanded(
-      child: ListView.builder(
-        itemCount: _chatHistory.length,
-        itemBuilder: (context, index) {
-          final chat = _chatHistory[index];
-          return MouseRegion(
-            onEnter: (_) {
-              setState(() {
-                hoveredIndex = index; // Imposta l'indice dell'elemento in hover
-              });
+  child: ListView.builder(
+    itemCount: _chatHistory.length, // Numero totale delle chat caricate
+    itemBuilder: (context, index) {
+      final chat = _chatHistory[index]; // Estrai i dettagli della chat corrente
+      final chatName = chat['name'] ?? 'Chat senza nome'; // Fallback per chat senza nome
+      final chatId = chat['id']; // Identificatore univoco della chat
+      final isHovered = hoveredIndex == index; // Controlla se la chat è in hover
+      final isActive = _activeChatIndex == index; // Controlla se la chat è attiva
+
+      return MouseRegion(
+        onEnter: (_) {
+          setState(() {
+            hoveredIndex = index; // Imposta l'indice per l'hover
+          });
+        },
+        onExit: (_) {
+          setState(() {
+            hoveredIndex = null; // Rimuovi l'hover quando il mouse esce
+          });
+        },
+        child: ListTile(
+          title: Text(
+            chatName, // Nome della chat
+            style: TextStyle(
+              color: Colors.white, // Testo bianco
+              fontWeight: isActive ? FontWeight.bold : FontWeight.normal, // Grassetto per la chat attiva
+            ),
+          ),
+          subtitle: Text(
+            'ID: $chatId', // Mostra l'ID della chat come sottotitolo
+            style: TextStyle(color: Colors.white70, fontSize: 12.0),
+          ),
+          trailing: PopupMenuButton<String>(
+            icon: Icon(
+              Icons.more_horiz,
+              color: (isHovered || isActive) ? Colors.white : Colors.transparent, // Visibile solo in hover o attivo
+            ),
+            padding: EdgeInsets.only(right: 4.0), // Margine ridotto a destra
+            onSelected: (String value) {
+              if (value == 'delete') {
+                _deleteChat(index); // Elimina la chat
+              } else if (value == 'edit') {
+                _showEditChatDialog(index); // Mostra il dialog per la modifica
+              }
             },
-            onExit: (_) {
-              setState(() {
-                hoveredIndex = null; // Rimuove l'hover quando il mouse esce
-              });
+            itemBuilder: (BuildContext context) {
+              return [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Modifica'),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Elimina'),
+                ),
+              ];
             },
-            child: ListTile(
-              title: Text(chat['name'], style: TextStyle(color: Colors.white)),
-              trailing: PopupMenuButton<String>(
-  icon: Icon(
-    Icons.more_horiz,
-    color: (hoveredIndex == index || _activeChatIndex == index) ? Colors.white : Colors.transparent,
+          ),
+          onTap: () {
+            _loadMessagesForChat(chatId); // Passa l'ID della chat (String) anziché l'indice
+            if (MediaQuery.of(context).size.width < 600) {
+              setState(() {
+                sidebarWidth = 0.0; // Collassa la barra laterale su schermi piccoli
+              });
+            }
+          },
+        ),
+      );
+    },
   ),
-  padding: EdgeInsets.only(right: 4.0), // Margine a destra ridotto
-  onSelected: (String value) {
-    if (value == 'delete') {
-      _deleteChat(index);
-    } else if (value == 'edit') {
-      _showEditChatDialog(index);
-    }
-  },
-  itemBuilder: (BuildContext context) {
-    return [
-      PopupMenuItem(
-        value: 'edit',
-        child: Text('Modifica'),
-      ),
-      PopupMenuItem(
-        value: 'delete',
-        child: Text('Elimina'),
-      ),
-    ];
-  },
 ),
 
-              onTap: () {
-                _loadMessagesForChat(index);
-                    if (MediaQuery.of(context).size.width < 600) {
-      setState(() {
-        sidebarWidth = 0.0; // Collassa la barra laterale
-      });
-    }
-                }, // Carica la chat selezionata
-            ),
-          );
-        },
-      ),
-    ),
+
 // Mantieni il pulsante di logout in basso, senza Spacer
 Align(
   alignment: Alignment.bottomCenter,
@@ -791,51 +842,90 @@ void _startNewChat() {
   });
 }
 
-// Funzione per caricare i messaggi di una chat salvata
-void _loadMessagesForChat(int chatIndex) {
-  setState(() {
-    _activeChatIndex = chatIndex;
-    final chat = _chatHistory[chatIndex];
-    List<dynamic> chatMessages = chat['messages'];
+void _loadMessagesForChat(String chatId) {
+  try {
+    // Trova la chat corrispondente all'ID
+    final chat = _chatHistory.firstWhere(
+      (chat) => chat['id'] == chatId,
+      orElse: () => null, // Se la chat non esiste, ritorna null
+    );
 
-    // Debug: Verifica che i messaggi siano corretti
-    print('Messaggi caricati per ${chat['name']}: $chatMessages');
+    if (chat == null) {
+      print('Errore: Nessuna chat trovata con ID $chatId');
+      return;
+    }
 
-    // Aggiorna `messages`
-    messages.clear();
-    messages.addAll(chatMessages.map((message) => Map<String, String>.from(message)).toList());
+    // Estrai e ordina i messaggi della chat
+    List<dynamic> chatMessages = chat['messages'] ?? [];
+    chatMessages.sort((a, b) {
+      final aCreatedAt = DateTime.parse(a['createdAt']);
+      final bCreatedAt = DateTime.parse(b['createdAt']);
+      return aCreatedAt.compareTo(bCreatedAt); // Ordina dal più vecchio al più recente
+    });
 
-    // Forza il passaggio alla schermata delle conversazioni
-    showKnowledgeBase = false; // Nascondi KnowledgeBase
-    showSettings = false; // Nascondi Impostazioni
+    // Aggiorna lo stato
+    setState(() {
+      _activeChatIndex = _chatHistory.indexWhere((c) => c['id'] == chatId); // Imposta l'indice della chat attiva
+      messages.clear();
+      messages.addAll(chatMessages.map((message) {
+        // Assicura che ogni messaggio sia un Map<String, dynamic>
+        return Map<String, String>.from(message);
+      }).toList());
 
-    // Debug: Verifica che la lista `messages` sia aggiornata
-    print('Messaggi aggiornati nella UI: $messages');
-  });
+      // Forza il passaggio alla schermata delle conversazioni
+      showKnowledgeBase = false; // Nascondi KnowledgeBase
+      showSettings = false; // Nascondi Impostazioni
+    });
+
+    // Debug: Messaggi caricati
+    print('Messaggi caricati per chat ID $chatId (${chat['name']}): $chatMessages');
+  } catch (e) {
+    print('Errore durante il caricamento dei messaggi per chat ID $chatId: $e');
+  }
 }
 
 
-  
+
 Future<void> _handleUserInput(String input) async {
   if (input.isEmpty) return;
 
+  final currentTime = DateTime.now().toIso8601String(); // Ora corrente
+  final userMessageId = uuid.v4(); // Genera un ID univoco per il messaggio utente
+
   setState(() {
-    messages.add({'role': 'user', 'content': input});
+    // Aggiungi il messaggio dell'utente con ID e timestamp
+    messages.add({
+      'id': userMessageId, // ID univoco del messaggio
+      'role': 'user',
+      'content': input,
+      'createdAt': currentTime, // Timestamp
+    });
     fullResponse = ""; // Reset della risposta completa
   });
 
-  // Placeholder per la risposta del bot
+  // Genera un ID per il messaggio placeholder dell'assistente
+  final assistantMessageId = uuid.v4();
+
   setState(() {
-    messages.add({'role': 'assistant', 'content': ''});
+    // Placeholder per la risposta del bot
+    messages.add({
+      'id': assistantMessageId, // ID univoco del messaggio dell'assistente
+      'role': 'assistant',
+      'content': '',
+      'createdAt': DateTime.now().toIso8601String(), // Timestamp
+    });
   });
 
   _controller.clear(); // Pulisce il campo di input
 
+  // Invia il messaggio all'API
   await _sendMessageToAPI(input);
 
-  // Salva la conversazione (aggiorna se c'è una chat attiva)
+  // Salva la conversazione con ID univoco per ogni messaggio
   _saveConversation(messages);
 }
+
+
 
 Future<void> __saveConversation(List<Map<String, String>> messages) async {
   try {
@@ -872,28 +962,38 @@ Future<void> __saveConversation(List<Map<String, String>> messages) async {
 }
 
 
-Future<void> _saveConversation(List<Map<String, String>> messages) async {
+Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
   try {
-    final currentTime = DateTime.now();
-    final chatName = _activeChatIndex != null 
-        ? _chatHistory[_activeChatIndex!]['name'] 
-        : 'Chat ${_chatHistory.length + 1}';
+    final currentTime = DateTime.now().toIso8601String(); // Ora corrente in formato ISO
+    final chatId = _activeChatIndex != null
+        ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
+        : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
+    final chatName = _activeChatIndex != null
+        ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
+        : 'New Chat'; // Nome predefinito per le nuove chat
 
-    // Crea o aggiorna la chat corrente
+    // Prepara i messaggi con copia profonda per evitare riferimenti condivisi
+    final List<Map<String, dynamic>> updatedMessages = messages.map((message) {
+      return Map<String, dynamic>.from(message); // Copia ogni messaggio
+    }).toList();
+
+    // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
     final currentChat = {
-      'name': chatName,
-      'date': currentTime.toIso8601String(),
-      'messages': List<Map<String, String>>.from(
-        messages.map((message) => Map<String, String>.from(message))
-      ),
+      'id': chatId, // ID della chat
+      'name': chatName, // Nome della chat
+      'createdAt': _activeChatIndex != null
+          ? _chatHistory[_activeChatIndex!]['createdAt'] // Mantieni la data di creazione originale
+          : currentTime, // Timestamp di creazione per nuove chat
+      'updatedAt': currentTime, // Aggiorna il timestamp di ultima modifica
+      'messages': updatedMessages, // Lista dei messaggi aggiornati
     };
 
     if (_activeChatIndex != null) {
       // Aggiorna la chat esistente nella lista locale
-      _chatHistory[_activeChatIndex!]['messages'] = currentChat['messages'];
+      _chatHistory[_activeChatIndex!] = Map<String, dynamic>.from(currentChat); // Copia profonda della chat
     } else {
       // Aggiungi una nuova chat alla lista locale
-      _chatHistory.add(currentChat);
+      _chatHistory.add(Map<String, dynamic>.from(currentChat)); // Copia profonda della chat
       _activeChatIndex = _chatHistory.length - 1;
     }
 
@@ -901,53 +1001,54 @@ Future<void> _saveConversation(List<Map<String, String>> messages) async {
     final String jsonString = jsonEncode({'chatHistory': _chatHistory});
     html.window.localStorage['chatHistory'] = jsonString;
 
-    print('Chat saved in local storage.');
+    print('Chat salvata correttamente nel Local Storage.');
 
     // Salva o aggiorna la chat nel database
-    final dbName = "${widget.user.username}-database";  // Usa il nome utente per il db
+    final dbName = "${widget.user.username}-database"; // Nome del database basato sull'utente
     final collectionName = 'chats';
 
-    // Controlla se la collection esiste, se non esiste, creala
     try {
-      // Controlla se la collection esiste già
-      final existingChats = await _databaseService.fetchCollectionData(dbName, collectionName, widget.token.accessToken);
-
-      // Cerca la chat corrente nel database
-      final existingChat = existingChats.firstWhere(
-        (chat) => chat['name'] == chatName,
-        orElse: () => <String, dynamic>{}, // Ritorna una mappa vuota invece di null
+      // Carica le chat esistenti dal database
+      final existingChats = await _databaseService.fetchCollectionData(
+        dbName,
+        collectionName,
+        widget.token.accessToken,
       );
 
-      // Verifica se la chat esistente ha un campo '_id'
+      // Trova la chat corrente nel database
+      final existingChat = existingChats.firstWhere(
+        (chat) => chat['id'] == chatId, // Cerca in base all'ID della chat
+        orElse: () => <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
+      );
+
       if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
-        // La chat esiste, aggiorna i suoi messaggi
+        // La chat esiste, aggiorna i campi nel database
         await _databaseService.updateCollectionData(
-          dbName, 
-          collectionName, 
-          existingChat['_id'],  // Usa l'ID della chat esistente
-          {'messages': currentChat['messages']},  // Aggiorna solo i messaggi
+          dbName,
+          collectionName,
+          existingChat['_id'], // ID del documento esistente
+          {
+            'name': currentChat['name'], // Aggiorna il nome della chat
+            'updatedAt': currentTime, // Aggiorna la data di ultima modifica
+            'messages': updatedMessages, // Aggiorna i messaggi
+          },
           widget.token.accessToken,
         );
-        print('Chat updated in database.');
+        print('Chat aggiornata nel database.');
       } else {
         // La chat non esiste nel database, aggiungi una nuova
         await _databaseService.addDataToCollection(
           dbName,
           collectionName,
-          currentChat,  // Aggiungi tutta la chat come nuovo documento
+          currentChat,
           widget.token.accessToken,
         );
-        print('New chat added to database.');
+        print('Nuova chat aggiunta al database.');
       }
     } catch (e) {
       if (e.toString().contains('Failed to load collection data')) {
-        // Errore 403 significa che la collection non esiste, quindi creala
-        print('Collection "chats" does not exist. Creating collection...');
-        print(dbName);
-        print(collectionName);
-        print(currentChat);
-        print(widget.token.accessToken);
-                // Crea la collection "chats"
+        // Se la collection non esiste, creala e aggiungi la chat
+        print('Collection "chats" non esistente. Creazione in corso...');
         await _databaseService.createCollection(dbName, collectionName, widget.token.accessToken);
 
         // Aggiungi la nuova chat alla collection appena creata
@@ -958,15 +1059,16 @@ Future<void> _saveConversation(List<Map<String, String>> messages) async {
           widget.token.accessToken,
         );
 
-        print('Collection "chats" created and chat added to database.');
+        print('Collection "chats" creata e chat aggiunta al database.');
       } else {
-        throw e;  // Propaga altri errori
+        throw e; // Propaga altri errori
       }
     }
   } catch (e) {
-    print('Error saving conversation: $e');
+    print('Errore durante il salvataggio della conversazione: $e');
   }
 }
+
 
 
 Future<void> _writeToFile(String jsonString) async {

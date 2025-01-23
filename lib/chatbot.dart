@@ -95,14 +95,16 @@ final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
   Color _avatarIconColor = Colors.white;
   double _avatarIconOpacity = 1.0;
   
-  String _selectedModel = "gpt-4o-mini";  // Variabile per il modello selezionato, di default GPT-4O
-int? hoveredIndex; // Variabile di stato per tracciare l'hover
+  String _selectedModel = "gpt-4o";  // Variabile per il modello selezionato, di default GPT-4O
+int? _buttonHoveredIndex; // Variabile per i pulsanti principali
+int? hoveredIndex; // Variabile per le chat salvate
+
 int? _activeChatIndex; // Chat attiva (null se si sta creando una nuova chat)
 final DatabaseService _databaseService = DatabaseService();
 // Aggiungi questa variabile per contenere la chat history simulata
 List<dynamic> _chatHistory = [];
 String? _nlpApiUrl;
-
+int? _activeButtonIndex;
 Future<void> _loadConfig() async {
   try {
     //final String response = await rootBundle.loadString('assets/config.json');
@@ -111,7 +113,6 @@ Future<void> _loadConfig() async {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
     "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag"
-
     };
     _nlpApiUrl = data['nlp_api'];
   } catch (e) {
@@ -127,23 +128,6 @@ void _logout(BuildContext context) {
 
   // Reindirizza l'utente alla pagina di login
   Navigator.pushReplacementNamed(context, '/login');
-}
-
-Future<void> __loadChatHistory() async {
-  try {
-    String? chatHistoryJson = html.window.localStorage['chatHistory'];
-    if (chatHistoryJson != null) {
-      final data = json.decode(chatHistoryJson);
-      setState(() {
-        _chatHistory = data['chatHistory'];
-      });
-      print('Chat history caricata: $_chatHistory');
-    } else {
-      print('Nessuna chat salvata trovata nel Local Storage');
-    }
-  } catch (e) {
-    print('Errore nel caricamento della chat history: $e');
-  }
 }
 
 Future<void> _loadChatHistory() async {
@@ -206,15 +190,25 @@ Future<void> _loadChatHistory() async {
 }
 
 
+late Future<void> _chatHistoryFuture;
 
-  @override
+@override
+void initState() {
+  super.initState();
+  _speech = stt.SpeechToText();
+  _flutterTts = FlutterTts();
+  _chatHistoryFuture = _loadChatHistory(); // Carica la cronologia solo una volta
+  _loadAvailableContexts();
+}
+
+  /*@override
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
     _flutterTts = FlutterTts();  // Inizializza FlutterTTS
     _loadAvailableContexts();  // Carica i contesti esistenti al caricamento della pagina
       _loadChatHistory();  // Carica la chat history simulata
-  }
+  }*/
 
   // Funzione per caricare i contesti dal backend
   Future<void> _loadAvailableContexts() async {
@@ -304,29 +298,119 @@ Future<void> _loadChatHistory() async {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        shadowColor: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
-        elevation: 8.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
-        title: Text(
-          'Teatek Agent',
-          style: TextStyle(color: Colors.white),
+  shadowColor: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
+  elevation: 8.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
+  title: Text(
+    'Teatek Agent',
+    style: TextStyle(color: Colors.white),
+  ),
+  backgroundColor: Color.fromARGB(255, 85, 107, 37), // Imposta il colore personalizzato
+  leading: IconButton(
+    icon: Icon(Icons.menu, color: Colors.white),
+    onPressed: () {
+      setState(() {
+        isExpanded = !isExpanded; // Alterna collasso ed espansione
+        if (isExpanded) {
+          sidebarWidth = MediaQuery.of(context).size.width < 600
+              ? MediaQuery.of(context).size.width // Su schermi piccoli, occupa l'intera larghezza
+              : 300.0; // Imposta la larghezza normale su schermi grandi
+        } else {
+          sidebarWidth = 0.0; // Collassa la barra laterale
+        }
+      });
+    },
+  ),
+  actions: [
+    PopupMenuButton<String>(
+      icon: CircleAvatar(
+        backgroundColor: Colors.white, // Sfondo bianco per l'avatar
+        child: Text(
+          widget.user.email.substring(0, 2).toUpperCase(), // Prime due lettere della mail in maiuscolo
+          style: TextStyle(color: Colors.black), // Testo nero
         ),
-        backgroundColor: Color.fromARGB(255, 85, 107, 37), // Imposta il colore personalizzato
-        leading: IconButton(
-  icon: Icon(Icons.menu, color: Colors.white),
-  onPressed: () {
-    setState(() {
-      isExpanded = !isExpanded;  // Alterna collasso ed espansione
-      if (isExpanded) {
-        sidebarWidth = MediaQuery.of(context).size.width < 600 
-            ? MediaQuery.of(context).size.width // Su schermi piccoli, occupa l'intera larghezza
-            : 300.0;  // Imposta la larghezza normale su schermi grandi
-      } else {
-        sidebarWidth = 0.0;  // Collassa la barra laterale
-      }
-    });
-  },
-),
       ),
+      onSelected: (value) {
+        switch (value) {
+          case 'Profilo':
+            // Naviga alla pagina del profilo
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => AccountSettingsPage(
+                  user: widget.user,
+                  token: widget.token,
+                ),
+              ),
+            );
+            break;
+          case 'Utilizzo':
+            // Naviga alla pagina di utilizzo
+            // TODO: Implementa la pagina di utilizzo
+            print('Naviga alla pagina di utilizzo');
+            break;
+          case 'Impostazioni':
+            // Apri il pannello delle impostazioni
+            setState(() {
+              showSettings = true; // Mostra la sezione delle impostazioni
+              showKnowledgeBase = false; // Nascondi il resto
+            });
+            break;
+          case 'Logout':
+            // Effettua il logout
+            _logout(context);
+            break;
+        }
+      },
+      itemBuilder: (BuildContext context) {
+        return [
+          PopupMenuItem(
+            value: 'Profilo',
+            child: Row(
+              children: [
+                Icon(Icons.person, color: Colors.black),
+                SizedBox(width: 8.0),
+                Text('Profilo'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'Utilizzo',
+            child: Row(
+              children: [
+                Icon(Icons.bar_chart, color: Colors.black),
+                SizedBox(width: 8.0),
+                Text('Utilizzo'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'Impostazioni',
+            child: Row(
+              children: [
+                Icon(Icons.settings, color: Colors.black),
+                SizedBox(width: 8.0),
+                Text('Impostazioni'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'Logout',
+            child: Row(
+              children: [
+                Icon(Icons.logout, color: Colors.red),
+                SizedBox(width: 8.0),
+                Text(
+                  'Logout',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ],
+            ),
+          ),
+        ];
+      },
+    ),
+  ],
+),
       body: Row(
         children: [
           // Barra laterale con possibilità di ridimensionamento
@@ -366,160 +450,355 @@ Future<void> _loadChatHistory() async {
           SizedBox(height: 16.0),  // Spazio verticale tra la linea e le voci del menu
           
           // Sezione fissa con le voci principali
-  // Pulsante per creare una nuova chat
-ListTile(
-  leading: Icon(Icons.add, color: Colors.white),
-  title: Text('Nuova Chat', style: TextStyle(color: Colors.white)),
-  onTap: () {
-    _startNewChat(); // Esegui l'azione del pulsante
-    if (MediaQuery.of(context).size.width < 600) {
-      setState(() {
-        sidebarWidth = 0.0; // Collassa la barra laterale
-      });
-    }
-  },
-),
-         ListTile(
-  leading: Icon(Icons.chat, color: Colors.white),
-  title: Text('Conversazione', style: TextStyle(color: Colors.white)),
-  onTap: () {
-    setState(() {
-      showKnowledgeBase = false;  // Nascondi la pagina di gestione dei contesti
-      showSettings = false;
-      _loadChatHistory();  // Carica la chat history simulata
-    });
-        if (MediaQuery.of(context).size.width < 600) {
-      setState(() {
-        sidebarWidth = 0.0; // Collassa la barra laterale
-      });
-    }
-  },
-),
-ListTile(
-  leading: Icon(Icons.book, color: Colors.white),
-  title: Text('Basi di conoscenza', style: TextStyle(color: Colors.white)),
-  onTap: () {
-    setState(() {
-      showKnowledgeBase = true;  // Visualizza la pagina di gestione dei contesti
-      showSettings = false;
-      
-    });
-        if (MediaQuery.of(context).size.width < 600) {
-      setState(() {
-        sidebarWidth = 0.0; // Collassa la barra laterale
-      });
-    }
-  },
-),
-ListTile(
-  leading: Icon(Icons.settings, color: Colors.white),
-  title: Text('Impostazioni', style: TextStyle(color: Colors.white)),
-  onTap: () {
-    setState(() {
-      showSettings = true;
-      showKnowledgeBase = false;
-    });
-        if (MediaQuery.of(context).size.width < 600) {
-      setState(() {
-        sidebarWidth = 0.0; // Collassa la barra laterale
-      });
-    }
-  },
-),
-/*ListTile(
-  leading: Icon(Icons.history, color: Colors.white),
-  title: Text('Conversazioni salvate', style: TextStyle(color: Colors.white)),
-  onTap: () {
-    setState(() {
-      showKnowledgeBase = false;
-      showSettings = false;
-      // Carica la lista delle chat salvate
-      _loadChatHistory();
-    });
-  },
-),*/
-// Visualizza la lista delle chat salvate e rendila scrollabile
-SizedBox(height: 16.0),  // Spazio verticale di 16.0px
 
-// Rendi la lista delle chat espandibile
-// Widget per visualizzare la lista delle chat salvate con menù a tre pallini
-// Widget per visualizzare la lista delle chat salvate con menù a tre pallini
+// Pulsante "Nuova Chat"
+MouseRegion(
+  onEnter: (_) {
+    setState(() {
+      _buttonHoveredIndex = 3; // Identifica "Nuova Chat" come in hover
+    });
+  },
+  onExit: (_) {
+    setState(() {
+      _buttonHoveredIndex = null; // Rimuove lo stato di hover
+    });
+  },
+  child: GestureDetector(
+    onTap: () {
+      _startNewChat(); // Avvia una nuova chat
+      setState(() {
+        _activeButtonIndex = 3; // Imposta "Nuova Chat" come attivo
+        showKnowledgeBase = false; // Deseleziona "Basi di conoscenza"
+        showSettings = false; // Deseleziona "Impostazioni"
+        _activeChatIndex = null; // Deseleziona qualsiasi chat
+      });
+      if (MediaQuery.of(context).size.width < 600) {
+        setState(() {
+          sidebarWidth = 0.0; // Collassa la barra laterale
+        });
+      }
+    },
+    child: Container(
+      margin: const EdgeInsets.all(4.0), // Margini laterali
+      decoration: BoxDecoration(
+        color: _buttonHoveredIndex == 3 || _activeButtonIndex == 3
+            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            : Colors.transparent, // Sfondo trasparente quando non è attivo
+        borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+      child: Row(
+        children: [
+          Icon(Icons.add, color: Colors.white),
+          const SizedBox(width: 8.0),
+          Text(
+            'Nuova Chat',
+            style: TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
+
+// Pulsante "Conversazione"
+MouseRegion(
+  onEnter: (_) {
+    setState(() {
+      _buttonHoveredIndex = 0; // Identifica "Conversazione" come in hover
+    });
+  },
+  onExit: (_) {
+    setState(() {
+      _buttonHoveredIndex = null; // Rimuove lo stato di hover
+    });
+  },
+  child: GestureDetector(
+    onTap: () {
+      setState(() {
+        _activeButtonIndex = 0; // Imposta "Conversazione" come attivo
+        showKnowledgeBase = false; // Deseleziona "Basi di conoscenza"
+        showSettings = false; // Deseleziona "Impostazioni"
+        _activeChatIndex = null; // Deseleziona qualsiasi chat
+      });
+      _loadChatHistory(); // Carica la cronologia delle chat
+      if (MediaQuery.of(context).size.width < 600) {
+        setState(() {
+          sidebarWidth = 0.0; // Collassa la barra laterale
+        });
+      }
+    },
+    child: Container(
+      margin: const EdgeInsets.all(4.0), // Margini laterali
+      decoration: BoxDecoration(
+        color: _buttonHoveredIndex == 0 || _activeButtonIndex == 0
+            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            : Colors.transparent, // Sfondo trasparente quando non è attivo
+        borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+      child: Row(
+        children: [
+          Icon(Icons.chat, color: Colors.white),
+          const SizedBox(width: 8.0),
+          Text(
+            'Conversazione',
+            style: TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
+
+// Pulsante "Basi di conoscenza"
+MouseRegion(
+  onEnter: (_) {
+    setState(() {
+      _buttonHoveredIndex = 1; // Identifica "Basi di conoscenza" come in hover
+    });
+  },
+  onExit: (_) {
+    setState(() {
+      _buttonHoveredIndex = null; // Rimuove lo stato di hover
+    });
+  },
+  child: GestureDetector(
+    onTap: () {
+      setState(() {
+        _activeButtonIndex = 1; // Imposta "Basi di conoscenza" come attivo
+        showKnowledgeBase = true; // Mostra "Basi di conoscenza"
+        showSettings = false; // Deseleziona "Impostazioni"
+        _activeChatIndex = null; // Deseleziona qualsiasi chat
+      });
+      if (MediaQuery.of(context).size.width < 600) {
+        setState(() {
+          sidebarWidth = 0.0; // Collassa la barra laterale
+        });
+      }
+    },
+    child: Container(
+      margin: const EdgeInsets.all(4.0), // Margini laterali
+      decoration: BoxDecoration(
+        color: _buttonHoveredIndex == 1 || _activeButtonIndex == 1
+            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            : Colors.transparent, // Sfondo trasparente quando non è attivo
+        borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+      child: Row(
+        children: [
+          Icon(Icons.book, color: Colors.white),
+          const SizedBox(width: 8.0),
+          Text(
+            'Basi di conoscenza',
+            style: TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
+
+// Pulsante "Impostazioni"
+MouseRegion(
+  onEnter: (_) {
+    setState(() {
+      _buttonHoveredIndex = 2; // Identifica "Impostazioni" come in hover
+    });
+  },
+  onExit: (_) {
+    setState(() {
+      _buttonHoveredIndex = null; // Rimuove lo stato di hover
+    });
+  },
+  child: GestureDetector(
+    onTap: () {
+      setState(() {
+        _activeButtonIndex = 2; // Imposta "Impostazioni" come attivo
+        showKnowledgeBase = false; // Deseleziona "Basi di conoscenza"
+        showSettings = true; // Mostra "Impostazioni"
+        _activeChatIndex = null; // Deseleziona qualsiasi chat
+      });
+      if (MediaQuery.of(context).size.width < 600) {
+        setState(() {
+          sidebarWidth = 0.0; // Collassa la barra laterale
+        });
+      }
+    },
+    child: Container(
+      margin: const EdgeInsets.all(4.0), // Margini laterali
+      decoration: BoxDecoration(
+        color: _buttonHoveredIndex == 2 || _activeButtonIndex == 2
+            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            : Colors.transparent, // Sfondo trasparente quando non è attivo
+        borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+      child: Row(
+        children: [
+          Icon(Icons.settings, color: Colors.white),
+          const SizedBox(width: 8.0),
+          Text(
+            'Impostazioni',
+            style: TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
+const SizedBox(height: 24),
+
+// Lista delle chat salvate
 Expanded(
-  child: ListView.builder(
-    itemCount: _chatHistory.length, // Numero totale delle chat caricate
-    itemBuilder: (context, index) {
-      final chat = _chatHistory[index]; // Estrai i dettagli della chat corrente
-      final chatName = chat['name'] ?? 'Chat senza nome'; // Fallback per chat senza nome
-      final chatId = chat['id']; // Identificatore univoco della chat
-      final isHovered = hoveredIndex == index; // Controlla se la chat è in hover
-      final isActive = _activeChatIndex == index; // Controlla se la chat è attiva
+  child: FutureBuilder(
+    future: _chatHistoryFuture, // Assicurati che le chat siano caricate
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return Center(child: CircularProgressIndicator());
+      }
 
-      return MouseRegion(
-        onEnter: (_) {
-          setState(() {
-            hoveredIndex = index; // Imposta l'indice per l'hover
-          });
-        },
-        onExit: (_) {
-          setState(() {
-            hoveredIndex = null; // Rimuovi l'hover quando il mouse esce
-          });
-        },
-        child: ListTile(
-          title: Text(
-            chatName, // Nome della chat
-            style: TextStyle(
-              color: Colors.white, // Testo bianco
-              fontWeight: isActive ? FontWeight.bold : FontWeight.normal, // Grassetto per la chat attiva
-            ),
+      // Raggruppa le chat in base alla data di aggiornamento
+      final groupedChats = _groupChatsByDate(_chatHistory);
+
+      // Filtra le sezioni per rimuovere quelle vuote
+      final nonEmptySections = groupedChats.entries
+          .where((entry) => entry.value.isNotEmpty)
+          .toList();
+
+      if (nonEmptySections.isEmpty) {
+        return Center(
+          child: Text(
+            "Nessuna chat disponibile.",
+            style: TextStyle(color: Colors.white70),
           ),
-          subtitle: Text(
-            'ID: $chatId', // Mostra l'ID della chat come sottotitolo
-            style: TextStyle(color: Colors.white70, fontSize: 12.0),
-          ),
-          trailing: PopupMenuButton<String>(
-            icon: Icon(
-              Icons.more_horiz,
-              color: (isHovered || isActive) ? Colors.white : Colors.transparent, // Visibile solo in hover o attivo
-            ),
-            padding: EdgeInsets.only(right: 4.0), // Margine ridotto a destra
-            onSelected: (String value) {
-              if (value == 'delete') {
-                _deleteChat(index); // Elimina la chat
-              } else if (value == 'edit') {
-                _showEditChatDialog(index); // Mostra il dialog per la modifica
-              }
-            },
-            itemBuilder: (BuildContext context) {
-              return [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Text('Modifica'),
+        );
+      }
+
+      return ListView.builder(
+        itemCount: nonEmptySections.length, // Numero delle sezioni non vuote
+        itemBuilder: (context, sectionIndex) {
+          final section = nonEmptySections[sectionIndex];
+          final sectionTitle = section.key; // Ottieni il titolo della sezione
+          final chatsInSection = section.value; // Ottieni le chat di quella sezione
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Intestazione della sezione
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                child: Text(
+                  sectionTitle, // Titolo della sezione
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Elimina'),
-                ),
-              ];
-            },
-          ),
-          onTap: () {
-            _loadMessagesForChat(chatId); // Passa l'ID della chat (String) anziché l'indice
-            if (MediaQuery.of(context).size.width < 600) {
-              setState(() {
-                sidebarWidth = 0.0; // Collassa la barra laterale su schermi piccoli
-              });
-            }
-          },
-        ),
+              ),
+              // Lista delle chat di questa sezione
+              ...chatsInSection.map((chat) {
+                final chatName = chat['name'] ?? 'Chat senza nome'; // Nome della chat
+                final chatId = chat['id']; // ID della chat
+                final isActive = _activeChatIndex == _chatHistory.indexOf(chat); // Chat attiva
+                final isHovered = hoveredIndex == _chatHistory.indexOf(chat); // Chat in hover
+
+                return MouseRegion(
+                  onEnter: (_) {
+                    setState(() {
+                      hoveredIndex = _chatHistory.indexOf(chat); // Aggiorna hover
+                    });
+                  },
+                  onExit: (_) {
+                    setState(() {
+                      hoveredIndex = null; // Rimuovi hover
+                    });
+                  },
+                  child: GestureDetector(
+                    onTap: () {
+                      _loadMessagesForChat(chatId); // Carica messaggi della chat
+                      setState(() {
+                        _activeChatIndex = _chatHistory.indexOf(chat); // Imposta la chat attiva
+                        _activeButtonIndex = null; // Deseleziona i pulsanti principali
+                        showKnowledgeBase = false; // Deseleziona "Basi di conoscenza"
+                        showSettings = false; // Deseleziona "Impostazioni"
+                      });
+                      if (MediaQuery.of(context).size.width < 600) {
+                        sidebarWidth = 0.0; // Collassa barra laterale
+                      }
+                    },
+                    child: Container(
+                      height: 40,
+                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2), // Margini laterali
+                      decoration: BoxDecoration(
+                        color: isHovered || isActive
+                            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro per hover o selezione
+                            : Colors.transparent, // Sfondo trasparente quando non attivo
+                        borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              chatName, // Mostra il nome della chat
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: isActive
+                                    ? FontWeight.bold // Evidenzia testo se attivo
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<String>(
+                            icon: Icon(
+                              Icons.more_horiz,
+                              color: (isHovered || isActive)
+                                  ? Colors.white // Colore bianco per l'icona in hover o selezione
+                                  : Colors.transparent, // Nascondi icona se non attivo o in hover
+                            ),
+                            padding: EdgeInsets.only(right: 4.0), // Riduci margine destro
+                            onSelected: (String value) {
+                              if (value == 'delete') {
+                                _deleteChat(_chatHistory.indexOf(chat)); // Elimina la chat
+                              } else if (value == 'edit') {
+                                _showEditChatDialog(_chatHistory.indexOf(chat)); // Modifica la chat
+                              }
+                            },
+                            itemBuilder: (BuildContext context) {
+                              return [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Modifica'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Elimina'),
+                                ),
+                              ];
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+              const SizedBox(height: 24), // Spaziatura tra le sezioni
+            ],
+          );
+        },
       );
     },
   ),
 ),
 
 
+
 // Mantieni il pulsante di logout in basso, senza Spacer
-Align(
+/*Align(
   alignment: Alignment.bottomCenter,
   child: Padding(
     padding: const EdgeInsets.all(16.0),
@@ -535,7 +814,7 @@ Align(
       onPressed: () => _logout(context), // Chiama la funzione di logout
     ),
   ),
-),
+),*/
 
 // Aggiungi qui il Container con padding leggero, bordi bianchi e angoli arrotondati
 /*Expanded(
@@ -925,41 +1204,39 @@ Future<void> _handleUserInput(String input) async {
   _saveConversation(messages);
 }
 
+Map<String, List<Map<String, dynamic>>> _groupChatsByDate(List<dynamic> chats) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final yesterday = today.subtract(Duration(days: 1));
+  final sevenDaysAgo = today.subtract(Duration(days: 7));
+  final thirtyDaysAgo = today.subtract(Duration(days: 30));
 
+  Map<String, List<Map<String, dynamic>>> groupedChats = {
+    'Oggi': [],
+    'Ieri': [],
+    'Ultimi 7 giorni': [],
+    'Ultimi 30 giorni': [],
+    'Chat passate': []
+  };
 
-Future<void> __saveConversation(List<Map<String, String>> messages) async {
-  try {
-    if (_activeChatIndex != null) {
-      // Fai una copia profonda dei messaggi per evitare riferimenti condivisi
-      _chatHistory[_activeChatIndex!]['messages'] = List<Map<String, String>>.from(
-        messages.map((message) => Map<String, String>.from(message))
-      );
+  for (var chat in chats) {
+    final chatDate = DateTime.parse(chat['updatedAt']);
+    if (chatDate.isAfter(today)) {
+      groupedChats['Oggi']?.add(chat);
+    } else if (chatDate.isAfter(yesterday)) {
+      groupedChats['Ieri']?.add(chat);
+    } else if (chatDate.isAfter(sevenDaysAgo)) {
+      groupedChats['Ultimi 7 giorni']?.add(chat);
+    } else if (chatDate.isAfter(thirtyDaysAgo)) {
+      groupedChats['Ultimi 30 giorni']?.add(chat);
     } else {
-      final currentTime = DateTime.now();
-      final chatName = 'Chat ${_chatHistory.length + 1}';
-
-      // Crea una nuova chat con copia profonda dei messaggi
-      final newChat = {
-        'name': chatName,
-        'date': currentTime.toIso8601String(),
-        'messages': List<Map<String, String>>.from(
-          messages.map((message) => Map<String, String>.from(message))
-        ),
-      };
-
-      _chatHistory.add(newChat);
-      _activeChatIndex = _chatHistory.length - 1;
+      groupedChats['Chat passate']?.add(chat);
     }
-
-    // Salva la cronologia delle chat nel Local Storage
-    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
-    html.window.localStorage['chatHistory'] = jsonString;
-
-    print('Chat salvata correttamente: $jsonString');
-  } catch (e) {
-    print('Errore durante il salvataggio della conversazione: $e');
   }
+
+  return groupedChats;
 }
+
 
 
 Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
@@ -993,8 +1270,8 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
       _chatHistory[_activeChatIndex!] = Map<String, dynamic>.from(currentChat); // Copia profonda della chat
     } else {
       // Aggiungi una nuova chat alla lista locale
-      _chatHistory.add(Map<String, dynamic>.from(currentChat)); // Copia profonda della chat
-      _activeChatIndex = _chatHistory.length - 1;
+      _chatHistory.insert(0, Map<String, dynamic>.from(currentChat)); // Inserisci in cima alla lista //_chatHistory.add(Map<String, dynamic>.from(currentChat)); // Copia profonda della chat
+      _activeChatIndex = 0; //_chatHistory.length - 1;
     }
 
     // Salva la cronologia delle chat nel Local Storage
@@ -1069,15 +1346,6 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
   }
 }
 
-
-
-Future<void> _writeToFile(String jsonString) async {
-  // Simulazione di scrittura (poiché non è possibile scrivere direttamente negli assets)
-  print("JSON aggiornato: $jsonString");
-  // In un'app reale, userebbe la memorizzazione locale o un backend per memorizzare i dati.
-}
-
-
 // Funzione per aprire il dialog di selezione del contesto e modello
 void _showContextDialog() async {
   // Aggiorna i contesti dal backend prima di aprire il dialog
@@ -1095,7 +1363,9 @@ void _showContextDialog() async {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
             ),
-            content: SingleChildScrollView( // Rende l'intero contenuto scrollabile
+            content: ConstrainedBox(
+    constraints: BoxConstraints(maxWidth: 600), // Fissa la larghezza massima
+    child: SingleChildScrollView( // Rende l'intero contenuto scrollabile
               child: Container(
                 width: double.maxFinite, // Permette alla finestra di dialogo di adattarsi alla larghezza disponibile
                 child: Column(
@@ -1158,7 +1428,7 @@ void _showContextDialog() async {
                   ],
                 ),
               ),
-            ),
+            )),
             actions: [
               ElevatedButton(
                 child: Text('Annulla'),
@@ -1209,86 +1479,6 @@ Widget _buildModelSelector(StateSetter setState) {
     }).toList(),
   );
 }
-
-// Funzione per creare la lista di contesti visualizzati come schede
-// Funzione per creare la lista di contesti visualizzati come schede
-Widget _buildContextList(Function(String) onContextSelected) {
-  final double cardHeight = 80.0; // Altezza fissa per ogni scheda
-
-  return LayoutBuilder(
-    builder: (BuildContext context, BoxConstraints constraints) {
-      return Align(
-  alignment: Alignment.topLeft, // Allinea il contenuto a sinistra
-  child: Wrap(
-        spacing: 10.0, // Spaziatura orizzontale tra le schede
-        runSpacing: 10.0, // Spaziatura verticale tra le righe
-        children: _availableContexts.map((contextMetadata) {
-          final isSelected = _selectedContext == contextMetadata.path;
-
-          return GestureDetector(
-            onTap: () {
-              onContextSelected(contextMetadata.path); // Seleziona il contesto
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: isSelected
-                      ? Color.fromARGB(255, 85, 107, 37)
-                      : Colors.transparent,
-                  width: 2.0,
-                ),
-                borderRadius: BorderRadius.circular(4.0),
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.3),
-                    blurRadius: 5.0,
-                    spreadRadius: 2.0,
-                  ),
-                ],
-              ),
-              child: Text(
-                contextMetadata.path, // Testo completo del contesto
-                style: TextStyle(
-                  color: isSelected
-                      ? Color.fromARGB(255, 85, 107, 37)
-                      : Colors.black,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          );
-        }).toList(),
-      ));
-    },
-  );
-}
-
-
-// Funzione per mostrare il dialog con il nome completo
-void _showFullNameDialog(BuildContext context, String fullName) {
-  showDialog(
-    context: context,
-    builder: (BuildContext context) {
-      return AlertDialog(
-        title: Text('Nome Completo'),
-        content: Text(fullName), // Mostra il nome completo
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop(); // Chiudi il dialog
-            },
-            child: Text('Chiudi'),
-          ),
-        ],
-      );
-    },
-  );
-}
-
 
 void set_context(String context, String model) async {
   try {

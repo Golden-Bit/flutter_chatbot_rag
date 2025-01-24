@@ -112,7 +112,8 @@ Future<void> _loadConfig() async {
     //final data = jsonDecode(response);
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
-    "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
+    //"nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
+    "nlp_api": "http://35.195.200.211:8100",
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
     "chatbot_nlp_api": "http://127.0.0.1:8100"
     };
@@ -291,6 +292,63 @@ void initState() {
         ),
       ),
     ],
+  );
+}
+
+void _showMessageInfoDialog(Map<String, String> message) {
+  final String role = message['role'] ?? 'unknown';
+  final String createdAt = message['createdAt'] ?? 'N/A';
+  final int contentLength = (message['content'] ?? '').length;
+
+  // Dati specifici per i messaggi dell'AI
+  final String? chainId = role == 'assistant' ? 'Esempio_Chain_ID' : null; // Inserisci il Chain ID corretto
+  final String? model = role == 'assistant' ? _selectedModel : null;
+  final int tokensReceived = role == 'assistant' ? 0 : 0; // Cambia con il valore reale
+  final int tokensGenerated = role == 'assistant' ? 0 : 0; // Cambia con il valore reale
+  final double responseCost = role == 'assistant' ? 0.0 : 0.0; // Cambia con il valore reale
+
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text("Dettagli del messaggio"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Ruolo del messaggio
+            Text(
+              "Ruolo: ${role == 'user' ? 'Utente' : 'Assistente'}",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            // Data di creazione
+            Text("Data: $createdAt"),
+            // Lunghezza in caratteri
+            Text("Lunghezza in caratteri: $contentLength"),
+            // Lunghezza in token (usando un valore fisso al momento)
+            Text("Lunghezza in token: 0"),
+            if (role == 'assistant') ...[
+              const Divider(),
+              // Mostra dettagli specifici dell'AI
+              Text("Modello usato: $model"),
+              Text("Chain ID: $chainId"),
+              Text("Token ricevuti: $tokensReceived"),
+              Text("Token generati: $tokensGenerated"),
+              Text("Costo risposta: \$${responseCost.toStringAsFixed(4)}"),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Chiudi il dialog
+            },
+            child: Text("Chiudi"),
+          ),
+        ],
+      );
+    },
   );
 }
 
@@ -895,51 +953,116 @@ Expanded(
           : Column(  // Altrimenti mostra la pagina del chatbot
               children: [
                 Expanded(
-  child: ListView.builder(
-    itemCount: messages.length,
-    itemBuilder: (context, index) {
-      final message = messages[index];
-      final isUser = message['role'] == 'user';
+child: ListView.builder(
+  itemCount: messages.length,
+  itemBuilder: (context, index) {
+    final message = messages[index];
+    final isUser = message['role'] == 'user';
 
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
-          mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!isUser)
-              Padding(
-                padding: const EdgeInsets.only(right: 8.0),
-                child: CircleAvatar(
-                  backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
-                  child: Icon(Icons.android, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
-                ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Avatar dell'assistente (se non è un messaggio utente)
+          if (!isUser)
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: CircleAvatar(
+                backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
+                child: Icon(Icons.android, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
               ),
-            Flexible(
-  child: Container(
-    padding: const EdgeInsets.all(12.0),
-    decoration: BoxDecoration(
-      color: isUser
-          ? _userMessageColor.withOpacity(_userMessageOpacity)
-          : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
-      borderRadius: BorderRadius.circular(8.0),
+            ),
+          Flexible(
+            child: Container(
+              // Il contenitore si adatta esattamente al contenuto testuale interno
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75, // Limita la larghezza massima al 75% dello schermo
+              ),
+              padding: const EdgeInsets.all(12.0),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? _userMessageColor.withOpacity(_userMessageOpacity)
+                    : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
+                borderRadius: BorderRadius.circular(8.0),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Contenuto del messaggio
+                  _buildMessageContent(message['content'] ?? '', isUser),
+                  const SizedBox(height: 8.0), // Spazio tra il testo e le icone
+                  // Icone aggiuntive sotto il messaggio
+// Icone aggiuntive sotto il messaggio
+Row(
+  mainAxisAlignment: MainAxisAlignment.start,
+  children: [
+    // Icona Copia (sempre presente)
+    IconButton(
+      icon: Icon(Icons.copy, size: 16),
+      tooltip: "Copia contenuto",
+      onPressed: () {
+        _copyToClipboard(message['content'] ?? '');
+      },
     ),
-    child: _buildMessageContent(message['content'] ?? '', isUser),
-  ),
+    // Mostra solo sotto i messaggi dell'AI
+    if (!isUser) ...[
+      // Icona Pollice su
+      IconButton(
+        icon: Icon(Icons.thumb_up, size: 16),
+        tooltip: "Feedback positivo",
+        onPressed: () {
+          print("Feedback positivo per il messaggio: ${message['content']}");
+        },
+      ),
+      // Icona Pollice giù
+      IconButton(
+        icon: Icon(Icons.thumb_down, size: 16),
+        tooltip: "Feedback negativo",
+        onPressed: () {
+          print("Feedback negativo per il messaggio: ${message['content']}");
+        },
+      ),
+    ],
+    // Icona Text-to-Speech (sempre presente)
+    IconButton(
+      icon: Icon(Icons.volume_up, size: 16),
+      tooltip: "Leggi il messaggio",
+      onPressed: () {
+        _speak(message['content'] ?? '');
+      },
+    ),
+    // Icona Informazioni (sempre presente)
+    IconButton(
+      icon: Icon(Icons.info_outline, size: 16),
+      tooltip: "Informazioni sul messaggio",
+      onPressed: () {
+        _showMessageInfoDialog(message); // Passa l'intero messaggio per mostrare più dettagli
+      },
+    ),
+  ],
 ),
-            if (isUser)
-              Padding(
-                padding: const EdgeInsets.only(left: 8.0),
-                child: CircleAvatar(
-                  backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
-                  child: Icon(Icons.person, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
-                ),
+                ],
               ),
-          ],
-        ),
-      );
-    },
-  ),
+            ),
+          ),
+          // Avatar dell'utente (se è un messaggio utente)
+          if (isUser)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: CircleAvatar(
+                backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
+                child: Icon(Icons.person, color: _avatarIconColor.withOpacity(_avatarIconOpacity)),
+              ),
+            ),
+        ],
+      ),
+    );
+  },
+),
+
+
 ),
 
                Padding(
@@ -1353,13 +1476,46 @@ void _showContextDialog() async {
   // Aggiorna i contesti dal backend prima di aprire il dialog
   await _loadAvailableContexts(); // Carica nuovamente i contesti disponibili dal backend
 
+  // Inizializza la lista filtrata con tutti i contesti disponibili
+  List<ContextMetadata> _filteredContexts = List.from(_availableContexts);
+
+  // Controller per la barra di ricerca
+  TextEditingController _searchController = TextEditingController();
+
   showDialog(
     context: context,
     builder: (BuildContext context) {
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter setState) {
+          // Funzione per filtrare i contesti
+          void _filterContexts(String query) {
+            setState(() {
+              _filteredContexts = _availableContexts.where((context) {
+                return context.path.toLowerCase().contains(query.toLowerCase());
+              }).toList();
+            });
+          }
+
           return AlertDialog(
-            title: Text('Seleziona Contesti e Modello'),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Seleziona Contesti e Modello'),
+                SizedBox(height: 20), // Aggiunto spazio maggiore tra il titolo e la barra di ricerca
+                // Barra di ricerca
+                TextField(
+                  controller: _searchController,
+                  onChanged: (value) => _filterContexts(value), // Filtra i contesti
+                  decoration: InputDecoration(
+                    hintText: 'Cerca contesti...',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             backgroundColor: Colors.white,
             elevation: 6, // Intensità dell'ombra
             shape: RoundedRectangleBorder(
@@ -1375,48 +1531,120 @@ void _showContextDialog() async {
                     children: [
                       // Lista scrollabile con checkbox per la selezione multipla dei contesti
                       Container(
-                        height: 300, // Altezza massima per la sezione scrollabile
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: _availableContexts.length,
-                          itemBuilder: (context, index) {
-                            final contextMetadata = _availableContexts[index];
-                            final isSelected = _selectedContexts.contains(contextMetadata.path);
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.black54, width: 1.0), // Bordo scuro sottile
+                          borderRadius: BorderRadius.circular(4), // Angoli arrotondati
+                        ),
+                        padding: EdgeInsets.all(8), // Padding interno al riquadro
+                        child: Container(
+                          height: 300, // Altezza massima per la sezione scrollabile
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _filteredContexts.length, // Usa i contesti filtrati
+                            itemBuilder: (context, index) {
+                              final contextMetadata = _filteredContexts[index];
+                              final isSelected = _selectedContexts.contains(contextMetadata.path);
 
-                            return CheckboxListTile(
-                              title: Text(
-                                contextMetadata.path,
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Color.fromARGB(255, 85, 107, 37) // Testo verde se selezionato
-                                      : Colors.black, // Testo nero di default
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              return CheckboxListTile(
+                                title: Text(
+                                  contextMetadata.path,
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Color.fromARGB(255, 85, 107, 37) // Testo verde se selezionato
+                                        : Colors.black, // Testo nero di default
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
                                 ),
-                              ),
-                              value: isSelected, // Stato del checkbox (se selezionato o no)
-                              onChanged: (bool? selected) {
-                                setState(() {
-                                  if (selected == true) {
-                                    _selectedContexts.add(contextMetadata.path); // Aggiungi alla lista selezionata
-                                  } else {
-                                    _selectedContexts.remove(contextMetadata.path); // Rimuovi dalla lista selezionata
-                                  }
-                                });
-                              },
-                              activeColor: Color.fromARGB(255, 85, 107, 37), // Colore del checkbox selezionato
-                              checkColor: Colors.white, // Colore del segno di spunta
-                            );
-                          },
+                                value: isSelected, // Stato del checkbox (se selezionato o no)
+                                onChanged: (bool? selected) {
+                                  setState(() {
+                                    if (selected == true) {
+                                      _selectedContexts.add(contextMetadata.path); // Aggiungi alla lista selezionata
+                                    } else {
+                                      _selectedContexts.remove(contextMetadata.path); // Rimuovi dalla lista selezionata
+                                    }
+                                  });
+                                },
+                                activeColor: Color.fromARGB(255, 85, 107, 37), // Colore del checkbox selezionato
+                                checkColor: Colors.white, // Colore del segno di spunta
+                              );
+                            },
+                          ),
                         ),
                       ),
                       SizedBox(height: 16.0), // Spaziatura tra la lista e il resto del contenuto
                       // Selettore del modello (es. GPT-4o, GPT-4o-mini)
-                      Text(
+                      /*Text(
                         'Seleziona Modello',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),*/
+                      //SizedBox(height: 8.0),
+                      // Pulsanti per selezionare il modello
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly, // Distribuzione equa nella riga
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                              child: ChoiceChip(
+                                label: Center(child: Text('gpt-4o')),
+                                selected: _selectedModel == 'gpt-4o',
+                                onSelected: (bool selected) {
+                                  setState(() {
+                                    _selectedModel = 'gpt-4o';
+                                    set_context(_selectedContexts, _selectedModel);
+                                  });
+                                },
+                                selectedColor: Color.fromARGB(255, 85, 107, 37), // Colore selezionato
+                                backgroundColor: Colors.grey[200], // Colore di default
+                                labelStyle: TextStyle(
+                                  color: _selectedModel == 'gpt-4o' ? Colors.white : Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                              child: ChoiceChip(
+                                label: Center(child: Text('gpt-4o-mini')),
+                                selected: _selectedModel == 'gpt-4o-mini',
+                                onSelected: (bool selected) {
+                                  setState(() {
+                                    _selectedModel = 'gpt-4o-mini';
+                                    set_context(_selectedContexts, _selectedModel);
+                                  });
+                                },
+                                selectedColor: Color.fromARGB(255, 85, 107, 37), // Colore selezionato
+                                backgroundColor: Colors.grey[200], // Colore di default
+                                labelStyle: TextStyle(
+                                  color: _selectedModel == 'gpt-4o-mini' ? Colors.white : Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                              child: ChoiceChip(
+                                label: Center(child: Text('qwen2-7b')),
+                                selected: _selectedModel == 'qwen2-7b',
+                                onSelected: (bool selected) {
+                                  setState(() {
+                                    _selectedModel = 'qwen2-7b';
+                                    set_context(_selectedContexts, _selectedModel);
+                                  });
+                                },
+                                selectedColor: Color.fromARGB(255, 85, 107, 37), // Colore selezionato
+                                backgroundColor: Colors.grey[200], // Colore di default
+                                labelStyle: TextStyle(
+                                  color: _selectedModel == 'qwen2-7b' ? Colors.white : Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      SizedBox(height: 8.0),
-                      _buildModelSelector(setState), // Usa la funzione per creare i chip del modello
                     ],
                   ),
                 ),
@@ -1444,6 +1672,7 @@ void _showContextDialog() async {
     },
   );
 }
+
 
 
 

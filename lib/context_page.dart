@@ -35,26 +35,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Map<String, bool> _isLoadingMap = {}; // Stato di caricamento per ciascun contesto
   Map<String, String?> _loadingFileNamesMap = {}; // Nome del file in caricamento per ciascun contesto
+// Controller per le due barre di ricerca
+TextEditingController _nameSearchController = TextEditingController(); // Per la ricerca per nome
+TextEditingController _descriptionSearchController = TextEditingController(); // Per la ricerca per descrizione
+
+// Lista dei contesti filtrati
+List<ContextMetadata> _filteredContexts = [];
 
   @override
   void initState() {
     super.initState();
     _loadContexts();
   }
+/// Restituisce un'icona basata sull'estensione del file.
+Map<String, dynamic> _getIconForFileType(String fileName) {
+  String extension = fileName.split('.').last.toLowerCase();
+
+  switch (extension) {
+    case 'pdf':
+      return {'icon': Icons.picture_as_pdf, 'color': Colors.red};
+    case 'docx':
+    case 'doc':
+      return {'icon': Icons.article, 'color': Colors.blue};
+    case 'xlsx':
+    case 'xls':
+      return {'icon': Icons.table_chart, 'color': Colors.green};
+    case 'pptx':
+    case 'ppt':
+      return {'icon': Icons.slideshow, 'color': Colors.orange};
+    case 'txt':
+      return {'icon': Icons.text_snippet, 'color': Colors.grey};
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+      return {'icon': Icons.image, 'color': Colors.purple};
+    case 'zip':
+    case 'rar':
+      return {'icon': Icons.folder_zip, 'color': Colors.brown};
+    default:
+      return {'icon': Icons.insert_drive_file, 'color': Colors.grey};
+  }
+}
 
   // Funzione per caricare i contesti
-  Future<void> _loadContexts() async {
-    try {
-      final contexts = await _apiSdk.listContexts();
-      if (mounted) {
-        setState(() {
-          _contexts = contexts;
-        });
-      }
-    } catch (e) {
-      print('Errore nel recupero dei contesti: $e');
+Future<void> _loadContexts() async {
+  try {
+    final contexts = await _apiSdk.listContexts();
+    if (mounted) {
+      setState(() {
+        _contexts = contexts;
+        _filteredContexts = List.from(_contexts); // Inizializza la lista filtrata
+      });
     }
+  } catch (e) {
+    print('Errore nel recupero dei contesti: $e');
   }
+}
+void _filterContexts() {
+  final nameQuery = _nameSearchController.text.toLowerCase();
+  final descriptionQuery = _descriptionSearchController.text.toLowerCase();
+
+  setState(() {
+    _filteredContexts = _contexts.where((context) {
+      final name = context.path.toLowerCase();
+      final description = (context.customMetadata?['description'] ?? '').toLowerCase();
+      return name.contains(nameQuery) && description.contains(descriptionQuery);
+    }).toList();
+  });
+}
 
   // Funzione per caricare i file di un contesto specifico
   Future<List<Map<String, dynamic>>> _loadFilesForContext(String contextPath) async {
@@ -106,37 +154,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Funzione per gestire l'upload del file per un contesto specifico
-  void _uploadFileForContext(String contextPath) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
+void _uploadFileForContext(String contextPath) async {
+  FilePickerResult? result = await FilePicker.platform.pickFiles();
 
-    if (result != null && result.files.first.bytes != null) {
-      // Aggiorna lo stato di caricamento del contesto
+  if (result != null && result.files.first.bytes != null) {
+    setState(() {
+      // Stato di caricamento del contesto specifico
+      _isLoadingMap[contextPath] = true;
+      _loadingFileNamesMap[contextPath] = result.files.first.name; // Nome del file in caricamento
+    });
+
+    try {
+      await _uploadFile(
+        result.files.first.bytes!,
+        [contextPath],
+        fileName: result.files.first.name,
+      );
+    } catch (e) {
+      print('Errore durante il caricamento: $e');
+    } finally {
       setState(() {
-        _isLoadingMap[contextPath] = true;
-        _loadingFileNamesMap[contextPath] = result.files.first.name;
+        // Rimuovi lo stato di caricamento una volta completato
+        _isLoadingMap.remove(contextPath);
+        _loadingFileNamesMap.remove(contextPath);
       });
-
-      // Esegui il caricamento del file
-      try {
-        await _uploadFile(
-          result.files.first.bytes!,
-          [contextPath],
-          fileName: result.files.first.name,
-        );
-      } catch (e) {
-        print('Errore durante il caricamento: $e');
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoadingMap.remove(contextPath);
-            _loadingFileNamesMap.remove(contextPath);
-          });
-        }
-      }
-    } else {
-      print("Nessun file selezionato");
     }
+  } else {
+    print("Nessun file selezionato");
   }
+}
+
+
 
   // Mostra il dialog per caricare file in contesti multipli
   void _showUploadFileToMultipleContextsDialog() {
@@ -258,58 +306,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Funzione per creare un nuovo contesto e caricare il file obbligatorio
-  Future<void> _createContextAndUploadFile(String name, String description) async {
-    if (_selectedFile == null || _selectedFile!.files.first.bytes == null) {
-      print("Errore: nessun file selezionato.");
-      return;
-    }
+Future<void> _createContextAndUploadFile(String name, String description) async {
+  if (_selectedFile == null || _selectedFile!.files.first.bytes == null) {
+    print("Errore: nessun file selezionato.");
+    return;
+  }
 
-    try {
+  try {
+    setState(() {
+      _isLoading = true;
+      _loadingContext = name;
+      _loadingFileName = _selectedFile!.files.first.name;
+    });
+
+    await _apiSdk.createContext(name, description: description);
+
+    String fileName = _selectedFile!.files.first.name;
+    await _uploadFile(
+      _selectedFile!.files.first.bytes!,
+      [name],
+      description: description,
+      fileName: fileName,
+    );
+
+    setState(() {
+      _contexts.add(ContextMetadata(path: name, customMetadata: {'description': description}));
+      _filteredContexts = List.from(_contexts); // Sincronizza con _contexts
+      _filterContexts(); // Applica i filtri
+    });
+  } catch (e) {
+    print('Errore creazione contesto o caricamento file: $e');
+  } finally {
+    if (mounted) {
       setState(() {
-        _isLoading = true;
-        _loadingContext = name;
-        _loadingFileName = _selectedFile!.files.first.name;
+        _isLoading = false;
+        _loadingContext = null;
+        _loadingFileName = null;
       });
-
-      // Creazione del contesto
-      await _apiSdk.createContext(name, description: description);
-
-      // Caricamento del file nel contesto creato
-      String fileName = _selectedFile!.files.first.name;
-      await _uploadFile(
-        _selectedFile!.files.first.bytes!,
-        [name],
-        description: description,
-        fileName: fileName,
-      );
-
-      _loadContexts(); // Ricarica i contesti dopo aver creato uno nuovo
-    } catch (e) {
-      print('Errore creazione contesto o caricamento file: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _loadingContext = null;
-          _loadingFileName = null;
-        });
-      }
     }
   }
-// Funzione per creare un nuovo contesto senza caricare subito un file
-  Future<void> _createContext(String name, String description) async {
-    try {
-      // Creazione del contesto nell'API
-      await _apiSdk.createContext(name, description: description);
+}
 
-      // Aggiunge il nuovo contesto manualmente alla lista dei contesti
-      setState(() {
-        _contexts.add(ContextMetadata(path: name, customMetadata: {'description': description}));
-      });
-    } catch (e) {
-      print('Errore creazione contesto: $e');
-    }
+Future<void> _createContext(String name, String description) async {
+  try {
+    await _apiSdk.createContext(name, description: description);
+
+    setState(() {
+      _contexts.add(ContextMetadata(path: name, customMetadata: {'description': description}));
+      _filteredContexts = List.from(_contexts); // Sincronizza con _contexts
+      _filterContexts(); // Applica i filtri
+    });
+  } catch (e) {
+    print('Errore creazione contesto: $e');
   }
+}
+
   // Funzione per mostrare il dialog per creare un contesto con caricamento obbligatorio di un file
   // Funzione per mostrare il dialog per creare un contesto senza obbligo di caricare un file subito
   void _showCreateContextDialog() {
@@ -367,118 +418,199 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 
 void _showFilesForContextDialog(String contextPath) async {
+  // Carica i file per il contesto selezionato
   List<Map<String, dynamic>> filesForContext = await _loadFilesForContext(contextPath);
 
+  // Trova la descrizione associata al contesto corrente
+  final selectedContext = _contexts.firstWhere(
+    (context) => context.path == contextPath,
+    orElse: () => ContextMetadata(path: '', customMetadata: {}),
+  );
+  final description = selectedContext.customMetadata?['description'] ?? null;
+
+  // Controller per la barra di ricerca
+  TextEditingController searchController = TextEditingController();
+
+  // Lista dei file filtrati
+  List<Map<String, dynamic>> filteredFiles = List.from(filesForContext);
+
+  // Funzione per filtrare i file
+  void _filterFiles(String query) {
+    filteredFiles = filesForContext.where((file) {
+      final fileName = (file['path'] ?? '').toLowerCase();
+      return fileName.contains(query.toLowerCase());
+    }).toList();
+  }
+
+  // Mostra il dialog
   showDialog(
     context: context,
     builder: (context) {
-      return AlertDialog(
-        title: Row(
+      return StatefulBuilder(
+        builder: (BuildContext context, StateSetter setState) {
+          return AlertDialog(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  contextPath,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                SizedBox(height: 8.0),
+                if (description != null)
+                  Text(
+                    description,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.normal,
+                      color: Colors.grey[600],
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                SizedBox(height: 16.0),
+                // Barra di ricerca
+                TextField(
+                  controller: searchController,
+                  onChanged: (value) {
+                    // Aggiorna i risultati del filtro
+                    setState(() {
+                      _filterFiles(value);
+                    });
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Cerca file...',
+                    prefixIcon: Icon(Icons.search),
+                    contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4.0),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.white,
+            elevation: 6,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(4),
+            ),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 400, maxHeight: 800),
+              child: Container(
+                width: double.maxFinite,
+                child: filteredFiles.isEmpty
+                    ? Text('Nessun file trovato per questo contesto.')
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: filteredFiles.length,
+                        itemBuilder: (context, index) {
+                          String filePath = filteredFiles[index]['path'];
+                          List<String> pathSegments = filePath.split('/');
+                          String fileName = pathSegments.isNotEmpty
+                              ? pathSegments.last
+                              : 'Sconosciuto';
+                          String fileUUID = filteredFiles[index]['custom_metadata']
+                                  ['file_uuid'] ??
+                              'Sconosciuto';
+                          String fileType = filteredFiles[index]['custom_metadata']
+                                  ['type'] ??
+                              'Sconosciuto';
+                          String uploadDate = filteredFiles[index]
+                                  ['custom_metadata']['upload_date'] ??
+                              'Sconosciuto';
+                          String fileSize = filteredFiles[index]['custom_metadata']
+                                  ['size'] ??
+                              'Sconosciuto';
+
+                       return Card(
+  color: Colors.white,
+  elevation: 6,
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(4),
+  ),
+  child: Padding(
+    padding: const EdgeInsets.all(8.0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Riga superiore: Nome file e icona rappresentativa
+        Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Nome del file
             Expanded(
               child: Text(
-                contextPath,
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                maxLines: 2, // Consenti un massimo di due righe
-                overflow: TextOverflow.ellipsis, // Troncamento se necessario
+                fileName,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            IconButton(
-              icon: Icon(Icons.upload_file),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _uploadFileForContext(contextPath);
-              },
+            // Icona del file
+            Icon(
+              _getIconForFileType(fileName)['icon'], // Ottieni l'icona
+              size: 32,
+              color: _getIconForFileType(fileName)['color'], // Ottieni il colore
             ),
           ],
         ),
-        backgroundColor: Colors.white, // Sfondo del popup
-        elevation: 6, // Intensità dell'ombra
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
-        ),
-        content: Container(
-          width: double.maxFinite,
-          child: filesForContext.isEmpty
-              ? Text('Nessun file trovato per questo contesto.')
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: filesForContext.length,
-                  itemBuilder: (context, index) {
-                    String filePath = filesForContext[index]['path'];
-                    List<String> pathSegments = filePath.split('/');
-                    String fileName = pathSegments.isNotEmpty
-                        ? pathSegments.last
-                        : 'Sconosciuto';
-                    String fileUUID = filesForContext[index]['custom_metadata']
-                            ['file_uuid'] ??
-                        'Sconosciuto';
-                    String fileType = filesForContext[index]['custom_metadata']
-                            ['type'] ??
-                        'Sconosciuto';
-                    String uploadDate = filesForContext[index]
-                            ['custom_metadata']['upload_date'] ??
-                        'Sconosciuto';
-                    String fileSize = filesForContext[index]['custom_metadata']
-                            ['size'] ??
-                        'Sconosciuto';
-
-                    return Card(
-                      color: Colors.white,
-                      elevation: 6,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              fileName,
-                              style: TextStyle(
-                                  fontSize: 14, fontWeight: FontWeight.bold),
-                            ),
-                            SizedBox(height: 5),
-                            Text('Tipo: $fileType'),
-                            Text('Dimensione: $fileSize'),
-                            Text('Data di caricamento: $uploadDate'),
-                            Text('ID: $fileUUID'),
-                            Align(
-                              alignment: Alignment.bottomRight,
-                              child: IconButton(
-                                icon: Icon(Icons.delete),
-                                onPressed: () async {
-                                  await _deleteFile(fileUUID);
-                                  setState(() {
-                                    filesForContext.removeAt(index);
-                                  });
-                                  Navigator.of(context).pop();
-                                  _showFilesForContextDialog(contextPath);
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
+        SizedBox(height: 5),
+        // Dettagli aggiuntivi del file
+        Text('Tipo: $fileType'),
+        Text('Dimensione: $fileSize'),
+        Text('Data di caricamento: $uploadDate'),
+        // Spazio per spostare il cestino in basso
+        Spacer(),
+        // Cestino in basso a destra
+        Align(
+          alignment: Alignment.bottomRight,
+          child: IconButton(
+            icon: Icon(Icons.delete, color: Colors.black), // Cestino nero
+            onPressed: () async {
+              await _deleteFile(fileUUID); // Funzione per eliminare il file
+              setState(() {
+                filesForContext.removeWhere(
+                    (file) => file['custom_metadata']['file_uuid'] == fileUUID);
+                _filterFiles(searchController.text); // Aggiorna la lista filtrata
+              });
             },
-            child: Text('Chiudi'),
           ),
-        ],
+        ),
+      ],
+    ),
+  ),
+);
+
+
+                        },
+                      ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: Text('Chiudi'),
+              ),
+            ],
+          );
+        },
       );
     },
   );
 }
+
 
 
   @override
@@ -495,8 +627,9 @@ void _showFilesForContextDialog(String contextPath) async {
           children: [
             //Text('Gestione dei Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             //SizedBox(height: 10),
-           Row(
-  mainAxisAlignment: MainAxisAlignment.spaceBetween, // Cambia l'allineamento per separare il testo e il pulsante
+// Titolo e pulsante "Nuovo Contesto"
+Row(
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
   children: [
     Text('Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
     ElevatedButton(
@@ -505,40 +638,86 @@ void _showFilesForContextDialog(String contextPath) async {
     ),
   ],
 ),
-            SizedBox(height: 10),
-            Expanded(
-              flex: 1,
-              child: GridView.builder(
-                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-  maxCrossAxisExtent: 300,  // Dimensione massima per ciascuna scheda
-  crossAxisSpacing: 10,     // Spaziatura tra le colonne
-  mainAxisSpacing: 10,      // Spaziatura tra le righe
-  childAspectRatio: 1.5,      // Proporzione larghezza/altezza delle schede
-),
-                itemCount: _contexts.length,
-                itemBuilder: (context, index) {
-                  Map<String, dynamic>? metadata = _contexts[index].customMetadata;
-                  List<Widget> metadataWidgets = [];
+SizedBox(height: 10),
 
-                  if (metadata != null) {
-                    metadata.forEach((key, value) {
-                      metadataWidgets.add(
-                        Padding(
-                          padding: const EdgeInsets.only(top: 5.0),
-                          child: Text(
-                            '$key: ${value.toString().length > 20 ? value.toString().substring(0, 20) + '...' : value.toString()}',
-                            style: TextStyle(fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      );
-                    });
-                  }
+// Barre di ricerca
+Row(
+  children: [
+    // Barra di ricerca per i nomi
+    Expanded(
+      child: TextField(
+        controller: _nameSearchController,
+        onChanged: (value) {
+          _filterContexts(); // Aggiorna i risultati del filtro
+        },
+        decoration: InputDecoration(
+          hintText: 'Cerca per nome...',
+          prefixIcon: Icon(Icons.search),
+          contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4.0),
+          ),
+        ),
+      ),
+    ),
+    SizedBox(width: 10), // Spazio tra le due barre
+
+    // Barra di ricerca per le descrizioni
+    Expanded(
+      child: TextField(
+        controller: _descriptionSearchController,
+        onChanged: (value) {
+          _filterContexts(); // Aggiorna i risultati del filtro
+        },
+        decoration: InputDecoration(
+          hintText: 'Cerca per descrizione...',
+          prefixIcon: Icon(Icons.search),
+          contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4.0),
+          ),
+        ),
+      ),
+    ),
+  ],
+),
+SizedBox(height: 10),
+
+            SizedBox(height: 10),
+Expanded(
+  flex: 1,
+  child: GridView.builder(
+    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 300,  // Dimensione massima per ciascuna scheda
+      crossAxisSpacing: 10,     // Spaziatura tra le colonne
+      mainAxisSpacing: 10,      // Spaziatura tra le righe
+      childAspectRatio: 1.5,    // Proporzione larghezza/altezza delle schede
+    ),
+    itemCount: _filteredContexts.length, // Usa la lista filtrata
+    itemBuilder: (context, index) {
+      final contextMetadata = _filteredContexts[index]; // Usa un contesto filtrato
+      Map<String, dynamic>? metadata = contextMetadata.customMetadata;
+      List<Widget> metadataWidgets = [];
+
+      if (metadata != null) {
+        metadata.forEach((key, value) {
+          metadataWidgets.add(
+            Padding(
+              padding: const EdgeInsets.only(top: 5.0),
+              child: Text(
+                '$key: ${value.toString().length > 20 ? value.toString().substring(0, 20) + '...' : value.toString()}',
+                style: TextStyle(fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          );
+        });
+      }
 
 return GestureDetector(
   onTap: () {
-    _showFilesForContextDialog(_contexts[index].path);
+    _showFilesForContextDialog(contextMetadata.path);
   },
   child: Card(
     color: Colors.white,
@@ -555,27 +734,56 @@ return GestureDetector(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    // Calcola il massimo spazio disponibile per il titolo
-                    double maxWidth = constraints.maxWidth;
-
-                    return Text(
-                      _contexts[index].path,
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Nome del contesto
+                    Text(
+                      contextMetadata.path,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      softWrap: false,
-                    );
-                  },
+                    ),
+                    // Rotella di caricamento e nome del file (se in caricamento)
+                    if (_isLoadingMap[contextMetadata.path] == true &&
+                        _loadingFileNamesMap[contextMetadata.path] != null)
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 16.0,
+                            height: 16.0,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.0, // Rotella più sottile
+                              color: Colors.blue, // Colore della rotella
+                            ),
+                          ),
+                          SizedBox(width: 8.0),
+                          Expanded(
+                            child: Text(
+                              _loadingFileNamesMap[contextMetadata.path] ?? '',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
               ),
+              // Menu popup per azioni (Carica File ed Elimina Contesto)
               PopupMenuButton<String>(
                 onSelected: (value) {
                   if (value == 'delete') {
-                    _deleteContext(_contexts[index].path);
+                    _deleteContext(contextMetadata.path);
                   } else if (value == 'upload') {
-                    _uploadFileForContext(_contexts[index].path);
+                    _uploadFileForContext(contextMetadata.path);
                   }
                 },
                 itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
@@ -592,32 +800,18 @@ return GestureDetector(
             ],
           ),
           SizedBox(height: 5),
+          // Metadati del contesto
           ...metadataWidgets,
-          if (_isLoadingMap[_contexts[index].path] == true) ...[
-            SizedBox(height: 10),
-            Row(
-              children: [
-                SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  _loadingFileNamesMap[_contexts[index].path] ?? '',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     ),
   ),
 );
-                },
-              ),
-            ),
+
+    },
+  ),
+),
+
           ],
         ),
       ),

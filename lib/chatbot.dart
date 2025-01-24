@@ -55,7 +55,8 @@ final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
   String fullResponse = "";
   bool showKnowledgeBase = false;
 
-  String _selectedContext = "default";  // Variabile per il contesto selezionato
+  //String _selectedContext = "default";  // Variabile per il contesto selezionato
+  List<String> _selectedContexts = []; // Variabile per memorizzare i contesti selezionati
   final ContextApiSdk _contextApiSdk = ContextApiSdk();  // Istanza dell'SDK per le API dei contesti
   List<ContextMetadata> _availableContexts = [];  // Lista dei contesti caricati dal backend
 
@@ -112,7 +113,8 @@ Future<void> _loadConfig() async {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag"
+    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    "chatbot_nlp_api": "http://127.0.0.1:8100"
     };
     _nlpApiUrl = data['nlp_api'];
   } catch (e) {
@@ -1346,10 +1348,10 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
   }
 }
 
-// Funzione per aprire il dialog di selezione del contesto e modello
+// Funzione per aprire il dialog di selezione dei contesti e del modello (supporta selezione multipla)
 void _showContextDialog() async {
   // Aggiorna i contesti dal backend prima di aprire il dialog
-  await _loadAvailableContexts(); // Carica di nuovo i contesti disponibili dal database
+  await _loadAvailableContexts(); // Carica nuovamente i contesti disponibili dal backend
 
   showDialog(
     context: context,
@@ -1357,78 +1359,69 @@ void _showContextDialog() async {
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter setState) {
           return AlertDialog(
-            title: Text('Seleziona Contesto e Modello'),
+            title: Text('Seleziona Contesti e Modello'),
             backgroundColor: Colors.white,
             elevation: 6, // Intensità dell'ombra
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
             ),
             content: ConstrainedBox(
-    constraints: BoxConstraints(maxWidth: 600), // Fissa la larghezza massima
-    child: SingleChildScrollView( // Rende l'intero contenuto scrollabile
-              child: Container(
-                width: double.maxFinite, // Permette alla finestra di dialogo di adattarsi alla larghezza disponibile
-                child: Column(
-                  mainAxisSize: MainAxisSize.min, // Imposta le dimensioni minime in base al contenuto
-                  children: [
-                    // Lista scrollabile con schede distribuite verticalmente
-                    Container(
-                      height: 300, // Altezza massima per la sezione scrollabile
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _availableContexts.length,
-                        itemBuilder: (context, index) {
-                          final contextMetadata = _availableContexts[index];
-                          final isSelected = _selectedContext == contextMetadata.path;
+              constraints: BoxConstraints(maxWidth: 600), // Limita la larghezza massima del dialog
+              child: SingleChildScrollView( // Rende l'intero contenuto scrollabile
+                child: Container(
+                  width: double.maxFinite, // Consente al contenuto di occupare la larghezza disponibile
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min, // Dimensioni minime in base al contenuto
+                    children: [
+                      // Lista scrollabile con checkbox per la selezione multipla dei contesti
+                      Container(
+                        height: 300, // Altezza massima per la sezione scrollabile
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: _availableContexts.length,
+                          itemBuilder: (context, index) {
+                            final contextMetadata = _availableContexts[index];
+                            final isSelected = _selectedContexts.contains(contextMetadata.path);
 
-                          return GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedContext = contextMetadata.path; // Aggiorna immediatamente il contesto selezionato
-                                set_context(_selectedContext, _selectedModel); // Passa il contesto e il modello selezionati
-                              });
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.all(4.0), // Spaziatura tra le schede
-                              padding: const EdgeInsets.all(12.0),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: isSelected
-                                      ? Color.fromARGB(255, 85, 107, 37) // Colore del bordo se selezionato
-                                      : Colors.transparent,
-                                  width: 1.0,
-                                ),
-                                borderRadius: BorderRadius.circular(4.0), // Bordi arrotondati
-                                color: Colors.white,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.grey.withOpacity(0.3),
-                                    blurRadius: 2.5,
-                                    spreadRadius: 1.0,
-                                  ),
-                                ],
-                              ),
-                              width: 300, // Larghezza fissa per ogni scheda
-                              child: Text(
+                            return CheckboxListTile(
+                              title: Text(
                                 contextMetadata.path,
                                 style: TextStyle(
                                   color: isSelected
-                                      ? Color.fromARGB(255, 85, 107, 37) // Colore del testo se selezionato
-                                      : Colors.black,
+                                      ? Color.fromARGB(255, 85, 107, 37) // Testo verde se selezionato
+                                      : Colors.black, // Testo nero di default
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                 ),
-                                textAlign: TextAlign.center,
                               ),
-                            ),
-                          );
-                        },
+                              value: isSelected, // Stato del checkbox (se selezionato o no)
+                              onChanged: (bool? selected) {
+                                setState(() {
+                                  if (selected == true) {
+                                    _selectedContexts.add(contextMetadata.path); // Aggiungi alla lista selezionata
+                                  } else {
+                                    _selectedContexts.remove(contextMetadata.path); // Rimuovi dalla lista selezionata
+                                  }
+                                });
+                              },
+                              activeColor: Color.fromARGB(255, 85, 107, 37), // Colore del checkbox selezionato
+                              checkColor: Colors.white, // Colore del segno di spunta
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 16.0), // Spaziatura tra la lista e il resto del contenuto
-                  ],
+                      SizedBox(height: 16.0), // Spaziatura tra la lista e il resto del contenuto
+                      // Selettore del modello (es. GPT-4o, GPT-4o-mini)
+                      Text(
+                        'Seleziona Modello',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 8.0),
+                      _buildModelSelector(setState), // Usa la funzione per creare i chip del modello
+                    ],
+                  ),
                 ),
               ),
-            )),
+            ),
             actions: [
               ElevatedButton(
                 child: Text('Annulla'),
@@ -1439,7 +1432,8 @@ void _showContextDialog() async {
               ElevatedButton(
                 child: Text('Conferma'),
                 onPressed: () {
-                  set_context(_selectedContext, _selectedModel); // Salva il contesto e il modello selezionato
+                  // Salva i contesti selezionati e il modello
+                  set_context(_selectedContexts, _selectedModel); // Chiama `set_context` con più contesti
                   Navigator.of(context).pop(); // Chiudi il dialog
                 },
               ),
@@ -1450,6 +1444,7 @@ void _showContextDialog() async {
     },
   );
 }
+
 
 
 // Funzione per creare il selettore di modelli
@@ -1467,7 +1462,7 @@ Widget _buildModelSelector(StateSetter setState) {
           setState(() {
             _selectedModel = model;  // Aggiorna il modello selezionato
             // Passa anche il contesto selezionato ogni volta che cambia il modello
-            set_context(_selectedContext, _selectedModel);
+            set_context(_selectedContexts, _selectedModel);
           });
         },
         selectedColor: Color.fromARGB(255, 85, 107, 37),  // Colore selezionato
@@ -1480,21 +1475,20 @@ Widget _buildModelSelector(StateSetter setState) {
   );
 }
 
-void set_context(String context, String model) async {
+void set_context(List<String> contexts, String model) async {
   try {
-    // Chiama la funzione dell'SDK per configurare e caricare la chain con il contesto selezionato
-    final response = await _contextApiSdk.configureAndLoadChain(context, model);
-    print('Chain configurata e caricata con successo per il contesto: $context');
+    // Chiama la funzione dell'SDK per configurare e caricare la chain con i contesti selezionati
+    final response = await _contextApiSdk.configureAndLoadChain(contexts, model);
+    print('Chain configurata e caricata con successo per i contesti: $contexts');
     print('Risultato della configurazione: $response');
 
     setState(() {
-      _selectedContext = context;  // Aggiorna la variabile con il contesto selezionato
+      _selectedContexts = contexts; // Aggiorna la lista dei contesti selezionati
     });
   } catch (e) {
     print('Errore nella configurazione e caricamento della chain: $e');
   }
 }
-
 
   // Sezione impostazioni TTS e customizzazione grafica nella barra laterale
   Widget _buildSettingsSection() {
@@ -1776,8 +1770,8 @@ void set_context(String context, String model) async {
 Future<void> _sendMessageToAPI(String input) async {
   if (_nlpApiUrl == null) await _loadConfig();  // Assicurati di caricare l'URL se non è già stato caricato
 
-final url = "$_nlpApiUrl/chains/stream_chain";  // Usa l'URL caricato dal JSON
-  final chainId = "${_selectedContext}_qa_chain";
+final url = "$_nlpApiUrl/chains/stream_events_chain";  // Usa l'URL caricato dal JSON
+  final chainId = "${_selectedContexts.join('')}_agent_with_tools";
 
   final payload = jsonEncode({
     "chain_id": chainId,
@@ -1827,8 +1821,12 @@ final url = "$_nlpApiUrl/chains/stream_chain";  // Usa l'URL caricato dal JSON
 
           final bytes = _convertJSArrayBufferToDartUint8List(value);
           final chunkString = utf8.decode(bytes);
-          nonDecodedChunk += chunkString;
-
+          //nonDecodedChunk += chunkString;
+                            setState(() {
+                    fullResponse += chunkString;
+                    messages[messages.length - 1]['content'] =
+                        fullResponse + "▌";
+                  });
           try {
             if (nonDecodedChunk.contains('"answer":')) {
               final splitChunks = nonDecodedChunk.split('\n');

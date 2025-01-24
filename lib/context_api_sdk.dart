@@ -57,7 +57,8 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag"
+        //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    "chatbot_nlp_api": "http://127.0.0.1:8100"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }
@@ -212,29 +213,44 @@ class ContextApiSdk {
     }
   }
 
-  // Metodo per configurare e caricare una chain basata su un contesto
-  Future<Map<String, dynamic>> configureAndLoadChain(String context, String model) async {
+  /// Metodo aggiornato per supportare la nuova versione dell'endpoint
+  Future<Map<String, dynamic>> configureAndLoadChain(List<String> contexts, String model) async {
     if (baseUrl == null) await loadConfig();
 
-    // Costruiamo l'URL con il parametro context nella query string
-    final uri = Uri.parse('$baseUrl/configure_and_load_chain/?context=$context&model=$model');
+    // Costruisci l'URI dell'endpoint
+    final uri = Uri.parse('$baseUrl/configure_and_load_chain/');
 
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',  // Impostiamo l'header per l'invio di JSON
-      },
-    );
+    // Costruisci il corpo della richiesta (invio dati in formato JSON)
+    final body = {
+      'contexts': contexts,
+      'model_name': model,
+    };
 
-    if (response.statusCode == 200) {
-      // Restituiamo la risposta in formato JSON se la richiesta ha successo
-      return jsonDecode(response.body);
-    } else {
-      // Gestiamo l'errore nel caso in cui lo stato della risposta non sia 200
-      throw ApiException('Errore durante la configurazione e il caricamento della chain: ${response.body}');
+    try {
+      // Effettua la richiesta POST
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json', // Cambia il Content-Type per supportare JSON
+        },
+        body: jsonEncode(body), // Serializza il body come JSON
+      );
+
+      if (response.statusCode == 200) {
+        // Restituisce il risultato della configurazione e caricamento della chain
+        return jsonDecode(response.body);
+      } else {
+        // Gestisce errori di configurazione e caricamento
+        final errorResponse = jsonDecode(response.body);
+        throw ApiException(
+            'Errore durante la configurazione e il caricamento della chain: ${errorResponse['detail'] ?? response.body}');
+      }
+    } catch (e) {
+      // Gestione errori generali
+      throw ApiException('Errore durante la chiamata all\'API: $e');
     }
   }
-
+  
   Future<void> downloadFile(String fileId) async {
     if (baseUrl == null) await loadConfig();
 

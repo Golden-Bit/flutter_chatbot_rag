@@ -748,32 +748,7 @@ return GestureDetector(
                       overflow: TextOverflow.ellipsis,
                     ),
                     // Rotella di caricamento e nome del file (se in caricamento)
-                    if (_isLoadingMap[contextMetadata.path] == true &&
-                        _loadingFileNamesMap[contextMetadata.path] != null)
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 16.0,
-                            height: 16.0,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.0, // Rotella più sottile
-                              color: Colors.blue, // Colore della rotella
-                            ),
-                          ),
-                          SizedBox(width: 8.0),
-                          Expanded(
-                            child: Text(
-                              _loadingFileNamesMap[contextMetadata.path] ?? '',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
+
                   ],
                 ),
               ),
@@ -802,6 +777,33 @@ return GestureDetector(
           SizedBox(height: 5),
           // Metadati del contesto
           ...metadataWidgets,
+          SizedBox(height: 5),
+                              if (_isLoadingMap[contextMetadata.path] == true &&
+                        _loadingFileNamesMap[contextMetadata.path] != null)
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 16.0,
+                            height: 16.0,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.0, // Rotella più sottile
+                              color: Colors.blue, // Colore della rotella
+                            ),
+                          ),
+                          SizedBox(width: 8.0),
+                          Expanded(
+                            child: Text(
+                              _loadingFileNamesMap[contextMetadata.path] ?? '',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
         ],
       ),
     ),

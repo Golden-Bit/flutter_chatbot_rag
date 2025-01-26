@@ -47,7 +47,7 @@ class ChatBotPage extends StatefulWidget {
 }
 
 class _ChatBotPageState extends State<ChatBotPage> {
-  List<Map<String, String>> messages = [];
+  List<Map<String, dynamic>> messages = [];
   
 final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
 
@@ -295,49 +295,77 @@ void initState() {
   );
 }
 
-void _showMessageInfoDialog(Map<String, String> message) {
-  final String role = message['role'] ?? 'unknown';
-  final String createdAt = message['createdAt'] ?? 'N/A';
-  final int contentLength = (message['content'] ?? '').length;
+void _showMessageInfoDialog(Map<String, dynamic> message) {
+  final String role = message['role'] ?? 'unknown'; // Ruolo del messaggio
+  final String createdAt = message['createdAt'] ?? 'N/A'; // Data di creazione
+  final int contentLength = (message['content'] ?? '').length; // Lunghezza contenuto
 
-  // Dati specifici per i messaggi dell'AI
-  final String? chainId = role == 'assistant' ? 'Esempio_Chain_ID' : null; // Inserisci il Chain ID corretto
-  final String? model = role == 'assistant' ? _selectedModel : null;
-  final int tokensReceived = role == 'assistant' ? 0 : 0; // Cambia con il valore reale
-  final int tokensGenerated = role == 'assistant' ? 0 : 0; // Cambia con il valore reale
-  final double responseCost = role == 'assistant' ? 0.0 : 0.0; // Cambia con il valore reale
+  // Estrai la configurazione dell'agente dal messaggio, se presente
+  final Map<String, dynamic>? agentConfig = message['agentConfig'];
+
+  // Informazioni di configurazione dell'agente
+  final String? model = agentConfig?['model']; // Modello selezionato
+  final List<String>? contexts = List<String>.from(agentConfig?['contexts'] ?? []);
+  final String? chainId = agentConfig?['chain_id'];
+
+  // Altri dettagli (aggiustabili secondo il caso)
+  final int tokensReceived = role == 'assistant' ? 0 : 0; // Modifica se disponi di dati token reali
+  final int tokensGenerated = role == 'assistant' ? 0 : 0; // Modifica se disponi di dati token reali
+  final double responseCost = role == 'assistant' ? 0.0 : 0.0; // Modifica se disponi di dati reali
 
   showDialog(
     context: context,
     builder: (BuildContext context) {
       return AlertDialog(
         title: Text("Dettagli del messaggio"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Ruolo del messaggio
-            Text(
-              "Ruolo: ${role == 'user' ? 'Utente' : 'Assistente'}",
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            // Data di creazione
-            Text("Data: $createdAt"),
-            // Lunghezza in caratteri
-            Text("Lunghezza in caratteri: $contentLength"),
-            // Lunghezza in token (usando un valore fisso al momento)
-            Text("Lunghezza in token: 0"),
-            if (role == 'assistant') ...[
-              const Divider(),
-              // Mostra dettagli specifici dell'AI
-              Text("Modello usato: $model"),
-              Text("Chain ID: $chainId"),
-              Text("Token ricevuti: $tokensReceived"),
-              Text("Token generati: $tokensGenerated"),
-              Text("Costo risposta: \$${responseCost.toStringAsFixed(4)}"),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Dettagli di base del messaggio
+              Text(
+                "Ruolo: ${role == 'user' ? 'Utente' : 'Assistente'}",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text("Data: $createdAt"),
+              Text("Lunghezza in caratteri: $contentLength"),
+              Text("Lunghezza in token: 0"), // Sostituisci se disponi di dati token
+
+              // Divider per separare i dettagli base dai dettagli di configurazione
+              if (role == 'assistant' || agentConfig != null) ...[
+                const Divider(),
+                Text("Dettagli della configurazione dell'agente:",
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+
+                // Mostra il modello selezionato
+                if (model != null) Text("Modello: $model"),
+                const SizedBox(height: 8),
+
+                // Mostra i contesti utilizzati
+                if (contexts != null && contexts.isNotEmpty) ...[
+                  Text("Contesti selezionati:",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  ...contexts.map((context) => Text("- $context")).toList(),
+                ],
+
+                const SizedBox(height: 8),
+
+                // Mostra l'ID della chain
+                if (chainId != null) Text("Chain ID: $chainId"),
+
+                // Divider aggiuntivo per eventuali altri dettagli
+                const Divider(),
+                Text("Metriche aggiuntive:",
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                Text("Token ricevuti: $tokensReceived"),
+                Text("Token generati: $tokensGenerated"),
+                Text("Costo risposta: \$${responseCost.toStringAsFixed(4)}"),
+              ],
             ],
-          ],
+          ),
         ),
         actions: [
           TextButton(
@@ -351,7 +379,6 @@ void _showMessageInfoDialog(Map<String, String> message) {
     },
   );
 }
-
 
   @override
   Widget build(BuildContext context) {
@@ -1273,7 +1300,7 @@ void _loadMessagesForChat(String chatId) {
       messages.clear();
       messages.addAll(chatMessages.map((message) {
         // Assicura che ogni messaggio sia un Map<String, dynamic>
-        return Map<String, String>.from(message);
+        return Map<String, dynamic>.from(message);
       }).toList());
 
       // Forza il passaggio alla schermata delle conversazioni
@@ -1295,34 +1322,42 @@ Future<void> _handleUserInput(String input) async {
 
   final currentTime = DateTime.now().toIso8601String(); // Ora corrente
   final userMessageId = uuid.v4(); // Genera un ID univoco per il messaggio utente
+  final assistantMessageId = uuid.v4(); // Genera un ID univoco per il messaggio dell'assistente
+  final chainId = "${_selectedContexts.join('')}_agent_with_tools"; // ID della chain generata
+
+  // Configurazione dell'agente
+  final agentConfiguration = {
+    'model': _selectedModel, // Modello selezionato
+    'contexts': _selectedContexts, // Contesti selezionati
+    'chain_id': chainId // ID della chain
+  };
 
   setState(() {
-    // Aggiungi il messaggio dell'utente con ID e timestamp
+    // Aggiungi il messaggio dell'utente con le informazioni di configurazione
     messages.add({
-      'id': userMessageId, // ID univoco del messaggio
-      'role': 'user',
-      'content': input,
+      'id': userMessageId, // ID univoco del messaggio utente
+      'role': 'user', // Ruolo dell'utente
+      'content': input, // Contenuto del messaggio
       'createdAt': currentTime, // Timestamp
+      'agentConfig': agentConfiguration, // Configurazione dell'agente
     });
+
     fullResponse = ""; // Reset della risposta completa
-  });
 
-  // Genera un ID per il messaggio placeholder dell'assistente
-  final assistantMessageId = uuid.v4();
-
-  setState(() {
-    // Placeholder per la risposta del bot
+    // Aggiungi un placeholder per la risposta dell'assistente
     messages.add({
       'id': assistantMessageId, // ID univoco del messaggio dell'assistente
-      'role': 'assistant',
-      'content': '',
+      'role': 'assistant', // Ruolo dell'assistente
+      'content': '', // Placeholder per il contenuto
       'createdAt': DateTime.now().toIso8601String(), // Timestamp
+      'agentConfig': agentConfiguration, // Configurazione dell'agente
     });
   });
 
-  _controller.clear(); // Pulisce il campo di input
+  // Pulisce il campo di input
+  _controller.clear();
 
-  // Invia il messaggio all'API
+  // Invia il messaggio all'API per ottenere la risposta
   await _sendMessageToAPI(input);
 
   // Salva la conversazione con ID univoco per ogni messaggio
@@ -1379,6 +1414,15 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
       return Map<String, dynamic>.from(message); // Copia ogni messaggio
     }).toList();
 
+    // Integra le informazioni di configurazione dell'agente nei messaggi
+    updatedMessages.forEach((message) {
+      message['agentConfig'] = {
+        'model': _selectedModel, // Modello selezionato (es. GPT-4)
+        'contexts': _selectedContexts, // Contesti selezionati
+        'chain_id': "${_selectedContexts.join('')}_agent_with_tools", // ID della chain
+      };
+    });
+
     // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
     final currentChat = {
       'id': chatId, // ID della chat
@@ -1395,8 +1439,8 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
       _chatHistory[_activeChatIndex!] = Map<String, dynamic>.from(currentChat); // Copia profonda della chat
     } else {
       // Aggiungi una nuova chat alla lista locale
-      _chatHistory.insert(0, Map<String, dynamic>.from(currentChat)); // Inserisci in cima alla lista //_chatHistory.add(Map<String, dynamic>.from(currentChat)); // Copia profonda della chat
-      _activeChatIndex = 0; //_chatHistory.length - 1;
+      _chatHistory.insert(0, Map<String, dynamic>.from(currentChat)); // Inserisci in cima alla lista
+      _activeChatIndex = 0; // Imposta l'indice della nuova chat
     }
 
     // Salva la cronologia delle chat nel Local Storage
@@ -1470,6 +1514,7 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
     print('Errore durante il salvataggio della conversazione: $e');
   }
 }
+
 
 // Funzione per aprire il dialog di selezione dei contesti e del modello (supporta selezione multipla)
 void _showContextDialog() async {
@@ -1997,21 +2042,42 @@ void set_context(List<String> contexts, String model) async {
   }
 
 Future<void> _sendMessageToAPI(String input) async {
-  if (_nlpApiUrl == null) await _loadConfig();  // Assicurati di caricare l'URL se non è già stato caricato
+  if (_nlpApiUrl == null) await _loadConfig(); // Assicurati che l'URL sia caricato
 
-final url = "$_nlpApiUrl/chains/stream_events_chain";  // Usa l'URL caricato dal JSON
+  // URL della chain API
+  final url = "$_nlpApiUrl/chains/stream_events_chain";
+
+  // ID della chain basato sui contesti selezionati
   final chainId = "${_selectedContexts.join('')}_agent_with_tools";
 
+  // Configurazione dell'agente
+  final agentConfiguration = {
+    'model': _selectedModel, // Modello selezionato
+    'contexts': _selectedContexts, // Contesti selezionati
+    'chain_id': chainId // ID della chain
+  };
+
+  // Prepara il payload da inviare all'API
   final payload = jsonEncode({
     "chain_id": chainId,
     "query": {
       "input": input,
-      "chat_history": messages,
+      "chat_history": messages.map((message) {
+        // Filtra e converte i messaggi in un formato compatibile con l'API
+        return {
+          "id": message['id'],
+          "role": message['role'],
+          "content": message['content'],
+          "createdAt": message['createdAt'],
+          "agentConfig": message['agentConfig'], // Include la configurazione dell'agente
+        };
+      }).toList(),
     },
     "inference_kwargs": {}
   });
 
   try {
+    // Invia la richiesta all'API
     final response = await js_util.promiseToFuture(js_util.callMethod(
       html.window,
       'fetch',
@@ -2021,25 +2087,29 @@ final url = "$_nlpApiUrl/chains/stream_events_chain";  // Usa l'URL caricato dal
           'method': 'POST',
           'headers': {'Content-Type': 'application/json'},
           'body': payload,
-        })
+        }),
       ],
     ));
 
+    // Controlla lo stato della risposta
     final ok = js_util.getProperty(response, 'ok') as bool;
     if (!ok) {
       throw Exception('Network response was not ok');
     }
 
+    // Recupera il corpo della risposta
     final body = js_util.getProperty(response, 'body');
     if (body == null) {
       throw Exception('Response body is null');
     }
 
+    // Ottieni il reader per leggere i chunk della risposta
     final reader = js_util.callMethod(body, 'getReader', []);
 
     String nonDecodedChunk = '';
     fullResponse = '';
 
+    // Funzione per leggere i chunk della risposta
     void readChunk() {
       js_util
           .promiseToFuture(js_util.callMethod(reader, 'read', []))
@@ -2048,15 +2118,18 @@ final url = "$_nlpApiUrl/chains/stream_events_chain";  // Usa l'URL caricato dal
         if (!done) {
           final value = js_util.getProperty(result, 'value');
 
+          // Converti il chunk in una stringa
           final bytes = _convertJSArrayBufferToDartUint8List(value);
           final chunkString = utf8.decode(bytes);
-          //nonDecodedChunk += chunkString;
-                            setState(() {
-                    fullResponse += chunkString;
-                    messages[messages.length - 1]['content'] =
-                        fullResponse + "▌";
-                  });
+
+          setState(() {
+            // Accumula la risposta man mano che arriva
+            fullResponse += chunkString;
+            messages[messages.length - 1]['content'] = fullResponse + "▌";
+          });
+
           try {
+            // Gestione del buffer per il parsing
             if (nonDecodedChunk.contains('"answer":')) {
               final splitChunks = nonDecodedChunk.split('\n');
               for (var line in splitChunks) {
@@ -2072,23 +2145,28 @@ final url = "$_nlpApiUrl/chains/stream_events_chain";  // Usa l'URL caricato dal
                   });
                 }
               }
-              nonDecodedChunk = ''; // Pulisce il buffer
+              nonDecodedChunk = ''; // Pulisci il buffer
             }
           } catch (e) {
             print("Errore durante il parsing del chunk: $e");
           }
 
-          readChunk(); // Legge il chunk successivo
+          // Continua a leggere il prossimo chunk
+          readChunk();
         } else {
-          // Fine lettura: rimuove il cursore "▌" e finalizza la risposta
+          // Fine lettura: finalizza la risposta
           setState(() {
             messages[messages.length - 1]['content'] = fullResponse;
+
+            // Associa la configurazione dell'agente alla risposta completata
+            messages[messages.length - 1]['agentConfig'] = agentConfiguration;
           });
 
           // Salva la conversazione solo dopo che la risposta è stata completata
           _saveConversation(messages);
         }
       }).catchError((error) {
+        // Gestione degli errori durante la lettura del chunk
         print('Errore durante la lettura del chunk: $error');
         setState(() {
           messages[messages.length - 1]['content'] = 'Errore: $error';
@@ -2096,14 +2174,17 @@ final url = "$_nlpApiUrl/chains/stream_events_chain";  // Usa l'URL caricato dal
       });
     }
 
+    // Avvia la lettura dei chunk
     readChunk();
   } catch (e) {
+    // Gestione degli errori durante la richiesta
     print('Errore durante il fetch dei dati: $e');
     setState(() {
       messages[messages.length - 1]['content'] = 'Errore: $e';
     });
   }
 }
+
 
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {

@@ -112,10 +112,10 @@ Future<void> _loadConfig() async {
     //final data = jsonDecode(response);
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
-    //"nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "nlp_api": "http://35.195.200.211:8100",
-    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    "chatbot_nlp_api": "http://127.0.0.1:8100"
+    "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
+    //"nlp_api": "http://35.195.200.211:8100",
+    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    //"chatbot_nlp_api": "http://127.0.0.1:8100"
     };
     _nlpApiUrl = data['nlp_api'];
   } catch (e) {

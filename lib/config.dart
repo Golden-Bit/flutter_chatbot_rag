@@ -10,7 +10,6 @@ config = {
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
     "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag"
 }
-
 */
 
 //34.79.136.231

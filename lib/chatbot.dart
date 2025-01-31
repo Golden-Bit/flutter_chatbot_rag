@@ -386,7 +386,7 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
       backgroundColor: Colors.white,
       appBar: AppBar(
   shadowColor: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
-  elevation: 8.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
+  elevation: 4.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
   title: Text(
     'Teatek Agent',
   style: TextStyle(color: Colors.black), // Cambia il testo in nero
@@ -410,10 +410,10 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
   actions: [
     PopupMenuButton<String>(
       icon: CircleAvatar(
-        backgroundColor: Colors.white, // Sfondo bianco per l'avatar
+        backgroundColor: Colors.black, // Sfondo bianco per l'avatar
         child: Text(
           widget.user.email.substring(0, 2).toUpperCase(), // Prime due lettere della mail in maiuscolo
-          style: TextStyle(color: Colors.black), // Testo nero
+          style: TextStyle(color: Colors.white), // Testo nero
         ),
       ),
       onSelected: (value) {
@@ -515,7 +515,7 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
   duration: Duration(milliseconds: 300), // Animazione per l'espansione e il collasso
   width: sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
   decoration: BoxDecoration(
-    color: Colors.white, // Colonna laterale con colore personalizzato
+    color: Colors.grey[200], // Colonna laterale con colore personalizzato
     boxShadow: [
       BoxShadow(
         color: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
@@ -569,18 +569,18 @@ MouseRegion(
       margin: const EdgeInsets.all(4.0), // Margini laterali
       decoration: BoxDecoration(
         color: _buttonHoveredIndex == 3 || _activeButtonIndex == 3
-            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            ? const Color.fromARGB(255, 224, 224, 224) // Colore scuro durante hover o selezione
             : Colors.transparent, // Sfondo trasparente quando non è attivo
         borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
       ),
       padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
       child: Row(
         children: [
-          Icon(Icons.add, color: Colors.white),
+          Icon(Icons.add, color: Colors.black),
           const SizedBox(width: 8.0),
           Text(
             'Nuova Chat',
-            style: TextStyle(color: Colors.white),
+  style: TextStyle(color: Colors.black), // Cambia colore in nero
           ),
         ],
       ),
@@ -619,18 +619,18 @@ MouseRegion(
       margin: const EdgeInsets.all(4.0), // Margini laterali
       decoration: BoxDecoration(
         color: _buttonHoveredIndex == 0 || _activeButtonIndex == 0
-            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            ? const Color.fromARGB(255, 224, 224, 224) // Colore scuro durante hover o selezione
             : Colors.transparent, // Sfondo trasparente quando non è attivo
         borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
       ),
       padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
       child: Row(
         children: [
-          Icon(Icons.chat, color: Colors.white),
+          Icon(Icons.chat, color: Colors.black),
           const SizedBox(width: 8.0),
           Text(
             'Conversazione',
-            style: TextStyle(color: Colors.white),
+  style: TextStyle(color: Colors.black), // Cambia colore in nero
           ),
         ],
       ),
@@ -668,18 +668,18 @@ MouseRegion(
       margin: const EdgeInsets.all(4.0), // Margini laterali
       decoration: BoxDecoration(
         color: _buttonHoveredIndex == 1 || _activeButtonIndex == 1
-            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            ? const Color.fromARGB(255, 224, 224, 224) // Colore scuro durante hover o selezione
             : Colors.transparent, // Sfondo trasparente quando non è attivo
         borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
       ),
       padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
       child: Row(
         children: [
-          Icon(Icons.book, color: Colors.white),
+          Icon(Icons.book, color: Colors.black),
           const SizedBox(width: 8.0),
           Text(
-            'Basi di conoscenza',
-            style: TextStyle(color: Colors.white),
+            'Knowledge Box',
+  style: TextStyle(color: Colors.black), // Cambia colore in nero
           ),
         ],
       ),
@@ -717,18 +717,18 @@ MouseRegion(
       margin: const EdgeInsets.all(4.0), // Margini laterali
       decoration: BoxDecoration(
         color: _buttonHoveredIndex == 2 || _activeButtonIndex == 2
-            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro durante hover o selezione
+            ? const Color.fromARGB(255, 224, 224, 224) // Colore scuro durante hover o selezione
             : Colors.transparent, // Sfondo trasparente quando non è attivo
         borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
       ),
       padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
       child: Row(
         children: [
-          Icon(Icons.settings, color: Colors.white),
+          Icon(Icons.settings, color: Colors.black),
           const SizedBox(width: 8.0),
           Text(
             'Impostazioni',
-            style: TextStyle(color: Colors.white),
+  style: TextStyle(color: Colors.black), // Cambia colore in nero
           ),
         ],
       ),
@@ -781,7 +781,7 @@ Expanded(
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: Colors.black,
                   ),
                 ),
               ),
@@ -821,7 +821,7 @@ Expanded(
                       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2), // Margini laterali
                       decoration: BoxDecoration(
                         color: isHovered || isActive
-                            ? const Color.fromARGB(255, 15, 59, 16) // Colore scuro per hover o selezione
+                            ? const Color.fromARGB(255, 224, 224, 224) // Colore scuro per hover o selezione
                             : Colors.transparent, // Sfondo trasparente quando non attivo
                         borderRadius: BorderRadius.circular(4.0), // Arrotonda gli angoli
                       ),
@@ -832,7 +832,7 @@ Expanded(
                             child: Text(
                               chatName, // Mostra il nome della chat
                               style: TextStyle(
-                                color: Colors.white,
+                                color: Colors.black,
                                 fontWeight: isActive
                                     ? FontWeight.bold // Evidenzia testo se attivo
                                     : FontWeight.normal,
@@ -843,7 +843,7 @@ Expanded(
                             icon: Icon(
                               Icons.more_horiz,
                               color: (isHovered || isActive)
-                                  ? Colors.white // Colore bianco per l'icona in hover o selezione
+                                  ? Colors.black // Colore bianco per l'icona in hover o selezione
                                   : Colors.transparent, // Nascondi icona se non attivo o in hover
                             ),
                             padding: EdgeInsets.only(right: 4.0), // Riduci margine destro
@@ -1103,10 +1103,10 @@ Row(
       GestureDetector(
         onTap: _showContextDialog,  // Apre il dialog di selezione del contesto
         child: CircleAvatar(
-          backgroundColor: Colors.white,
+          backgroundColor: Colors.black,
           child: Icon(
             Icons.book,  // Usa l'icona analoga alla base di conoscenza
-            color:Color.fromARGB(255, 85, 107, 37),
+            color:Colors.white,
           ),
         ),
       ),
@@ -1120,7 +1120,7 @@ Row(
             labelText: 'Say something...',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(30.0), // Smussa gli angoli
-              borderSide: BorderSide(color: Color.fromARGB(255, 85, 107, 37)), // Bordi colorati
+              borderSide: BorderSide(color: Colors.black), // Bordi colorati
             ),
           ),
           onSubmitted: _handleUserInput,
@@ -1132,7 +1132,7 @@ Row(
       GestureDetector(
         onTap: _listen, // Attiva o disattiva la registrazione vocale
         child: CircleAvatar(
-          backgroundColor: Color.fromARGB(255, 85, 107, 37),
+          backgroundColor: Colors.black,
           child: Icon(
             _isListening ? Icons.mic_off : Icons.mic,
             color: Colors.white,
@@ -1145,7 +1145,7 @@ Row(
       GestureDetector(
         onTap: () => _handleUserInput(_controller.text),
         child: CircleAvatar(
-          backgroundColor: Color.fromARGB(255, 85, 107, 37),
+          backgroundColor: Colors.black,
           child: Icon(
             Icons.send,
             color: Colors.white,
@@ -1599,7 +1599,7 @@ void _showContextDialog() async {
                                   contextMetadata.path,
                                   style: TextStyle(
                                     color: isSelected
-                                        ? Color.fromARGB(255, 85, 107, 37) // Testo verde se selezionato
+                                        ? Colors.black // Testo verde se selezionato
                                         : Colors.black, // Testo nero di default
                                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                   ),
@@ -1614,7 +1614,7 @@ void _showContextDialog() async {
                                     }
                                   });
                                 },
-                                activeColor: Color.fromARGB(255, 85, 107, 37), // Colore del checkbox selezionato
+                                activeColor: Colors.black, // Colore del checkbox selezionato
                                 checkColor: Colors.white, // Colore del segno di spunta
                               );
                             },
@@ -1644,7 +1644,7 @@ void _showContextDialog() async {
                                     set_context(_selectedContexts, _selectedModel);
                                   });
                                 },
-                                selectedColor: Color.fromARGB(255, 85, 107, 37), // Colore selezionato
+                                selectedColor: Colors.grey[700], // Colore selezionato
                                 backgroundColor: Colors.grey[200], // Colore di default
                                 labelStyle: TextStyle(
                                   color: _selectedModel == 'gpt-4o' ? Colors.white : Colors.black,
@@ -1664,7 +1664,7 @@ void _showContextDialog() async {
                                     set_context(_selectedContexts, _selectedModel);
                                   });
                                 },
-                                selectedColor: Color.fromARGB(255, 85, 107, 37), // Colore selezionato
+                                selectedColor: Colors.grey[700], // Colore selezionato
                                 backgroundColor: Colors.grey[200], // Colore di default
                                 labelStyle: TextStyle(
                                   color: _selectedModel == 'gpt-4o-mini' ? Colors.white : Colors.black,
@@ -1684,7 +1684,7 @@ void _showContextDialog() async {
                                     set_context(_selectedContexts, _selectedModel);
                                   });
                                 },
-                                selectedColor: Color.fromARGB(255, 85, 107, 37), // Colore selezionato
+                                selectedColor: Colors.grey[700], // Colore selezionato
                                 backgroundColor: Colors.grey[200], // Colore di default
                                 labelStyle: TextStyle(
                                   color: _selectedModel == 'qwen2-7b' ? Colors.white : Colors.black,
@@ -1743,7 +1743,7 @@ Widget _buildModelSelector(StateSetter setState) {
             set_context(_selectedContexts, _selectedModel);
           });
         },
-        selectedColor: Color.fromARGB(255, 85, 107, 37),  // Colore selezionato
+        selectedColor: Colors.grey[700],  // Colore selezionato
         backgroundColor: Colors.grey[200],  // Colore di default
         labelStyle: TextStyle(
           color: isSelected ? Colors.white : Colors.black,  // Cambia il colore del testo quando selezionato

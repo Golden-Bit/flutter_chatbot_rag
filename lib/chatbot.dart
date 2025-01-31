@@ -216,7 +216,7 @@ void initState() {
   // Funzione per caricare i contesti dal backend
   Future<void> _loadAvailableContexts() async {
     try {
-      List<ContextMetadata> contexts = await _contextApiSdk.listContexts();
+      List<ContextMetadata> contexts = await _contextApiSdk.listContexts(widget.user.username, widget.token.accessToken);
       setState(() {
         _availableContexts = contexts;  // Salva i contesti caricati nello stato
       });
@@ -389,11 +389,11 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
   elevation: 8.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
   title: Text(
     'Teatek Agent',
-    style: TextStyle(color: Colors.white),
+  style: TextStyle(color: Colors.black), // Cambia il testo in nero
   ),
-  backgroundColor: Color.fromARGB(255, 85, 107, 37), // Imposta il colore personalizzato
+  backgroundColor: Colors.white, // Bianco, // Imposta il colore personalizzato
   leading: IconButton(
-    icon: Icon(Icons.menu, color: Colors.white),
+    icon: Icon(Icons.menu, color: Colors.black),
     onPressed: () {
       setState(() {
         isExpanded = !isExpanded; // Alterna collasso ed espansione
@@ -515,7 +515,7 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
   duration: Duration(milliseconds: 300), // Animazione per l'espansione e il collasso
   width: sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
   decoration: BoxDecoration(
-    color: Color.fromARGB(255, 85, 107, 37), // Colonna laterale con colore personalizzato
+    color: Colors.white, // Colonna laterale con colore personalizzato
     boxShadow: [
       BoxShadow(
         color: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
@@ -959,7 +959,10 @@ Expanded(
                 //),
                 //SizedBox(height: 20),  // Spaziatura sotto il titolo
                 Expanded(
-                  child: DashboardScreen(),  // Contenuto della gestione dei contesti
+                  child: DashboardScreen(
+  username: widget.user.username,  // Passa l'username
+  token: widget.token.accessToken, // Passa il token
+),  // Contenuto della gestione dei contesti
                 ),
               ],
             ),
@@ -1100,10 +1103,10 @@ Row(
       GestureDetector(
         onTap: _showContextDialog,  // Apre il dialog di selezione del contesto
         child: CircleAvatar(
-          backgroundColor: Color.fromARGB(255, 85, 107, 37),
+          backgroundColor: Colors.white,
           child: Icon(
             Icons.book,  // Usa l'icona analoga alla base di conoscenza
-            color: Colors.white,
+            color:Color.fromARGB(255, 85, 107, 37),
           ),
         ),
       ),
@@ -1323,12 +1326,13 @@ Future<void> _handleUserInput(String input) async {
   final currentTime = DateTime.now().toIso8601String(); // Ora corrente
   final userMessageId = uuid.v4(); // Genera un ID univoco per il messaggio utente
   final assistantMessageId = uuid.v4(); // Genera un ID univoco per il messaggio dell'assistente
-  final chainId = "${_selectedContexts.join('')}_agent_with_tools"; // ID della chain generata
+final formattedContexts = _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
+final chainId = "${formattedContexts.join('')}_agent_with_tools";
 
   // Configurazione dell'agente
   final agentConfiguration = {
     'model': _selectedModel, // Modello selezionato
-    'contexts': _selectedContexts, // Contesti selezionati
+    'contexts': formattedContexts, // Contesti selezionati
     'chain_id': chainId // ID della chain
   };
 
@@ -1752,7 +1756,7 @@ Widget _buildModelSelector(StateSetter setState) {
 void set_context(List<String> contexts, String model) async {
   try {
     // Chiama la funzione dell'SDK per configurare e caricare la chain con i contesti selezionati
-    final response = await _contextApiSdk.configureAndLoadChain(contexts, model);
+    final response = await _contextApiSdk.configureAndLoadChain(widget.user.username, widget.token.accessToken, contexts, model);
     print('Chain configurata e caricata con successo per i contesti: $contexts');
     print('Risultato della configurazione: $response');
 
@@ -2046,10 +2050,10 @@ Future<void> _sendMessageToAPI(String input) async {
 
   // URL della chain API
   final url = "$_nlpApiUrl/chains/stream_events_chain";
-
+final formattedContexts = _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
+final chainId = "${formattedContexts.join('')}_agent_with_tools";
   // ID della chain basato sui contesti selezionati
-  final chainId = "${_selectedContexts.join('')}_agent_with_tools";
-
+  print('$chainId');
   // Configurazione dell'agente
   final agentConfiguration = {
     'model': _selectedModel, // Modello selezionato

@@ -3,7 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'context_api_sdk.dart';
 import 'dart:typed_data';
 
-void main() {
+/*void main() {
   runApp(MyApp());
 }
 
@@ -18,9 +18,19 @@ class MyApp extends StatelessWidget {
       home: DashboardScreen(),
     );
   }
-}
+}*/
 
 class DashboardScreen extends StatefulWidget {
+
+    final String username;
+  final String token;
+
+    const DashboardScreen({
+    Key? key,
+    required this.username,
+    required this.token,
+  }) : super(key: key);
+
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
 }
@@ -80,7 +90,7 @@ Map<String, dynamic> _getIconForFileType(String fileName) {
   // Funzione per caricare i contesti
 Future<void> _loadContexts() async {
   try {
-    final contexts = await _apiSdk.listContexts();
+    final contexts = await _apiSdk.listContexts(widget.username, widget.token);
     if (mounted) {
       setState(() {
         _contexts = contexts;
@@ -107,7 +117,7 @@ void _filterContexts() {
   // Funzione per caricare i file di un contesto specifico
   Future<List<Map<String, dynamic>>> _loadFilesForContext(String contextPath) async {
     try {
-      final files = await _apiSdk.listFiles(contexts: [contextPath]);
+      final files = await _apiSdk.listFiles(widget.username, widget.token, contexts: [contextPath]);
       return files;
     } catch (e) {
       print('Errore nel recupero dei file per il contesto $contextPath: $e');
@@ -120,7 +130,7 @@ void _filterContexts() {
       {String? description, required String fileName}) async {
     try {
       await _apiSdk.uploadFileToContexts(
-          fileBytes, contexts, description: description, fileName: fileName);
+          fileBytes, contexts, widget.username, widget.token, description: description,fileName:  fileName);
     } catch (e) {
       print('Errore caricamento file: $e');
     } finally {
@@ -137,7 +147,7 @@ void _filterContexts() {
   // Funzione per eliminare un contesto
   Future<void> _deleteContext(String contextName) async {
     try {
-      await _apiSdk.deleteContext(contextName);
+      await _apiSdk.deleteContext(contextName, widget.username, widget.token);
       _loadContexts();
     } catch (e) {
       print('Errore eliminazione contesto: $e');
@@ -147,7 +157,7 @@ void _filterContexts() {
   // Funzione per eliminare un file
   Future<void> _deleteFile(String fileId) async {
     try {
-      await _apiSdk.deleteFile(fileId: fileId);
+      await _apiSdk.deleteFile(widget.username, widget.token, fileId: fileId);
     } catch (e) {
       print('Errore eliminazione file: $e');
     }
@@ -319,7 +329,7 @@ Future<void> _createContextAndUploadFile(String name, String description) async 
       _loadingFileName = _selectedFile!.files.first.name;
     });
 
-    await _apiSdk.createContext(name, description: description);
+    await _apiSdk.createContext(name, description, widget.username, widget.token);
 
     String fileName = _selectedFile!.files.first.name;
     await _uploadFile(
@@ -349,7 +359,7 @@ Future<void> _createContextAndUploadFile(String name, String description) async 
 
 Future<void> _createContext(String name, String description) async {
   try {
-    await _apiSdk.createContext(name, description: description);
+    await _apiSdk.createContext(name, description, widget.username, widget.token);
 
     setState(() {
       _contexts.add(ContextMetadata(path: name, customMetadata: {'description': description}));

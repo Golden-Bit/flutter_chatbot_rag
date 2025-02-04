@@ -251,7 +251,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   DropdownButtonFormField<String>(
                     isExpanded: true,
                     decoration:
-                        InputDecoration(labelText: 'Seleziona Contesti'),
+                        InputDecoration(labelText: 'Seleziona le Knowledge Boxes'),
                     items: _contexts.map((context) {
                       return DropdownMenuItem<String>(
                         value: context.path,
@@ -667,7 +667,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             //Text('Gestione dei Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             //SizedBox(height: 10),
 // Titolo e pulsante "Nuovo Contesto"
-            Text('Contesti',
+            Text('Knowledge Boxes',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
 
             SizedBox(height: 10),
@@ -715,7 +715,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       onTap:
                           _showCreateContextDialog, // Apre il dialog per creare il contesto
                       child: Card(
-                        color: Colors.grey[300], // Sfondo grigio
+                        color: Colors.grey[400], // Sfondo grigio
                         elevation: 6,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(4),

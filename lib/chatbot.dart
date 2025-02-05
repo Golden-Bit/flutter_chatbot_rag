@@ -3,6 +3,7 @@ import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/codeblock_md_builder.dart';
 import 'package:flutter_app/user_manager/auth_pages.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -17,6 +18,10 @@ import 'package:flutter_app/user_manager/user_model.dart';
 import 'databases_manager/database_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:uuid/uuid.dart'; // Importa il pacchetto UUID (assicurati di averlo aggiunto a pubspec.yaml)
+import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart'; // Per gestire il tap sui link
+
 
 /*void main() {
   runApp(MyApp());
@@ -266,7 +271,7 @@ void initState() {
     );
   }
 
-  Widget _buildMessageContent(String content, bool isUser) {
+  Widget _buildMessageContent_(String content, bool isUser) {
   return Stack(
     children: [
       // Markdown renderer (sotto)
@@ -294,6 +299,63 @@ void initState() {
     ],
   );
 }
+
+
+// Funzione che restituisce il widget per il messaggio Markdown, con formattazione avanzata
+Widget _buildMessageContent(
+  BuildContext context,
+  String content,
+  bool isUser, {
+  Color? userMessageColor,
+  double? userMessageOpacity,
+  Color? assistantMessageColor,
+  double? assistantMessageOpacity,
+}) {
+  // Definisce il colore di sfondo in base al ruolo del mittente
+  final bgColor = isUser
+      ? (userMessageColor ?? Colors.blue[100])!.withOpacity(userMessageOpacity ?? 1.0)
+      : (assistantMessageColor ?? Colors.grey[200])!.withOpacity(assistantMessageOpacity ?? 1.0);
+
+  return Container(
+    margin: const EdgeInsets.symmetric(vertical: 4.0),
+    padding: const EdgeInsets.all(12.0),
+    decoration: BoxDecoration(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(8.0),
+    ),
+    child: MarkdownBody(
+      data: content,
+      // Inserisci il builder personalizzato per i blocchi di codice
+      builders: {
+        'code': CodeBlockBuilder(context),
+      },
+      styleSheet: MarkdownStyleSheet(
+        p: const TextStyle(fontSize: 16.0, color: Colors.black87),
+        h1: const TextStyle(fontSize: 24.0, fontWeight: FontWeight.bold),
+        h2: const TextStyle(fontSize: 22.0, fontWeight: FontWeight.bold),
+        h3: const TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
+        // Lo stile 'code' qui è usato per il rendering base (verrà sovrascritto dal nostro builder)
+        code: TextStyle(
+          fontFamily: 'Courier',
+          backgroundColor: Colors.grey[300],
+          fontSize: 14.0,
+        ),
+        blockquote: const TextStyle(
+          fontStyle: FontStyle.italic,
+          color: Colors.blueGrey,
+          fontSize: 14.0,
+        ),
+      ),
+      // Gestione opzionale del tap sui link
+      onTapLink: (text, href, title) async {
+        if (href != null && await canLaunch(href)) {
+          await launch(href);
+        }
+      },
+    ),
+  );
+}
+
 
 void _showMessageInfoDialog(Map<String, dynamic> message) {
   final String role = message['role'] ?? 'unknown'; // Ruolo del messaggio
@@ -1021,7 +1083,7 @@ child: ListView.builder(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Contenuto del messaggio
-                  _buildMessageContent(message['content'] ?? '', isUser),
+                  _buildMessageContent(context, message['content'] ?? '', isUser),
                   const SizedBox(height: 8.0), // Spazio tra il testo e le icone
                   // Icone aggiuntive sotto il messaggio
 // Icone aggiuntive sotto il messaggio

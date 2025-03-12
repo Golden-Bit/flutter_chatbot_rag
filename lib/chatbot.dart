@@ -316,6 +316,8 @@ Widget _buildMessageContent(
       ? (userMessageColor ?? Colors.blue[100])!.withOpacity(userMessageOpacity ?? 1.0)
       : (assistantMessageColor ?? Colors.grey[200])!.withOpacity(assistantMessageOpacity ?? 1.0);
 
+  //final bgColor = Colors.transparent;
+
   return Container(
     margin: const EdgeInsets.symmetric(vertical: 4.0),
     padding: const EdgeInsets.all(12.0),
@@ -446,7 +448,7 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
+      /*appBar: AppBar(
   shadowColor: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
   elevation: 4.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
   title: Text(
@@ -559,7 +561,7 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
       },
     ),
   ],
-),
+),*/
       body: Row(
         children: [
           // Barra laterale con possibilità di ridimensionamento
@@ -574,17 +576,18 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
               }
             },
             child:AnimatedContainer(
+              margin: const EdgeInsets.fromLTRB(16, 0, 0, 0),
   duration: Duration(milliseconds: 300), // Animazione per l'espansione e il collasso
   width: sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
   decoration: BoxDecoration(
-    color: Colors.grey[200], // Colonna laterale con colore personalizzato
-    boxShadow: [
+    color: Colors.white, // Colonna laterale con colore personalizzato
+    /*boxShadow: [
       BoxShadow(
         color: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
         blurRadius: 8.0, // Sfocatura dell'ombra
         offset: Offset(2, 0), // Posizione dell'ombra (x, y)
       ),
-    ],
+    ],*/
   ),
   child: MediaQuery.of(context).size.width < 600 || sidebarWidth > 0
     ? Column(
@@ -596,9 +599,49 @@ void _showMessageInfoDialog(Map<String, dynamic> message) {
             color: Colors.white,  // Colore bianco per la linea
           ),
           // Padding verticale tra l'AppBar e le voci del menu
-          SizedBox(height: 16.0),  // Spazio verticale tra la linea e le voci del menu
-          
-          // Sezione fissa con le voci principali
+          SizedBox(height: 12.0),  // Spazio verticale tra la linea e le voci del menu
+
+
+
+
+Container(
+  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+  color: Colors.white, // oppure usa lo stesso colore del menu laterale
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      // Titolo a sinistra
+      Text(
+        'Teatek LLM',
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: Colors.black,
+        ),
+      ),
+      // Icona di espansione/contrazione a destra
+      IconButton(
+        icon: Icon(isExpanded ? Icons.close : Icons.menu), // Usa l'icona che preferisci (qui ad esempio menu/close)
+        onPressed: () {
+          setState(() {
+            isExpanded = !isExpanded;
+            if (isExpanded) {
+              sidebarWidth = MediaQuery.of(context).size.width < 600
+                  ? MediaQuery.of(context).size.width
+                  : 300.0;
+            } else {
+              sidebarWidth = 0.0;
+            }
+          });
+        },
+      ),
+    ],
+  ),
+),
+
+
+
+// Sezione fissa con le voci principali
 
 // Pulsante "Nuova Chat"
 MouseRegion(
@@ -998,16 +1041,185 @@ Expanded(
             ),
           ),
           // Area principale
+
+
+
 Expanded(
   child: Container(
+    clipBehavior: Clip.hardEdge,
+    margin: const EdgeInsets.all(16.0),
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey, width: 1.0),
+      borderRadius: BorderRadius.circular(8.0),
+      gradient: const RadialGradient(
+        center: Alignment(0.5, 0.25),
+        radius: 1.2, // aumenta o diminuisci per rendere più o meno ampio il cerchio
+        colors: [
+          Color.fromARGB(255, 199, 230, 255), // Azzurro pieno al centro
+          Colors.white,                       // Bianco verso i bordi
+        ],
+        stops: [0.0, 1.0], // Transizione graduale dall'inizio (0%) alla fine (100%)
+      ),
+    ),
+  child: Column(
+    children: [
+    
+      
+            // Nuova top bar per info e pulsante utente
+      Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 0), // Margine uniforme da tutti i lati
+        //padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        padding: const EdgeInsets.fromLTRB(0,0,0,0),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          //boxShadow: [
+          //  BoxShadow(
+          //    color: Colors.black.withOpacity(0.5),
+          //    blurRadius: 4.0,
+          //  ),
+          //],
+        ),
+        child: Row(
+  children: [
+    // Lato sinistro: un Expanded per allineare a sinistra
+Expanded(
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.start,
+    children: [
+      if (sidebarWidth == 0.0) ...[
+        IconButton(
+          icon: Icon(Icons.menu, color: Colors.black),
+          onPressed: () {
+            setState(() {
+              isExpanded = true;
+              sidebarWidth = MediaQuery.of(context).size.width < 600
+                  ? MediaQuery.of(context).size.width
+                  : 300.0;
+            });
+          },
+        ),
+        const SizedBox(width: 8),
+        Text(
+          'Teatek LLM',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
+        ),
+      ],
+    ],
+  ),
+),
+
+    // Lato destro: azioni utente
+    PopupMenuButton<String>(
+      icon: CircleAvatar(
+        backgroundColor: Colors.black,
+        child: Text(
+          widget.user.email.substring(0, 2).toUpperCase(),
+          style: TextStyle(color: Colors.white),
+        ),
+      ),
+      onSelected: (value) {
+        switch (value) {
+          case 'Profilo':
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => AccountSettingsPage(
+                  user: widget.user,
+                  token: widget.token,
+                ),
+              ),
+            );
+            break;
+          case 'Utilizzo':
+            print('Naviga alla pagina di utilizzo');
+            break;
+          case 'Impostazioni':
+            setState(() {
+              showSettings = true;
+              showKnowledgeBase = false;
+            });
+            break;
+          case 'Logout':
+            _logout(context);
+            break;
+        }
+      },
+      itemBuilder: (BuildContext context) {
+        return [
+          PopupMenuItem(
+            value: 'Profilo',
+            child: Row(
+              children: [
+                Icon(Icons.person, color: Colors.black),
+                SizedBox(width: 8.0),
+                Text('Profilo'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'Utilizzo',
+            child: Row(
+              children: [
+                Icon(Icons.bar_chart, color: Colors.black),
+                SizedBox(width: 8.0),
+                Text('Utilizzo'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'Impostazioni',
+            child: Row(
+              children: [
+                Icon(Icons.settings, color: Colors.black),
+                SizedBox(width: 8.0),
+                Text('Impostazioni'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'Logout',
+            child: Row(
+              children: [
+                Icon(Icons.logout, color: Colors.red),
+                SizedBox(width: 8.0),
+                Text(
+                  'Logout',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ],
+            ),
+          ),
+        ];
+      },
+    ),
+  ],
+),
+      ),
+
+    //const SizedBox(height: 16),  
+
+    const Divider(
+      color: Colors.grey,
+      //thickness: 1,
+      height: 0,
+    ),
+      
+    //const SizedBox(height: 16),  
+
+    Expanded(
+      child:  Container(
+    margin: const EdgeInsets.all(16.0), // Margine uniforme da tutti i lati
     padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),  // Aggiungi padding orizzontale e verticale
-    color: _chatBackgroundColor.withOpacity(_chatBackgroundOpacity),  // Sfondo della pagina generale
-    child: Center(
-      child: showKnowledgeBase 
+    color: Colors.transparent, //.withOpacity(_chatBackgroundOpacity),  // Sfondo della pagina generale
+    child: showKnowledgeBase 
         ? Container(
             padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),  // Aggiungi padding orizzontale e verticale
             decoration: BoxDecoration(
-              color: Colors.white,  // Sfondo bianco all'interno del riquadro
+              color: Colors.transparent,  // Sfondo bianco all'interno del riquadro
               //border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi dello stesso colore dell'AppBar
               borderRadius: BorderRadius.circular(4.0),  // Arrotonda i bordi
             ),
@@ -1032,7 +1244,7 @@ Expanded(
           ? Container(
               padding: const EdgeInsets.all(4.0),
               decoration: BoxDecoration(
-                color: Colors.white,  // Sfondo bianco
+                color: Colors.transparent,  // Sfondo bianco
                 //border: Border.all(color: Color.fromARGB(255, 85, 107, 37), width: 2.0),  // Bordi colorati
                 borderRadius: BorderRadius.circular(2.0),
               ),
@@ -1073,17 +1285,22 @@ child: ListView.builder(
                 maxWidth: MediaQuery.of(context).size.width * 0.75, // Limita la larghezza massima al 75% dello schermo
               ),
               padding: const EdgeInsets.all(12.0),
-              decoration: BoxDecoration(
-                color: isUser
-                    ? _userMessageColor.withOpacity(_userMessageOpacity)
-                    : _assistantMessageColor.withOpacity(_assistantMessageOpacity),
-                borderRadius: BorderRadius.circular(8.0),
-              ),
+    decoration: BoxDecoration(
+      color: Colors.white,                // Sfondo bianco
+      borderRadius: BorderRadius.circular(8.0),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black12,          // Ombra leggera
+          blurRadius: 4.0,                // Sfocatura
+          offset: Offset(2, 2),           // Spostamento orizz/vert dell’ombra
+        ),
+      ],
+    ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Contenuto del messaggio
-                  _buildMessageContent(context, message['content'] ?? '', isUser),
+                  _buildMessageContent(context, message['content'] ?? '', isUser, userMessageColor: Colors.white, assistantMessageColor: Colors.white),
                   const SizedBox(height: 8.0), // Spazio tra il testo e le icone
                   // Icone aggiuntive sotto il messaggio
 // Icone aggiuntive sotto il messaggio
@@ -1157,6 +1374,13 @@ Row(
 
 ),
 
+Container(
+  margin: const EdgeInsets.all(16.0), // Margine uniforme da tutti i lati
+  //decoration: BoxDecoration(
+  //  border: Border.all(color: Colors.grey, width: 1.0), // Bordo grigio sottile
+  //  borderRadius: BorderRadius.circular(8.0), // Arrotondamento facoltativo degli angoli
+  //),
+  child:
                Padding(
   padding: const EdgeInsets.all(8.0),
   child: Row(
@@ -1216,12 +1440,15 @@ Row(
       ),
     ],
   ),
-),
+),)
               ],
             ),
       ),
-    ),
-  ),
+  )])
+
+
+
+  ),)
 
         ],
       ),

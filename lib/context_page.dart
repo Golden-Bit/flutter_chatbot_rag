@@ -658,7 +658,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       //appBar: //AppBar(
       //title: Text('Context API Dashboard'),
       //),
-      backgroundColor: Colors.white, // Imposta lo sfondo bianco
+      backgroundColor: Colors.transparent, // Imposta lo sfondo bianco
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(

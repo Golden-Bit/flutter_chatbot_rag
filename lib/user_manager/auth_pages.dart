@@ -615,7 +615,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
       //appBar: AppBar(
       //  title: Text('Impostazioni Account'),
       //),
-      backgroundColor: Colors.white, // Imposta lo sfondo bianco
+      backgroundColor: Colors.transparent, // Imposta lo sfondo bianco
       body: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 600),

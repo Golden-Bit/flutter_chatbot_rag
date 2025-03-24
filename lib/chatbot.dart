@@ -3,7 +3,11 @@ import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/codeblock_md_builder.dart';
+import 'package:flutter_app/ui_components/message/codeblock_md_builder.dart';
+import 'package:flutter_app/llm_ui_tools/tools.dart';
+import 'package:flutter_app/ui_components/buttons/blue_button.dart';
+import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
+import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
 import 'package:flutter_app/user_manager/auth_pages.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -41,6 +45,24 @@ class MyApp extends StatelessWidget {
     );
   }
 }*/
+/// Risultato del parsing del testo chatbot:
+/// text:   il testo "pulito" (senza la parte di <...>)
+/// widgetData: se esiste un widget, i dati necessari (altrimenti null)
+class ParsedWidgetResult {
+  final String text;
+  final List<Map<String, dynamic>> widgetList;
+
+  ParsedWidgetResult(this.text, this.widgetList);
+}
+
+
+/// Classe di appoggio per segmenti di testo o placeholder
+class _Segment {
+  final String? text;
+  final String? placeholder;
+  _Segment({this.text, this.placeholder});
+}
+
 
 class ChatBotPage extends StatefulWidget {
   final User user;
@@ -54,7 +76,16 @@ class ChatBotPage extends StatefulWidget {
 
 class _ChatBotPageState extends State<ChatBotPage> {
   List<Map<String, dynamic>> messages = [];
+// Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
+final Map<String, Widget Function(Map<String, dynamic> data, void Function(String) onReply)> widgetMap = {
+  "NButtonWidget": (data, onReply) => NButtonWidget(data: data, onReply: onReply),
+  "RadarChart": (data, onReply) => RadarChartWidgetTool(jsonData: data, onReply: onReply),
+  "TradingViewAdvancedChart": (data, onReply) => TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply),
+  "TradingViewMarketOverview": (data, onReply) => TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply),
+  "CustomChartWidget": (data, onReply) => CustomChartWidgetTool(jsonData: data, onReply: onReply),
+};
 
+  final Map<String, Widget> _widgetCache = {}; // Cache dei widget
   final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
 
   final TextEditingController _controller = TextEditingController();
@@ -116,6 +147,241 @@ class _ChatBotPageState extends State<ChatBotPage> {
   List<dynamic> _chatHistory = [];
   String? _nlpApiUrl;
   int? _activeButtonIndex;
+
+/// Risultato del parsing del testo chatbot:
+/// text: testo "pulito" dopo la rimozione dei blocchi widget, 
+///       in cui ogni widget è sostituito da un segnaposto [WIDGET_PLACEHOLDER_X]
+/// widgetList: lista di dati dei widget estratti
+
+ParsedWidgetResult _parsePotentialWidgets(String fullText) {
+  String updatedText = fullText;
+  final List<Map<String, dynamic>> widgetList = [];
+  int widgetCounter = 0;
+
+  while (true) {
+    // 1) Trova l'indice di inizio del pattern "< TYPE='WIDGET'"
+    final startIndex = updatedText.indexOf("< TYPE='WIDGET'");
+    if (startIndex == -1) {
+      // Se non troviamo più il pattern, interrompi
+      break;
+    }
+
+    // 2) Trova l'indice di chiusura ">"
+    final endIndex = updatedText.indexOf(">", startIndex);
+    if (endIndex == -1) {
+      // Se manca '>', il blocco non è valido: interrompi
+      break;
+    }
+
+    // Estrarre il sottoblocco
+    final widgetBlock = updatedText.substring(startIndex, endIndex + 1);
+
+    // 3) Cerchiamo la prima e la seconda barra verticale "|"
+    final firstBar = widgetBlock.indexOf("|");
+    final secondBar = widgetBlock.indexOf("|", firstBar + 1);
+
+    if (firstBar == -1 || secondBar == -1) {
+      // Pattern non valido, rimuoviamo e proseguiamo
+      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+      continue;
+    }
+
+    // 4) Estrarre la parte JSON
+    final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
+
+    // 5) Estrarre widgetId (dopo WIDGET_ID=' ... ')
+    final widgetIdSearch = "WIDGET_ID='";
+    final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
+    if (widgetIdStart == -1) {
+      // Pattern non valido
+      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+      continue;
+    }
+    final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
+    final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
+    if (widgetIdEnd == -1 || widgetIdEnd <= widgetIdStartAdjusted) {
+      // Pattern non valido
+      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+      continue;
+    }
+
+    final widgetId = widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
+
+    // 6) Decodifica del JSON
+    Map<String, dynamic>? widgetJson;
+    try {
+      widgetJson = jsonDecode(jsonString) as Map<String, dynamic>;
+    } catch (e) {
+      print("Errore parse JSON widget: $e");
+      widgetJson = null;
+    }
+
+    if (widgetJson == null) {
+      // Pattern non valido, rimuoviamo
+      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+      continue;
+    }
+
+    // 7) Genera un _id univoco per il widget
+    final widgetUniqueId = uuid.v4(); 
+    // Assicurati di aver dichiarato "final Uuid uuid = Uuid();" nella classe
+
+    // 8) Costruisci un segnaposto univoco
+    final placeholder = "[WIDGET_PLACEHOLDER_$widgetCounter]";
+
+    // 9) Aggiungi questo widget alla lista
+    widgetList.add({
+      "_id": widgetUniqueId,
+      "widgetId": widgetId,
+      "jsonData": widgetJson,
+      "placeholder": placeholder,
+    });
+
+    // 10) Sostituisci nel testo
+    updatedText = updatedText.replaceRange(
+      startIndex,
+      endIndex + 1,
+      placeholder,
+    );
+
+    widgetCounter++;
+  }
+
+  // Restituisci il testo aggiornato e la lista di widget
+  return ParsedWidgetResult(updatedText, widgetList);
+}
+
+
+
+Widget _buildMixedContent(Map<String, dynamic> message) {
+  // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
+  final widgetDataList = message['widgetDataList'] as List<dynamic>?;
+  if (widgetDataList == null || widgetDataList.isEmpty) {
+    // Non c'è widget => mostriamo solo testo
+    final isUser = (message['role'] == 'user');
+    return _buildMessageContent(
+      context,
+      message['content'] ?? '',
+      isUser,
+      userMessageColor: Colors.white,
+      assistantMessageColor: Colors.white,
+    );
+  }
+
+  // Abbiamo almeno un widget. Otteniamo il testo completo già "pulito"
+  // (dove i blocchi widget sono stati rimpiazzati da placeholder tipo [WIDGET_PLACEHOLDER_0], ecc.)
+  final textContent = message['content'] ?? '';
+
+  // Se vuoi essere sicuro di gestire i widget nell'ordine giusto,
+  // puoi ordinare i widget in base al nome/numero del placeholder
+  // Esempio: "[WIDGET_PLACEHOLDER_0]" < "[WIDGET_PLACEHOLDER_1]" ...
+  widgetDataList.sort((a, b) {
+    final pa = a['placeholder'] as String;
+    final pb = b['placeholder'] as String;
+    return pa.compareTo(pb);
+  });
+
+  // Costruiamo un array di segmenti di testo o "placeholder"
+  final segments = <_Segment>[];
+  String temp = textContent;
+
+  // Estrapoliamo tutti i placeholder trovati in widgetDataList
+  while (true) {
+    // Trova quale placeholder compare per primo nella stringa temp
+    int foundPos = temp.length;
+    String foundPh = "";
+    for (final w in widgetDataList) {
+      final ph = w['placeholder'] as String;
+      final idx = temp.indexOf(ph);
+      if (idx != -1 && idx < foundPos) {
+        foundPos = idx;
+        foundPh = ph;
+      }
+    }
+
+    if (foundPos == temp.length) {
+      // Nessun placeholder trovato
+      if (temp.isNotEmpty) {
+        segments.add(_Segment(text: temp));
+      }
+      break;
+    }
+
+    // Se abbiamo trovato un placeholder
+    if (foundPos > 0) {
+      // C'è del testo prima del placeholder
+      final beforeText = temp.substring(0, foundPos);
+      segments.add(_Segment(text: beforeText));
+    }
+
+    // Aggiungiamo il placeholder come segment
+    segments.add(_Segment(placeholder: foundPh));
+
+    // Rimuoviamo la parte elaborata
+    temp = temp.substring(foundPos + foundPh.length);
+  }
+
+  // Ora creiamo la lista di widget finali
+  final contentWidgets = <Widget>[];
+
+  for (final seg in segments) {
+    if (seg.placeholder == null) {
+      // Segmento di testo
+      final isUser = (message['role'] == 'user');
+      if (seg.text != null && seg.text!.isNotEmpty) {
+        contentWidgets.add(
+          _buildMessageContent(
+            context,
+            seg.text!,
+            isUser,
+            userMessageColor: Colors.white,
+            assistantMessageColor: Colors.white,
+          ),
+        );
+      }
+    } else {
+      // Segmento che rappresenta un placeholder
+      final ph = seg.placeholder!;
+      // Cerchiamo i dati del widget corrispondente
+      final wdata = widgetDataList.firstWhere((x) => x['placeholder'] == ph);
+      final widgetUniqueId = wdata['_id'] as String;
+      final widgetId = wdata['widgetId'] as String;
+      final jsonData = wdata['jsonData'] as Map<String, dynamic>? ?? {};
+
+      // Verifichiamo se abbiamo già un widget in cache
+      Widget? embeddedWidget = _widgetCache[widgetUniqueId];
+      if (embeddedWidget == null) {
+        // Creiamo il widget ora
+        final widgetBuilder = widgetMap[widgetId];
+        if (widgetBuilder != null) {
+          embeddedWidget = widgetBuilder(jsonData, (reply) => _handleUserInput(reply));
+        } else {
+          embeddedWidget = Text("Widget sconosciuto: $widgetId");
+        }
+        _widgetCache[widgetUniqueId] = embeddedWidget;
+      }
+
+      // Inseriamo il widget, centrato orizzontalmente
+      contentWidgets.add(
+        Container(
+          width: double.infinity,
+          child: Align(
+            alignment: Alignment.center,
+            child: embeddedWidget,
+          ),
+        ),
+      );
+    }
+  }
+
+  // Restituiamo la colonna
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: contentWidgets,
+  );
+}
+
+
   Future<void> _loadConfig() async {
     try {
       //final String response = await rootBundle.loadString('assets/config.json');
@@ -212,11 +478,11 @@ class _ChatBotPageState extends State<ChatBotPage> {
     _chatHistoryFuture =
         _loadChatHistory(); // Carica la cronologia solo una volta
     _loadAvailableContexts();
-  
+
     // Aggiungi questo per aggiornare la UI quando cambia il testo
-  _controller.addListener(() {
-    setState(() {});
-  });
+    _controller.addListener(() {
+      setState(() {});
+    });
   }
 
   /*@override
@@ -468,120 +734,7 @@ class _ChatBotPageState extends State<ChatBotPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      /*appBar: AppBar(
-  shadowColor: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
-  elevation: 4.0, // Aggiungi ombreggiatura (default è 4.0, aumenta se necessario)
-  title: Text(
-    'Teatek Agent',
-  style: TextStyle(color: Colors.black), // Cambia il testo in nero
-  ),
-  backgroundColor: Colors.white, // Bianco, // Imposta il colore personalizzato
-  leading: IconButton(
-    icon: Icon(Icons.menu, color: Colors.black),
-    onPressed: () {
-      setState(() {
-        isExpanded = !isExpanded; // Alterna collasso ed espansione
-        if (isExpanded) {
-          sidebarWidth = MediaQuery.of(context).size.width < 600
-              ? MediaQuery.of(context).size.width // Su schermi piccoli, occupa l'intera larghezza
-              : 300.0; // Imposta la larghezza normale su schermi grandi
-        } else {
-          sidebarWidth = 0.0; // Collassa la barra laterale
-        }
-      });
-    },
-  ),
-  actions: [
-    PopupMenuButton<String>(
-      icon: CircleAvatar(
-        backgroundColor: Colors.black, // Sfondo bianco per l'avatar
-        child: Text(
-          widget.user.email.substring(0, 2).toUpperCase(), // Prime due lettere della mail in maiuscolo
-          style: TextStyle(color: Colors.white), // Testo nero
-        ),
-      ),
-      onSelected: (value) {
-        switch (value) {
-          case 'Profilo':
-            // Naviga alla pagina del profilo
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => AccountSettingsPage(
-                  user: widget.user,
-                  token: widget.token,
-                ),
-              ),
-            );
-            break;
-          case 'Utilizzo':
-            // Naviga alla pagina di utilizzo
-            // TODO: Implementa la pagina di utilizzo
-            print('Naviga alla pagina di utilizzo');
-            break;
-          case 'Impostazioni':
-            // Apri il pannello delle impostazioni
-            setState(() {
-              showSettings = true; // Mostra la sezione delle impostazioni
-              showKnowledgeBase = false; // Nascondi il resto
-            });
-            break;
-          case 'Logout':
-            // Effettua il logout
-            _logout(context);
-            break;
-        }
-      },
-      itemBuilder: (BuildContext context) {
-        return [
-          PopupMenuItem(
-            value: 'Profilo',
-            child: Row(
-              children: [
-                Icon(Icons.person, color: Colors.black),
-                SizedBox(width: 8.0),
-                Text('Profilo'),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'Utilizzo',
-            child: Row(
-              children: [
-                Icon(Icons.bar_chart, color: Colors.black),
-                SizedBox(width: 8.0),
-                Text('Utilizzo'),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'Impostazioni',
-            child: Row(
-              children: [
-                Icon(Icons.settings, color: Colors.black),
-                SizedBox(width: 8.0),
-                Text('Impostazioni'),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'Logout',
-            child: Row(
-              children: [
-                Icon(Icons.logout, color: Colors.red),
-                SizedBox(width: 8.0),
-                Text(
-                  'Logout',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ],
-            ),
-          ),
-        ];
-      },
-    ),
-  ],
-),*/
+   
       body: Row(
         children: [
           // Barra laterale con possibilità di ridimensionamento
@@ -674,70 +827,55 @@ class _ChatBotPageState extends State<ChatBotPage> {
 
 // Sezione fissa con le voci principali
 
-// Pulsante "Nuova Chat"
-                        MouseRegion(
-                          onEnter: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  3; // Identifica "Nuova Chat" come in hover
-                            });
-                          },
-                          onExit: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  null; // Rimuove lo stato di hover
-                            });
-                          },
-                          child: GestureDetector(
-                            onTap: () {
-                              _startNewChat(); // Avvia una nuova chat
-                              setState(() {
-                                _activeButtonIndex =
-                                    3; // Imposta "Nuova Chat" come attivo
-                                showKnowledgeBase =
-                                    false; // Deseleziona "Basi di conoscenza"
-                                showSettings =
-                                    false; // Deseleziona "Impostazioni"
-                                _activeChatIndex =
-                                    null; // Deseleziona qualsiasi chat
-                              });
-                              if (MediaQuery.of(context).size.width < 600) {
-                                setState(() {
-                                  sidebarWidth =
-                                      0.0; // Collassa la barra laterale
-                                });
-                              }
-                            },
-                            child: Container(
-                              margin:
-                                  const EdgeInsets.all(4.0), // Margini laterali
-                              decoration: BoxDecoration(
-                                color: _buttonHoveredIndex == 3 ||
-                                        _activeButtonIndex == 3
-                                    ? const Color.fromARGB(255, 224, 224,
-                                        224) // Colore scuro durante hover o selezione
-                                    : Colors
-                                        .transparent, // Sfondo trasparente quando non è attivo
-                                borderRadius: BorderRadius.circular(
-                                    4.0), // Arrotonda gli angoli
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 12.0, horizontal: 16.0),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.add, color: Colors.black),
-                                  const SizedBox(width: 8.0),
-                                  Text(
-                                    'Nuova Chat',
-                                    style: TextStyle(
-                                        color: Colors
-                                            .black), // Cambia colore in nero
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
+// Pulsante "Cerca"
+MouseRegion(
+  onEnter: (_) {
+    setState(() {
+      _buttonHoveredIndex = 99; // un indice qualsiasi per l'hover
+    });
+  },
+  onExit: (_) {
+    setState(() {
+      _buttonHoveredIndex = null;
+    });
+  },
+  child: GestureDetector(
+    onTap: () {
+      // Quando clicco, apro il dialog di ricerca
+showSearchDialog(
+  context: context,
+  chatHistory: _chatHistory,
+  onNavigateToMessage: (String chatId, String messageId) {
+    // Carica la chat corrispondente
+    _loadMessagesForChat(chatId);
+    // Se vuoi scrollare al messaggio specifico, puoi salvare
+    // un "targetMessageId" e poi gestire lo scroll/spostamento
+    // dopo che i messaggi sono stati caricati.
+  },
+);
+    },
+    child: Container(
+      margin: const EdgeInsets.all(4.0),
+      decoration: BoxDecoration(
+        color: _buttonHoveredIndex == 99
+            ? const Color.fromARGB(255, 224, 224, 224)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(4.0),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+      child: Row(
+        children: [
+          Icon(Icons.search, color: Colors.black),
+          const SizedBox(width: 8.0),
+          Text(
+            'Cerca',
+            style: TextStyle(color: Colors.black),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
 
 // Pulsante "Conversazione"
                         MouseRegion(
@@ -863,7 +1001,7 @@ class _ChatBotPageState extends State<ChatBotPage> {
                                       color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
-                                    'Knowledge Box',
+                                    'Knowledge Boxes',
                                     style: TextStyle(
                                         color: Colors
                                             .black), // Cambia colore in nero
@@ -940,8 +1078,9 @@ class _ChatBotPageState extends State<ChatBotPage> {
                         const SizedBox(height: 24),
 
 // Lista delle chat salvate
-                        Expanded(
-                          child: FutureBuilder(
+SizedBox(
+  height: 500, // Altezza fissa
+  child: FutureBuilder(
                             future:
                                 _chatHistoryFuture, // Assicurati che le chat siano caricate
                             builder: (context, snapshot) {
@@ -970,194 +1109,211 @@ class _ChatBotPageState extends State<ChatBotPage> {
                               }
 
                               return ShaderMask(
-  shaderCallback: (Rect bounds) {
-    return const LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: [
-        Colors.transparent, // Mantiene opaco
-        Colors.transparent, // Ancora opaco
-        Colors.white, // A partire da qui diventa trasparente
-      ],
-      stops: [0.0, 0.75, 1.0],
-    ).createShader(bounds);
-  },
-  // Con dstOut, le parti del gradiente che sono bianche (o trasparenti) "tagliano" via il contenuto
-  blendMode: BlendMode.dstOut,
-  child: ListView.builder(
-      padding: const EdgeInsets.only(bottom: 32.0), // Spazio extra in fondo
-                                itemCount: nonEmptySections
-                                    .length, // Numero delle sezioni non vuote
-                                itemBuilder: (context, sectionIndex) {
-                                  final section =
-                                      nonEmptySections[sectionIndex];
-                                  final sectionTitle = section
-                                      .key; // Ottieni il titolo della sezione
-                                  final chatsInSection = section
-                                      .value; // Ottieni le chat di quella sezione
+                                  shaderCallback: (Rect bounds) {
+                                    return const LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent, // Mantiene opaco
+                                        Colors.transparent, // Ancora opaco
+                                        Colors
+                                            .white, // A partire da qui diventa trasparente
+                                      ],
+                                      stops: [0.0, 0.75, 1.0],
+                                    ).createShader(bounds);
+                                  },
+                                  // Con dstOut, le parti del gradiente che sono bianche (o trasparenti) "tagliano" via il contenuto
+                                  blendMode: BlendMode.dstOut,
+                                  child: ListView.builder(
+                                    padding: const EdgeInsets.only(
+                                        bottom: 32.0), // Spazio extra in fondo
+                                    itemCount: nonEmptySections
+                                        .length, // Numero delle sezioni non vuote
+                                    itemBuilder: (context, sectionIndex) {
+                                      final section =
+                                          nonEmptySections[sectionIndex];
+                                      final sectionTitle = section
+                                          .key; // Ottieni il titolo della sezione
+                                      final chatsInSection = section
+                                          .value; // Ottieni le chat di quella sezione
 
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // Intestazione della sezione
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8.0, vertical: 4.0),
-                                        child: Text(
-                                          sectionTitle, // Titolo della sezione
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.black,
-                                          ),
-                                        ),
-                                      ),
-                                      // Lista delle chat di questa sezione
-                                      ...chatsInSection.map((chat) {
-                                        final chatName = chat['name'] ??
-                                            'Chat senza nome'; // Nome della chat
-                                        final chatId =
-                                            chat['id']; // ID della chat
-                                        final isActive = _activeChatIndex ==
-                                            _chatHistory
-                                                .indexOf(chat); // Chat attiva
-                                        final isHovered = hoveredIndex ==
-                                            _chatHistory
-                                                .indexOf(chat); // Chat in hover
-
-                                        return MouseRegion(
-                                          onEnter: (_) {
-                                            setState(() {
-                                              hoveredIndex =
-                                                  _chatHistory.indexOf(
-                                                      chat); // Aggiorna hover
-                                            });
-                                          },
-                                          onExit: (_) {
-                                            setState(() {
-                                              hoveredIndex =
-                                                  null; // Rimuovi hover
-                                            });
-                                          },
-                                          child: GestureDetector(
-                                            onTap: () {
-                                              _loadMessagesForChat(
-                                                  chatId); // Carica messaggi della chat
-                                              setState(() {
-                                                _activeChatIndex =
-                                                    _chatHistory.indexOf(
-                                                        chat); // Imposta la chat attiva
-                                                _activeButtonIndex =
-                                                    null; // Deseleziona i pulsanti principali
-                                                showKnowledgeBase =
-                                                    false; // Deseleziona "Basi di conoscenza"
-                                                showSettings =
-                                                    false; // Deseleziona "Impostazioni"
-                                              });
-                                              if (MediaQuery.of(context)
-                                                      .size
-                                                      .width <
-                                                  600) {
-                                                sidebarWidth =
-                                                    0.0; // Collassa barra laterale
-                                              }
-                                            },
-                                            child: Container(
-                                              height: 40,
-                                              margin: const EdgeInsets
-                                                  .symmetric(
-                                                  horizontal: 4,
-                                                  vertical:
-                                                      2), // Margini laterali
-                                              decoration: BoxDecoration(
-                                                color: isHovered || isActive
-                                                    ? const Color.fromARGB(
-                                                        255,
-                                                        224,
-                                                        224,
-                                                        224) // Colore scuro per hover o selezione
-                                                    : Colors
-                                                        .transparent, // Sfondo trasparente quando non attivo
-                                                borderRadius: BorderRadius.circular(
-                                                    4.0), // Arrotonda gli angoli
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 4.0,
-                                                      horizontal: 16.0),
-                                              child: Row(
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      chatName, // Mostra il nome della chat
-                                                      style: TextStyle(
-                                                        color: Colors.black,
-                                                        fontWeight: isActive
-                                                            ? FontWeight
-                                                                .bold // Evidenzia testo se attivo
-                                                            : FontWeight.normal,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  PopupMenuButton<String>(
-                                                    icon: Icon(
-                                                      Icons.more_horiz,
-                                                      color: (isHovered ||
-                                                              isActive)
-                                                          ? Colors
-                                                              .black // Colore bianco per l'icona in hover o selezione
-                                                          : Colors
-                                                              .transparent, // Nascondi icona se non attivo o in hover
-                                                    ),
-                                                    padding: EdgeInsets.only(
-                                                        right:
-                                                            4.0), // Riduci margine destro
-                                                    onSelected: (String value) {
-                                                      if (value == 'delete') {
-                                                        _deleteChat(_chatHistory
-                                                            .indexOf(
-                                                                chat)); // Elimina la chat
-                                                      } else if (value ==
-                                                          'edit') {
-                                                        _showEditChatDialog(
-                                                            _chatHistory.indexOf(
-                                                                chat)); // Modifica la chat
-                                                      }
-                                                    },
-                                                    itemBuilder:
-                                                        (BuildContext context) {
-                                                      return [
-                                                        PopupMenuItem(
-                                                          value: 'edit',
-                                                          child:
-                                                              Text('Modifica'),
-                                                        ),
-                                                        PopupMenuItem(
-                                                          value: 'delete',
-                                                          child:
-                                                              Text('Elimina'),
-                                                        ),
-                                                      ];
-                                                    },
-                                                  ),
-                                                ],
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          // Intestazione della sezione
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8.0, vertical: 4.0),
+                                            child: Text(
+                                              sectionTitle, // Titolo della sezione
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.black,
                                               ),
                                             ),
                                           ),
-                                        );
-                                      }).toList(),
-                                      const SizedBox(
-                                          height:
-                                              24), // Spaziatura tra le sezioni
-                                    ],
-                                  );
-                                },
-                              ));
+                                          // Lista delle chat di questa sezione
+                                          ...chatsInSection.map((chat) {
+                                            final chatName = chat['name'] ??
+                                                'Chat senza nome'; // Nome della chat
+                                            final chatId =
+                                                chat['id']; // ID della chat
+                                            final isActive = _activeChatIndex ==
+                                                _chatHistory.indexOf(
+                                                    chat); // Chat attiva
+                                            final isHovered = hoveredIndex ==
+                                                _chatHistory.indexOf(
+                                                    chat); // Chat in hover
+
+                                            return MouseRegion(
+                                              onEnter: (_) {
+                                                setState(() {
+                                                  hoveredIndex =
+                                                      _chatHistory.indexOf(
+                                                          chat); // Aggiorna hover
+                                                });
+                                              },
+                                              onExit: (_) {
+                                                setState(() {
+                                                  hoveredIndex =
+                                                      null; // Rimuovi hover
+                                                });
+                                              },
+                                              child: GestureDetector(
+                                                onTap: () {
+                                                  _loadMessagesForChat(
+                                                      chatId); // Carica messaggi della chat
+                                                  setState(() {
+                                                    _activeChatIndex =
+                                                        _chatHistory.indexOf(
+                                                            chat); // Imposta la chat attiva
+                                                    _activeButtonIndex =
+                                                        null; // Deseleziona i pulsanti principali
+                                                    showKnowledgeBase =
+                                                        false; // Deseleziona "Basi di conoscenza"
+                                                    showSettings =
+                                                        false; // Deseleziona "Impostazioni"
+                                                  });
+                                                  if (MediaQuery.of(context)
+                                                          .size
+                                                          .width <
+                                                      600) {
+                                                    sidebarWidth =
+                                                        0.0; // Collassa barra laterale
+                                                  }
+                                                },
+                                                child: Container(
+                                                  height: 40,
+                                                  margin: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 4,
+                                                      vertical:
+                                                          2), // Margini laterali
+                                                  decoration: BoxDecoration(
+                                                    color: isHovered || isActive
+                                                        ? const Color.fromARGB(
+                                                            255,
+                                                            224,
+                                                            224,
+                                                            224) // Colore scuro per hover o selezione
+                                                        : Colors
+                                                            .transparent, // Sfondo trasparente quando non attivo
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            4.0), // Arrotonda gli angoli
+                                                  ),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      vertical: 4.0,
+                                                      horizontal: 16.0),
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: Text(
+                                                          chatName, // Mostra il nome della chat
+                                                          style: TextStyle(
+                                                            color: Colors.black,
+                                                            fontWeight: isActive
+                                                                ? FontWeight
+                                                                    .bold // Evidenzia testo se attivo
+                                                                : FontWeight
+                                                                    .normal,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      PopupMenuButton<String>(
+                                                        icon: Icon(
+                                                          Icons.more_horiz,
+                                                          color: (isHovered ||
+                                                                  isActive)
+                                                              ? Colors
+                                                                  .black // Colore bianco per l'icona in hover o selezione
+                                                              : Colors
+                                                                  .transparent, // Nascondi icona se non attivo o in hover
+                                                        ),
+                                                        padding: EdgeInsets.only(
+                                                            right:
+                                                                4.0), // Riduci margine destro
+                                                        onSelected:
+                                                            (String value) {
+                                                          if (value ==
+                                                              'delete') {
+                                                            _deleteChat(_chatHistory
+                                                                .indexOf(
+                                                                    chat)); // Elimina la chat
+                                                          } else if (value ==
+                                                              'edit') {
+                                                            _showEditChatDialog(
+                                                                _chatHistory
+                                                                    .indexOf(
+                                                                        chat)); // Modifica la chat
+                                                          }
+                                                        },
+                                                        itemBuilder:
+                                                            (BuildContext
+                                                                context) {
+                                                          return [
+                                                            PopupMenuItem(
+                                                              value: 'edit',
+                                                              child: Text(
+                                                                  'Modifica'),
+                                                            ),
+                                                            PopupMenuItem(
+                                                              value: 'delete',
+                                                              child: Text(
+                                                                  'Elimina'),
+                                                            ),
+                                                          ];
+                                                        },
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          }).toList(),
+                                          const SizedBox(
+                                              height:
+                                                  24), // Spaziatura tra le sezioni
+                                        ],
+                                      );
+                                    },
+                                  ));
                             },
                           ),
                         ),
-
+// Pulsante "Nuova Chat"
+HoverableNewChatButton(
+  onPressed: () {
+    _startNewChat();
+    setState(() {
+      _activeButtonIndex = 3;
+      showKnowledgeBase = false;
+      showSettings = false;
+      _activeChatIndex = null;
+    });}),
 // Mantieni il pulsante di logout in basso, senza Spacer
 /*Align(
   alignment: Alignment.bottomCenter,
@@ -1213,26 +1369,28 @@ class _ChatBotPageState extends State<ChatBotPage> {
 
           Expanded(
             child: Container(
-              clipBehavior: Clip.hardEdge,
-              margin: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey, width: 1.0),
-                borderRadius: BorderRadius.circular(16.0),
-                gradient: const RadialGradient(
-                  center: Alignment(0.5, 0.25),
-                  radius: 1.2, // aumenta o diminuisci per rendere più o meno ampio il cerchio
-                  colors: [
-                    Color.fromARGB(255, 199, 230, 255), // Azzurro pieno al centro
-                    Colors.white, // Bianco verso i bordi
-                  ],
-                  stops: [0.0, 1.0],
+                clipBehavior: Clip.hardEdge,
+                margin: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey, width: 1.0),
+                  borderRadius: BorderRadius.circular(16.0),
+                  gradient: const RadialGradient(
+                    center: Alignment(0.5, 0.25),
+                    radius:
+                        1.2, // aumenta o diminuisci per rendere più o meno ampio il cerchio
+                    colors: [
+                      Color.fromARGB(
+                          255, 199, 230, 255), // Azzurro pieno al centro
+                      Colors.white, // Bianco verso i bordi
+                    ],
+                    stops: [0.0, 1.0],
+                  ),
                 ),
-              ),
-              child: Column(
-                children: [
+                child: Column(children: [
                   // Nuova top bar per info e pulsante utente
                   Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                    margin:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                     padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
                     decoration: const BoxDecoration(
                       color: Colors.transparent,
@@ -1246,11 +1404,15 @@ class _ChatBotPageState extends State<ChatBotPage> {
                             children: [
                               if (sidebarWidth == 0.0) ...[
                                 IconButton(
-                                  icon: const Icon(Icons.menu, color: Colors.black),
+                                  icon: const Icon(Icons.menu,
+                                      color: Colors.black),
                                   onPressed: () {
                                     setState(() {
                                       isExpanded = true;
-                                      sidebarWidth = MediaQuery.of(context).size.width < 600
+                                      sidebarWidth = MediaQuery.of(context)
+                                                  .size
+                                                  .width <
+                                              600
                                           ? MediaQuery.of(context).size.width
                                           : 300.0;
                                     });
@@ -1364,11 +1526,13 @@ class _ChatBotPageState extends State<ChatBotPage> {
                   Expanded(
                     child: Container(
                       margin: const EdgeInsets.all(12.0),
-                      padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 0.0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 0.0, vertical: 0.0),
                       color: Colors.transparent,
                       child: showKnowledgeBase
                           ? Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4.0, vertical: 4.0),
                               decoration: BoxDecoration(
                                 color: Colors.transparent,
                                 borderRadius: BorderRadius.circular(16.0),
@@ -1393,7 +1557,8 @@ class _ChatBotPageState extends State<ChatBotPage> {
                                     color: Colors.transparent,
                                     borderRadius: BorderRadius.circular(2.0),
                                   ),
-                                  constraints: const BoxConstraints(maxWidth: 600),
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 600),
                                   child: AccountSettingsPage(
                                     user: widget.user,
                                     token: widget.token,
@@ -1402,176 +1567,253 @@ class _ChatBotPageState extends State<ChatBotPage> {
                               : Column(
                                   children: [
                                     // Sezione principale con i messaggi
-                                    Expanded(
-                                      // NOTA: applichiamo lo ShaderMask attorno alla ListView
-                                      child: LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final double rightContainerWidth = constraints.maxWidth;
-                                          // se vuoi max 800, ad es.
-                                          final double containerWidth = (rightContainerWidth > 800)
-                                              ? 800.0
-                                              : rightContainerWidth;
+Expanded(
+  child: LayoutBuilder(
+    builder: (context, constraints) {
+      final double rightContainerWidth = constraints.maxWidth;
+      final double containerWidth =
+          (rightContainerWidth > 800) ? 800.0 : rightContainerWidth;
 
-return ShaderMask(
-  shaderCallback: (Rect bounds) {
-    // Invece di passare [Colors.white, Colors.white, Colors.transparent],
-    // inverti i colori usando nero (keeps area) -> bianco (removes area).
-    return const LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: [
-        // In alto nero = mantieni i messaggi
-        Colors.white,
-        Colors.transparent,
-        Colors.transparent,
-        // In basso bianco = rimuovi gradualmente i messaggi
-        Colors.white,
-      ],
-      stops: [0.0,0.03,0.97,1.0],
-    ).createShader(bounds);
-  },
-  blendMode: BlendMode.dstOut,
-                                            child: ConstrainedBox(
-                                              constraints: BoxConstraints(
-                                                maxWidth: containerWidth,
-                                              ),
-                                              child: ListView.builder(
-                                                itemCount: messages.length,
-                                                itemBuilder: (context, index) {
-                                                  final message = messages[index];
-                                                  final isUser = message['role'] == 'user';
-                                                  final DateTime parsedTime =
-                                                      DateTime.tryParse(message['createdAt'] ?? '') ??
-                                                          DateTime.now();
-                                                  final String formattedTime =
-                                                      DateFormat('h:mm a').format(parsedTime);
+      return ShaderMask(
+        shaderCallback: (Rect bounds) {
+          return const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.white,
+              Colors.transparent,
+              Colors.transparent,
+              Colors.white,
+            ],
+            stops: [0.0, 0.03, 0.97, 1.0],
+          ).createShader(bounds);
+        },
+        blendMode: BlendMode.dstOut,
+        child: SingleChildScrollView(
+          // (1) Lo scroll avviene su tutta la larghezza
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Center(
+            // (2) Centra la colonna
+            child: ConstrainedBox(
+              // (3) Limita la larghezza della colonna a containerWidth
+              constraints: BoxConstraints(
+                maxWidth: containerWidth,
+              ),
+              child: Column(
+                children: List.generate(messages.length, (index) {
+                  final message = messages[index];
+                  final isUser = (message['role'] == 'user');
+                  final DateTime parsedTime = DateTime.tryParse(
+                        message['createdAt'] ?? '',
+                      ) ??
+                      DateTime.now();
+                  final String formattedTime = DateFormat('h:mm a').format(parsedTime);
 
-                                                  return Padding(
-                                                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  return Padding(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        vertical: 8.0),
                                                     child: Row(
-                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
                                                       children: [
                                                         ConstrainedBox(
-                                                          constraints: BoxConstraints(
-                                                            maxWidth: containerWidth,
+                                                          constraints:
+                                                              BoxConstraints(
+                                                            maxWidth:
+                                                                containerWidth,
                                                             minWidth: 200,
                                                           ),
                                                           child: Container(
-                                                            width: double.infinity,
-                                                            padding: const EdgeInsets.all(12.0),
-                                                            decoration: BoxDecoration(
-                                                              color: Colors.white,
-                                                              borderRadius: BorderRadius.circular(16.0),
+                                                            width:
+                                                                double.infinity,
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .all(12.0),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color:
+                                                                  Colors.white,
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          16.0),
                                                               boxShadow: const [
                                                                 BoxShadow(
-                                                                  color: Colors.black12,
-                                                                  blurRadius: 4.0,
-                                                                  offset: Offset(2, 2),
+                                                                  color: Colors
+                                                                      .black12,
+                                                                  blurRadius:
+                                                                      4.0,
+                                                                  offset:
+                                                                      Offset(
+                                                                          2, 2),
                                                                 ),
                                                               ],
                                                             ),
                                                             child: Column(
-                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
                                                               children: [
                                                                 // RIGA 1: Avatar, nome e orario
                                                                 Row(
                                                                   children: [
                                                                     if (!isUser)
                                                                       CircleAvatar(
-                                                                        backgroundColor: Colors.transparent,
-                                                                        child: Image.network(
+                                                                        backgroundColor:
+                                                                            Colors.transparent,
+                                                                        child: Image
+                                                                            .network(
                                                                           'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
-                                                                          height: 42,
-                                                                          fit: BoxFit.contain,
-                                                                          isAntiAlias: true,
+                                                                          height:
+                                                                              42,
+                                                                          fit: BoxFit
+                                                                              .contain,
+                                                                          isAntiAlias:
+                                                                              true,
                                                                         ),
                                                                       )
                                                                     else
                                                                       CircleAvatar(
-                                                                        backgroundColor: _avatarBackgroundColor
-                                                                            .withOpacity(_avatarBackgroundOpacity),
-                                                                        child: Icon(
-                                                                          Icons.person,
-                                                                          color: _avatarIconColor
-                                                                              .withOpacity(_avatarIconOpacity),
+                                                                        backgroundColor:
+                                                                            _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
+                                                                        child:
+                                                                            Icon(
+                                                                          Icons
+                                                                              .person,
+                                                                          color:
+                                                                              _avatarIconColor.withOpacity(_avatarIconOpacity),
                                                                         ),
                                                                       ),
-                                                                    const SizedBox(width: 8.0),
+                                                                    const SizedBox(
+                                                                        width:
+                                                                            8.0),
                                                                     Text(
-                                                                      isUser ? widget.user.username : 'boxed-ai',
-                                                                      style: const TextStyle(
-                                                                        fontWeight: FontWeight.bold,
+                                                                      isUser
+                                                                          ? widget
+                                                                              .user
+                                                                              .username
+                                                                          : 'boxed-ai',
+                                                                      style:
+                                                                          const TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold,
                                                                       ),
                                                                     ),
-                                                                    const SizedBox(width: 4),
+                                                                    const SizedBox(
+                                                                        width:
+                                                                            4),
                                                                     const VerticalDivider(
-                                                                      thickness: 1,
-                                                                      color: Colors.black,
+                                                                      thickness:
+                                                                          1,
+                                                                      color: Colors
+                                                                          .black,
                                                                       width: 4,
                                                                     ),
-                                                                    const SizedBox(width: 4),
+                                                                    const SizedBox(
+                                                                        width:
+                                                                            4),
                                                                     Text(
                                                                       formattedTime,
-                                                                      style: const TextStyle(
-                                                                        fontSize: 12,
-                                                                        color: Colors.grey,
+                                                                      style:
+                                                                          const TextStyle(
+                                                                        fontSize:
+                                                                            12,
+                                                                        color: Colors
+                                                                            .grey,
                                                                       ),
                                                                     ),
                                                                   ],
                                                                 ),
-                                                                const SizedBox(height: 8.0),
+                                                                const SizedBox(
+                                                                    height:
+                                                                        8.0),
                                                                 // RIGA 2: Contenuto del messaggio (Markdown)
-                                                                _buildMessageContent(
-                                                                  context,
-                                                                  message['content'] ?? '',
-                                                                  isUser,
-                                                                  userMessageColor: Colors.white,
-                                                                  assistantMessageColor: Colors.white,
-                                                                ),
-                                                                const SizedBox(height: 8.0),
+                                                                _buildMixedContent(
+                                                                    message),
+                                                                const SizedBox(
+                                                                    height:
+                                                                        8.0),
                                                                 // RIGA 3: Icone (copia, feedback, TTS, info)
                                                                 Row(
-                                                                  mainAxisAlignment: MainAxisAlignment.start,
+                                                                  mainAxisAlignment:
+                                                                      MainAxisAlignment
+                                                                          .start,
                                                                   children: [
                                                                     IconButton(
-                                                                      icon: const Icon(Icons.copy, size: 14),
-                                                                      tooltip: "Copia contenuto",
-                                                                      onPressed: () {
-                                                                        _copyToClipboard(
-                                                                            message['content'] ?? '');
+                                                                      icon: const Icon(
+                                                                          Icons
+                                                                              .copy,
+                                                                          size:
+                                                                              14),
+                                                                      tooltip:
+                                                                          "Copia contenuto",
+                                                                      onPressed:
+                                                                          () {
+                                                                        _copyToClipboard(message['content'] ??
+                                                                            '');
                                                                       },
                                                                     ),
                                                                     if (!isUser) ...[
                                                                       IconButton(
-                                                                        icon: const Icon(Icons.thumb_up, size: 14),
-                                                                        tooltip: "Feedback positivo",
-                                                                        onPressed: () {
+                                                                        icon: const Icon(
+                                                                            Icons
+                                                                                .thumb_up,
+                                                                            size:
+                                                                                14),
+                                                                        tooltip:
+                                                                            "Feedback positivo",
+                                                                        onPressed:
+                                                                            () {
                                                                           print(
                                                                               "Feedback positivo per il messaggio: ${message['content']}");
                                                                         },
                                                                       ),
                                                                       IconButton(
-                                                                        icon: const Icon(Icons.thumb_down, size: 14),
-                                                                        tooltip: "Feedback negativo",
-                                                                        onPressed: () {
+                                                                        icon: const Icon(
+                                                                            Icons
+                                                                                .thumb_down,
+                                                                            size:
+                                                                                14),
+                                                                        tooltip:
+                                                                            "Feedback negativo",
+                                                                        onPressed:
+                                                                            () {
                                                                           print(
                                                                               "Feedback negativo per il messaggio: ${message['content']}");
                                                                         },
                                                                       ),
                                                                     ],
                                                                     IconButton(
-                                                                      icon: const Icon(Icons.volume_up, size: 14),
-                                                                      tooltip: "Leggi il messaggio",
-                                                                      onPressed: () {
-                                                                        _speak(message['content'] ?? '');
+                                                                      icon: const Icon(
+                                                                          Icons
+                                                                              .volume_up,
+                                                                          size:
+                                                                              14),
+                                                                      tooltip:
+                                                                          "Leggi il messaggio",
+                                                                      onPressed:
+                                                                          () {
+                                                                        _speak(message['content'] ??
+                                                                            '');
                                                                       },
                                                                     ),
                                                                     IconButton(
-                                                                      icon: const Icon(Icons.info_outline, size: 14),
-                                                                      tooltip: "Informazioni sul messaggio",
-                                                                      onPressed: () {
-                                                                        _showMessageInfoDialog(message);
+                                                                      icon: const Icon(
+                                                                          Icons
+                                                                              .info_outline,
+                                                                          size:
+                                                                              14),
+                                                                      tooltip:
+                                                                          "Informazioni sul messaggio",
+                                                                      onPressed:
+                                                                          () {
+                                                                        _showMessageInfoDialog(
+                                                                            message);
                                                                       },
                                                                     ),
                                                                   ],
@@ -1586,29 +1828,36 @@ return ShaderMask(
                                                 },
                                               ),
                                             ),
-                                          );
+                                          ))));
                                         },
                                       ),
                                     ),
 
                                     // Container di input unificato (testo + icone + mic/invia)
                                     Container(
-                                      margin: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+                                      margin: const EdgeInsets.fromLTRB(
+                                          0, 16, 0, 0),
                                       child: LayoutBuilder(
                                         builder: (context, constraints) {
-                                          final double availableWidth = constraints.maxWidth;
+                                          final double availableWidth =
+                                              constraints.maxWidth;
                                           final double containerWidth =
-                                              (availableWidth > 800) ? 800 : availableWidth;
+                                              (availableWidth > 800)
+                                                  ? 800
+                                                  : availableWidth;
 
                                           return ConstrainedBox(
                                             constraints: BoxConstraints(
                                               maxWidth: containerWidth,
                                             ),
                                             child: Container(
-                                              padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 8.0),
                                               decoration: BoxDecoration(
                                                 color: Colors.white,
-                                                borderRadius: BorderRadius.circular(16.0),
+                                                borderRadius:
+                                                    BorderRadius.circular(16.0),
                                                 boxShadow: const [
                                                   BoxShadow(
                                                     color: Colors.black12,
@@ -1619,19 +1868,26 @@ return ShaderMask(
                                               ),
                                               child: Column(
                                                 mainAxisSize: MainAxisSize.min,
-                                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.stretch,
                                                 children: [
                                                   // RIGA 1: Campo di input testuale
                                                   Padding(
-                                                    padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 8.0),
+                                                    padding: const EdgeInsets
+                                                        .fromLTRB(
+                                                        16.0, 8.0, 16.0, 8.0),
                                                     child: TextField(
                                                       controller: _controller,
                                                       // onChanged: (_) => setState(() {}),
-                                                      decoration: const InputDecoration(
-                                                        hintText: 'Scrivi qui il tuo messaggio...',
-                                                        border: InputBorder.none,
+                                                      decoration:
+                                                          const InputDecoration(
+                                                        hintText:
+                                                            'Scrivi qui il tuo messaggio...',
+                                                        border:
+                                                            InputBorder.none,
                                                       ),
-                                                      onSubmitted: _handleUserInput,
+                                                      onSubmitted:
+                                                          _handleUserInput,
                                                     ),
                                                   ),
 
@@ -1644,49 +1900,71 @@ return ShaderMask(
 
                                                   // RIGA 2: Icone in basso (contesti, doc, media) + mic/freccia
                                                   Padding(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(horizontal: 8.0, vertical: 0.0),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 8.0,
+                                                        vertical: 0.0),
                                                     child: Row(
                                                       children: [
                                                         // Icona contesti
                                                         IconButton(
-                                                          icon: const Icon(Icons.book_outlined),
+                                                          icon: const Icon(Icons
+                                                              .book_outlined),
                                                           tooltip: "Contesti",
-                                                          onPressed: _showContextDialog,
+                                                          onPressed:
+                                                              _showContextDialog,
                                                         ),
                                                         // Icona doc (inattiva)
                                                         IconButton(
-                                                          icon: const Icon(Icons.description_outlined),
-                                                          tooltip: "Carica documento (inattivo)",
+                                                          icon: const Icon(Icons
+                                                              .description_outlined),
+                                                          tooltip:
+                                                              "Carica documento (inattivo)",
                                                           onPressed: () {
                                                             // in futuro: logica di upload
-                                                            print("Upload doc inattivo");
+                                                            print(
+                                                                "Upload doc inattivo");
                                                           },
                                                         ),
                                                         // Icona media (inattiva)
                                                         IconButton(
-                                                          icon: const Icon(Icons.image_outlined),
-                                                          tooltip: "Carica media (inattivo)",
+                                                          icon: const Icon(Icons
+                                                              .image_outlined),
+                                                          tooltip:
+                                                              "Carica media (inattivo)",
                                                           onPressed: () {
                                                             // in futuro: logica di upload
-                                                            print("Upload media inattivo");
+                                                            print(
+                                                                "Upload media inattivo");
                                                           },
                                                         ),
 
                                                         const Spacer(),
 
-                                                        (_controller.text.isEmpty)
+                                                        (_controller
+                                                                .text.isEmpty)
                                                             ? IconButton(
                                                                 icon: Icon(
-                                                                  _isListening ? Icons.mic_off : Icons.mic,
+                                                                  _isListening
+                                                                      ? Icons
+                                                                          .mic_off
+                                                                      : Icons
+                                                                          .mic,
                                                                 ),
-                                                                tooltip: "Attiva microfono",
-                                                                onPressed: _listen,
+                                                                tooltip:
+                                                                    "Attiva microfono",
+                                                                onPressed:
+                                                                    _listen,
                                                               )
                                                             : IconButton(
-                                                                icon: const Icon(Icons.send),
-                                                                tooltip: "Invia messaggio",
-                                                                onPressed: () => _handleUserInput(_controller.text),
+                                                                icon: const Icon(
+                                                                    Icons.send),
+                                                                tooltip:
+                                                                    "Invia messaggio",
+                                                                onPressed: () =>
+                                                                    _handleUserInput(
+                                                                        _controller
+                                                                            .text),
                                                               ),
                                                       ],
                                                     ),
@@ -2080,257 +2358,26 @@ return ShaderMask(
     }
   }
 
-// Funzione per aprire il dialog di selezione dei contesti e del modello (supporta selezione multipla)
-  void _showContextDialog() async {
-    // Aggiorna i contesti dal backend prima di aprire il dialog
-    await _loadAvailableContexts(); // Carica nuovamente i contesti disponibili dal backend
+void _showContextDialog() async {
+  // Carichiamo i contesti (se serve farlo qui) ...
+  await _loadAvailableContexts();
 
-    // Inizializza la lista filtrata con tutti i contesti disponibili
-    List<ContextMetadata> _filteredContexts = List.from(_availableContexts);
-
-    // Controller per la barra di ricerca
-    TextEditingController _searchController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            // Funzione per filtrare i contesti
-            void _filterContexts(String query) {
-              setState(() {
-                _filteredContexts = _availableContexts.where((context) {
-                  return context.path
-                      .toLowerCase()
-                      .contains(query.toLowerCase());
-                }).toList();
-              });
-            }
-
-            return AlertDialog(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Seleziona Contesti e Modello'),
-                  SizedBox(
-                      height:
-                          20), // Aggiunto spazio maggiore tra il titolo e la barra di ricerca
-                  // Barra di ricerca
-                  TextField(
-                    controller: _searchController,
-                    onChanged: (value) =>
-                        _filterContexts(value), // Filtra i contesti
-                    decoration: InputDecoration(
-                      hintText: 'Cerca contesti...',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.white,
-              elevation: 6, // Intensità dell'ombra
-              shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(4), // Arrotondamento degli angoli
-              ),
-              content: ConstrainedBox(
-                constraints: BoxConstraints(
-                    maxWidth: 600), // Limita la larghezza massima del dialog
-                child: SingleChildScrollView(
-                  // Rende l'intero contenuto scrollabile
-                  child: Container(
-                    width: double
-                        .maxFinite, // Consente al contenuto di occupare la larghezza disponibile
-                    child: Column(
-                      mainAxisSize: MainAxisSize
-                          .min, // Dimensioni minime in base al contenuto
-                      children: [
-                        // Lista scrollabile con checkbox per la selezione multipla dei contesti
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: Colors.black54,
-                                width: 1.0), // Bordo scuro sottile
-                            borderRadius:
-                                BorderRadius.circular(4), // Angoli arrotondati
-                          ),
-                          padding:
-                              EdgeInsets.all(8), // Padding interno al riquadro
-                          child: Container(
-                            height:
-                                300, // Altezza massima per la sezione scrollabile
-                            child: ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: _filteredContexts
-                                  .length, // Usa i contesti filtrati
-                              itemBuilder: (context, index) {
-                                final contextMetadata =
-                                    _filteredContexts[index];
-                                final isSelected = _selectedContexts
-                                    .contains(contextMetadata.path);
-
-                                return CheckboxListTile(
-                                  title: Text(
-                                    contextMetadata.path,
-                                    style: TextStyle(
-                                      color: isSelected
-                                          ? Colors
-                                              .black // Testo verde se selezionato
-                                          : Colors
-                                              .black, // Testo nero di default
-                                      fontWeight: isSelected
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                    ),
-                                  ),
-                                  value:
-                                      isSelected, // Stato del checkbox (se selezionato o no)
-                                  onChanged: (bool? selected) {
-                                    setState(() {
-                                      if (selected == true) {
-                                        _selectedContexts.add(contextMetadata
-                                            .path); // Aggiungi alla lista selezionata
-                                      } else {
-                                        _selectedContexts.remove(contextMetadata
-                                            .path); // Rimuovi dalla lista selezionata
-                                      }
-                                    });
-                                  },
-                                  activeColor: Colors
-                                      .black, // Colore del checkbox selezionato
-                                  checkColor: Colors
-                                      .white, // Colore del segno di spunta
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        SizedBox(
-                            height:
-                                16.0), // Spaziatura tra la lista e il resto del contenuto
-                        // Selettore del modello (es. GPT-4o, GPT-4o-mini)
-                        /*Text(
-                        'Seleziona Modello',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),*/
-                        //SizedBox(height: 8.0),
-                        // Pulsanti per selezionare il modello
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment
-                              .spaceEvenly, // Distribuzione equa nella riga
-                          children: [
-                            Expanded(
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 4.0),
-                                child: ChoiceChip(
-                                  label: Center(child: Text('gpt-4o')),
-                                  selected: _selectedModel == 'gpt-4o',
-                                  onSelected: (bool selected) {
-                                    setState(() {
-                                      _selectedModel = 'gpt-4o';
-                                      set_context(
-                                          _selectedContexts, _selectedModel);
-                                    });
-                                  },
-                                  selectedColor:
-                                      Colors.grey[700], // Colore selezionato
-                                  backgroundColor:
-                                      Colors.grey[200], // Colore di default
-                                  labelStyle: TextStyle(
-                                    color: _selectedModel == 'gpt-4o'
-                                        ? Colors.white
-                                        : Colors.black,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 4.0),
-                                child: ChoiceChip(
-                                  label: Center(child: Text('gpt-4o-mini')),
-                                  selected: _selectedModel == 'gpt-4o-mini',
-                                  onSelected: (bool selected) {
-                                    setState(() {
-                                      _selectedModel = 'gpt-4o-mini';
-                                      set_context(
-                                          _selectedContexts, _selectedModel);
-                                    });
-                                  },
-                                  selectedColor:
-                                      Colors.grey[700], // Colore selezionato
-                                  backgroundColor:
-                                      Colors.grey[200], // Colore di default
-                                  labelStyle: TextStyle(
-                                    color: _selectedModel == 'gpt-4o-mini'
-                                        ? Colors.white
-                                        : Colors.black,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 4.0),
-                                child: ChoiceChip(
-                                  label: Center(child: Text('qwen2-7b')),
-                                  selected: _selectedModel == 'qwen2-7b',
-                                  onSelected: (bool selected) {
-                                    setState(() {
-                                      _selectedModel = 'qwen2-7b';
-                                      set_context(
-                                          _selectedContexts, _selectedModel);
-                                    });
-                                  },
-                                  selectedColor:
-                                      Colors.grey[700], // Colore selezionato
-                                  backgroundColor:
-                                      Colors.grey[200], // Colore di default
-                                  labelStyle: TextStyle(
-                                    color: _selectedModel == 'qwen2-7b'
-                                        ? Colors.white
-                                        : Colors.black,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              actions: [
-                ElevatedButton(
-                  child: Text('Annulla'),
-                  onPressed: () {
-                    Navigator.of(context)
-                        .pop(); // Chiudi il dialog senza salvare
-                  },
-                ),
-                ElevatedButton(
-                  child: Text('Conferma'),
-                  onPressed: () {
-                    // Salva i contesti selezionati e il modello
-                    set_context(_selectedContexts,
-                        _selectedModel); // Chiama `set_context` con più contesti
-                    Navigator.of(context).pop(); // Chiudi il dialog
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+  // Richiamiamo il dialog esterno
+  await showSelectContextDialog(
+    context: context,
+    availableContexts: _availableContexts,
+    initialSelectedContexts: _selectedContexts,
+    initialModel: _selectedModel,
+    onConfirm: (List<String> newContexts, String newModel) {
+      setState(() {
+        _selectedContexts = newContexts;
+        _selectedModel = newModel;
+      });
+      // E se vuoi, chiami la funzione set_context
+      set_context(_selectedContexts, _selectedModel);
+    },
+  );
+}
 
 // Funzione per creare il selettore di modelli
   Widget _buildModelSelector(StateSetter setState) {
@@ -2785,6 +2832,15 @@ return ShaderMask(
               messages[messages.length - 1]['agentConfig'] = agentConfiguration;
             });
 
+final parsed = _parsePotentialWidgets(fullResponse);
+
+// Sovrascrivi il contenuto e aggiungi widgetData
+setState(() {
+  messages[messages.length - 1]['content'] = parsed.text;
+
+  // Invece di 'widgetData', ora useremo, per esempio, 'widgetDataList'
+  messages[messages.length - 1]['widgetDataList'] = parsed.widgetList;
+});
             // Salva la conversazione solo dopo che la risposta è stata completata
             _saveConversation(messages);
           }
@@ -2813,5 +2869,62 @@ return ShaderMask(
     final byteOffset = js_util.getProperty(jsArrayBuffer, 'byteOffset') as int;
     final byteLength = js_util.getProperty(jsArrayBuffer, 'byteLength') as int;
     return Uint8List.view(buffer, byteOffset, byteLength);
+  }
+}
+
+class NButtonWidget extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final void Function(String) onReply;
+
+  const NButtonWidget({Key? key, required this.data, required this.onReply})
+      : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final buttons = data["buttons"] as List<dynamic>? ?? [];
+    return Wrap(
+      alignment: WrapAlignment.center, // Centra i pulsanti orizzontalmente
+      spacing: 8.0, // Spazio orizzontale tra i pulsanti
+      runSpacing: 8.0, // Spazio verticale tra le righe
+      children: buttons.map((btn) {
+        return ElevatedButton(
+          onPressed: () {
+            final replyText = btn["reply"] ?? "Nessuna reply definita";
+            onReply(replyText);
+          },
+          style: ButtonStyle(
+            // Sfondo di default blu, hover bianco
+            backgroundColor: MaterialStateProperty.resolveWith<Color>(
+              (Set<MaterialState> states) {
+                if (states.contains(MaterialState.hovered)) return Colors.white;
+                return Colors.blue;
+              },
+            ),
+            // Testo di default bianco, hover blu
+            foregroundColor: MaterialStateProperty.resolveWith<Color>(
+              (Set<MaterialState> states) {
+                if (states.contains(MaterialState.hovered)) return Colors.blue;
+                return Colors.white;
+              },
+            ),
+            // Bordo visibile solo in hover (blu) altrimenti nessun bordo
+            side: MaterialStateProperty.resolveWith<BorderSide>(
+              (Set<MaterialState> states) {
+                if (states.contains(MaterialState.hovered))
+                  return const BorderSide(color: Colors.blue);
+                return BorderSide.none;
+              },
+            ),
+            // Angoli arrotondati a 8
+            shape: MaterialStateProperty.all<RoundedRectangleBorder>(
+              RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+          child: Text(btn["label"] ?? "Senza etichetta"),
+        );
+      }).toList(),
+    );
   }
 }

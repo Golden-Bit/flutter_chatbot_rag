@@ -544,7 +544,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                      backgroundColor: Colors.white, // Sfondo del popup
       elevation: 6, // Intensità dell'ombra
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(4), // Arrotondamento degli angoli
+        borderRadius: BorderRadius.circular(16), // Arrotondamento degli angoli
         //side: BorderSide(
         //  color: Colors.blue, // Colore del bordo
         //  width: 2, // Spessore del bordo
@@ -609,227 +609,277 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      //appBar: AppBar(
-      //  title: Text('Impostazioni Account'),
-      //),
-      backgroundColor: Colors.transparent, // Imposta lo sfondo bianco
-      body: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 600),
-          child: Padding(
-            padding: EdgeInsets.all(16.0),
-            child: ListView(
-              children: [
-                Form(
-                  key: _profileFormKey,
-                  child: Card(
-                                      color: Colors.white, // Imposta lo sfondo bianco
-                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
-    //side: BorderSide(
-    //  color: Colors.grey, // Colore dei bordi
-    //  width: 0, // Spessore dei bordi
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    //appBar: AppBar(
+    //  title: Text('Impostazioni Account'),
     //),
-  ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Modifica Profilo',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 20),
-                          TextFormField(
-                            controller: _emailController,
-                              decoration: InputDecoration(
-    labelText: 'Email',
-    border: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
-  ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Inserisci la tua email';
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
-                          TextFormField(
-                            controller: _fullNameController,
-                              decoration: InputDecoration(
-    labelText: 'Full Name',
-    border: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
-  ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Inserisci il tuo nome completo';
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: 20),
-                          Align(
-                            alignment: Alignment.bottomRight,
-                            child: ElevatedButton(
-                              onPressed: _updateProfile,
-                              child: Text('Aggiorna Profilo'),
-                            ),
-                          ),
-                        ],
+    backgroundColor: Colors.transparent, // Imposta lo sfondo bianco
+    body: Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 600),
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: ListView(
+            children: [
+              // UNICO RIQUADRO CHE CONTIENE SIA "MODIFICA PROFILO" CHE "MODIFICA PASSWORD"
+              Card(
+                color: Colors.white, // Sfondo bianco
+                elevation: 6, // Intensità dell'ombra
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16), // Angoli arrotondati
+                  //side: BorderSide(
+                  //  color: Colors.grey, // Colore dei bordi
+                  //  width: 0, // Spessore dei bordi
+                  //),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Sezione "Modifica profilo"
+                      Text(
+                        'Modifica profilo',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 20),
-                Form(
-                  key: _passwordFormKey,
-                  child: Card(
-                                      color: Colors.white, // Imposta lo sfondo bianco
-                                                          elevation: 6, // Intensità dell'ombra (0 = nessuna ombra)
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(4), // Angoli arrotondati
-    //side: BorderSide(
-    //  color: Colors.grey, // Colore dei bordi
-    //  width: 0, // Spessore dei bordi
-    //),
-  ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Modifica Password',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
+                      SizedBox(height: 20),
+
+                      // Form per il profilo
+                      Form(
+                        key: _profileFormKey,
+                        child: Column(
+                          children: [
+                            // Campo Email
+                            TextFormField(
+                              controller: _emailController,
+                              decoration: InputDecoration(
+                                hintText: 'Inserisci email...',
+                                prefixIcon: Icon(Icons.email_outlined),
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black, width: 2.0),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Inserisci la tua email';
+                                }
+                                return null;
+                              },
                             ),
-                          ),
-                          SizedBox(height: 20),
-                          TextFormField(
-                            controller: _oldPasswordController,
+                            SizedBox(height: 20),
+
+                            // Campo Full Name
+                            TextFormField(
+                              controller: _fullNameController,
                               decoration: InputDecoration(
-    labelText: 'Vecchia Password',
-    border: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
-  ),
-                            obscureText: true,
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Inserisci la vecchia password';
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
-                          TextFormField(
-                            controller: _newPasswordController,
-                              decoration: InputDecoration(
-    labelText: 'Nuova Password',
-    border: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
-  ),
-                            obscureText: true,
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Inserisci la nuova password';
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: 20), // Spazio verticale dopo l'ultimo campo di input
-                          TextFormField(
-                            controller: _confirmNewPasswordController,
-                              decoration: InputDecoration(
-    labelText: 'Conferma Nuova Password',
-    border: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
-  ),
-                            obscureText: true,
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Conferma la nuova password';
-                              }
-                              if (value != _newPasswordController.text) {
-                                return 'Le password non coincidono';
-                              }
-                              return null;
-                            },
-                          ),
-                          SizedBox(height: 20),
-                          Align(
-                            alignment: Alignment.bottomRight,
-                            child: ElevatedButton(
-                              onPressed: _changePassword,
-                              child: Text('Cambia Password'),
+                                hintText: 'Inserisci user name...',
+                                prefixIcon: Icon(Icons.person_outline),
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black, width: 2.0),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Inserisci il tuo nome completo';
+                                }
+                                return null;
+                              },
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
+                      SizedBox(height: 20),
+
+                      // Pulsante "Aggiorna profilo"
+                      Align(
+                        alignment: Alignment.bottomRight,
+                        child: ElevatedButton(
+                          onPressed: _updateProfile,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(42),
+                            ),
+                          ),
+                          child: Text(
+                            'Aggiorna profilo',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+
+                      SizedBox(height: 20),
+
+                      // Sezione "Modifica password"
+                      Text(
+                        'Modifica password',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 20),
+
+                      // Form per la password
+                      Form(
+                        key: _passwordFormKey,
+                        child: Column(
+                          children: [
+                            // Campo "Vecchia password"
+                            TextFormField(
+                              controller: _oldPasswordController,
+                              decoration: InputDecoration(
+                                hintText: 'Vecchia password...',
+                                prefixIcon: Icon(Icons.lock_outline),
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black, width: 2.0),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              obscureText: true,
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Inserisci la vecchia password';
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: 20),
+
+                            // Campo "Nuova password"
+                            TextFormField(
+                              controller: _newPasswordController,
+                              decoration: InputDecoration(
+                                hintText: 'Nuova password...',
+                                prefixIcon: Icon(Icons.lock_outline),
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black, width: 2.0),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              obscureText: true,
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Inserisci la nuova password';
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: 20),
+
+                            // Campo "Conferma nuova password"
+                            TextFormField(
+                              controller: _confirmNewPasswordController,
+                              decoration: InputDecoration(
+                                hintText: 'Conferma nuova password...',
+                                prefixIcon: Icon(Icons.lock_outline),
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.black, width: 2.0),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              obscureText: true,
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Conferma la nuova password';
+                                }
+                                if (value != _newPasswordController.text) {
+                                  return 'Le password non coincidono';
+                                }
+                                return null;
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 20),
+
+                      // Pulsante "Cambia password"
+                      Align(
+                        alignment: Alignment.bottomRight,
+                        child: ElevatedButton(
+                          onPressed: _changePassword,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(42),
+                            ),
+                          ),
+                          child: Text(
+                            'Cambia password',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _deleteAccount,
-                  child: Text(
-                    'Elimina Account',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                  ),
+              ),
+
+              SizedBox(height: 20),
+
+              // Pulsante "Elimina Account" fuori dal riquadro, in basso
+              ElevatedButton(
+                onPressed: _deleteAccount,
+                child: Text(
+                  'Elimina Account',
+                  style: TextStyle(color: Colors.white),
                 ),
-              ],
-            ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                ),
+              ),
+            ],
           ),
         ),
       ),
-    );
+    ));
   }
 }

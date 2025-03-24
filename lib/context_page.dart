@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_app/ui_components/icons/cube.dart';
 import 'context_api_sdk.dart';
 import 'dart:typed_data';
 
@@ -328,6 +329,84 @@ class _DashboardScreenState extends State<DashboardScreen> {
       },
     );
   }
+Widget _buildSearchAreaWithTitle() {
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      if (constraints.maxWidth > 900) {
+        // Se la larghezza disponibile è maggiore di 900,
+        // mostra titolo e campo di ricerca in riga, con spazio tra di loro
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Titolo allineato a sinistra
+            Text(
+              'Knowledge Boxes',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            // Campo di ricerca con larghezza massima fissata (ad es. 600)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 600),
+              child: TextField(
+                controller: _nameSearchController,
+                onChanged: (value) {
+                  _filterContexts();
+                },
+                decoration: InputDecoration(
+                  hintText: 'Cerca per nome o descrizione...',
+                  prefixIcon: Icon(Icons.search),
+                  contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      } else {
+        // Se la larghezza disponibile è inferiore a 900,
+        // mostra il titolo sopra il campo di ricerca
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Titolo allineato a sinistra
+            Text(
+              'Knowledge Boxes',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            // Campo di ricerca centrato e che occupa tutta la larghezza disponibile
+            Center(
+              child: TextField(
+                controller: _nameSearchController,
+                onChanged: (value) {
+                  _filterContexts();
+                },
+                decoration: InputDecoration(
+                  hintText: 'Cerca per nome o descrizione...',
+                  prefixIcon: Icon(Icons.search),
+                  contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.black), // Bordi neri
+                  ),
+    enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+    },
+  );
+}
 
   // Funzione per creare un nuovo contesto e caricare il file obbligatorio
   Future<void> _createContextAndUploadFile(
@@ -406,7 +485,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           elevation: 6, // Intensità dell'ombra
           shape: RoundedRectangleBorder(
             borderRadius:
-                BorderRadius.circular(4), // Arrotondamento degli angoli
+                BorderRadius.circular(16), // Arrotondamento degli angoli
             //side: BorderSide(
             //  color: Colors.blue, // Colore del bordo
             //  width: 2, // Spessore del bordo
@@ -481,9 +560,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
+                        shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(16), // Arrotondamento degli angoli
+            //side: BorderSide(
+            //  color: Colors.blue, // Colore del bordo
+            //  width: 2, // Spessore del bordo
+            //),
+          ),
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(children: [
+                    WireframeCubeIcon(
+  size: 36.0,
+  color: Colors.blue,
+),
+    SizedBox(width: 8.0),
                   Text(
                     contextPath,
                     style: TextStyle(
@@ -493,7 +586,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                  ),
+                  )]),
                   SizedBox(height: 8.0),
                   if (description != null)
                     Text(
@@ -520,18 +613,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       hintText: 'Cerca file...',
                       prefixIcon: Icon(Icons.search),
                       contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(4.0),
-                      ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.black), // Bordi neri
+                  ),
+    enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
+    ),
+    focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
+    ),
                     ),
                   ),
                 ],
               ),
               backgroundColor: Colors.white,
               elevation: 6,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4),
-              ),
+              //shape: RoundedRectangleBorder(
+              //  borderRadius: BorderRadius.circular(8),
+              //),
               content: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: 400, maxHeight: 800),
                 child: Container(
@@ -564,7 +666,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               color: Colors.white,
                               elevation: 6,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(4),
+                                borderRadius: BorderRadius.circular(8),
                               ),
                               child: Padding(
                                 padding: const EdgeInsets.all(8.0),
@@ -664,35 +766,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            /*Row(
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  children: [
             //Text('Gestione dei Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             //SizedBox(height: 10),
 // Titolo e pulsante "Nuovo Contesto"
             Text('Knowledge Boxes',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-
-            SizedBox(height: 10),
-
 // Barre di ricerca
-            Row(
-              children: [
-// Barra di ricerca unica
-                TextField(
-                  controller:
-                      _nameSearchController, // Riutilizziamo uno dei controller
-                  onChanged: (value) {
-                    _filterContexts(); // Aggiorna i risultati del filtro
-                  },
-                  decoration: InputDecoration(
-                    hintText: 'Cerca per nome o descrizione...',
-                    prefixIcon: Icon(Icons.search),
-                    contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(4.0),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+const SizedBox(width: 16),
+    ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: 250), // Limite di larghezza
+      child: TextField(
+        controller: _nameSearchController,
+        onChanged: (value) {
+          _filterContexts(); // Aggiorna i risultati del filtro
+        },
+        decoration: InputDecoration(
+          hintText: 'Cerca per nome o descrizione...',
+          prefixIcon: Icon(Icons.search),
+          contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8.0),
+          ),
+        ),
+      ),
+    ),
+  ],
+),*/
+_buildSearchAreaWithTitle(),
             SizedBox(height: 10),
 
             SizedBox(height: 10),
@@ -715,10 +818,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       onTap:
                           _showCreateContextDialog, // Apre il dialog per creare il contesto
                       child: Card(
-                        color: Colors.grey[400], // Sfondo grigio
+                        color: Colors.blue, // Sfondo grigio
                         elevation: 6,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: Center(
                           child: Text(
@@ -766,7 +869,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: Colors.white,
                       elevation: 6,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(10.0),
@@ -781,16 +884,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
+                                      Row(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+                                          // 1) ICONA CUBO
+WireframeCubeIcon(
+  size: 36.0,
+  color: Colors.blue,
+),
+    SizedBox(width: 8.0),
                                       // Nome del contesto
                                       Text(
                                         contextMetadata.path,
                                         style: TextStyle(
-                                          fontSize: 14,
+                                          fontSize: 18,
                                           fontWeight: FontWeight.bold,
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                      ),
+                                      )]),
                                       // Rotella di caricamento e nome del file (se in caricamento)
                                     ],
                                   ),
@@ -867,3 +979,4 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 }
+

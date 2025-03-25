@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_app/context_api_sdk.dart';
+import 'package:flutter_app/utilities/localization.dart';
 
 // Se serve importare user/token, puoi aggiungere:
 // import 'package:flutter_app/user_manager/user_model.dart';
@@ -94,6 +95,7 @@ class _SelectContextDialogContentState
 
   @override
   Widget build(BuildContext context) {
+    final localizations = LocalizationProvider.of(context);
     // Invece di AlertDialog, usiamo un Dialog personalizzato
     // per controllare meglio forma e dimensioni
     return Dialog(
@@ -118,7 +120,7 @@ class _SelectContextDialogContentState
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
               child: Text(
-                'Seleziona contesti e modello',
+                localizations.select_contexts_and_model,
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -140,7 +142,7 @@ class _SelectContextDialogContentState
                       controller: _searchController,
                       onChanged: _filterContexts,
                       decoration: InputDecoration(
-                        hintText: 'Cerca contesti...',
+                        hintText: localizations.search_contexts,
                         prefixIcon: Icon(Icons.search),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -230,8 +232,8 @@ class _SelectContextDialogContentState
                     onPressed: () => Navigator.of(context).pop(),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Text('Annulla'),
+                      children: [
+                        Text(localizations.cancel),
                       ],
                     ),
                   ),
@@ -249,9 +251,9 @@ class _SelectContextDialogContentState
                     onPressed: _handleConfirm,
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
+                      children: [
                         Text(
-                          'Conferma',
+                          localizations.confirm,
                           style: TextStyle(color: Colors.white),
                         )
                       ],
@@ -267,7 +269,7 @@ class _SelectContextDialogContentState
   }
 
   Widget _buildModelSelector() {
-    final List<String> models = ['Gpt-4o', 'Gpt-4o-Mini'];
+    final List<String> models = ['gpt-4o', 'gpt-4o-mini'];
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,

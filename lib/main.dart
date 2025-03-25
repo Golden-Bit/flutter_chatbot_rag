@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/utilities/localization.dart';
 import 'dart:html' as html;
 import 'user_manager/auth_service.dart';
 import 'chatbot.dart';
@@ -8,7 +9,11 @@ import 'utils.dart'; // Schermata di caricamento
 import 'databases_manager/database_service.dart'; // Schermata di caricamento
 
 void main() {
-  runApp(MyApp());
+  runApp(
+    LocalizationProviderWrapper(
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {

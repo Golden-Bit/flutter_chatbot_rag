@@ -921,6 +921,7 @@ Widget build(BuildContext context) {
                                     textAlign: TextAlign.left, // Assicura l'allineamento a sinistra
                                   ),
                                   PopupMenuButton<String>(
+                                                                                            color: Colors.white,
                                     onSelected: (value) {
                                       if (value == 'create') {
                                         _createCollection(db.dbName);

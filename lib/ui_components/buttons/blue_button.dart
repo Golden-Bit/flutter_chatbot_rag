@@ -33,7 +33,7 @@ class _HoverableNewChatButtonState extends State<HoverableNewChatButton> {
           padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
           decoration: BoxDecoration(
             color: backgroundColor,
-            borderRadius: BorderRadius.circular(4.0),
+            borderRadius: BorderRadius.circular(8.0),
             border: Border.all(
               color: Colors.blue,
               width: 1.5,

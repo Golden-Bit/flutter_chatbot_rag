@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/utilities/localization.dart';
 import 'auth_service.dart';
 import 'user_model.dart';
 import '../main.dart'; // Importa main.dart per navigazione
@@ -44,9 +45,10 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
+    final localizations = LocalizationProvider.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('Register'),
+        title: Text(localizations.registrationTitle),
       ),
       backgroundColor: Colors.white, // Imposta lo sfondo bianco
       body: Center(
@@ -74,7 +76,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Registrazione',
+                          localizations.registerButton,
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -97,7 +99,7 @@ class _RegisterPageState extends State<RegisterPage> {
   ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Inserisci il tuo username';
+                              return localizations.enterUsername;
                             }
                             return null;
                           },
@@ -119,7 +121,7 @@ class _RegisterPageState extends State<RegisterPage> {
   ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Inserisci la tua email';
+                              return localizations.enterEmail;
                             }
                             return null;
                           },
@@ -141,7 +143,7 @@ class _RegisterPageState extends State<RegisterPage> {
   ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Inserisci il tuo nome completo';
+                              return localizations.enterFullName;
                             }
                             return null;
                           },
@@ -164,7 +166,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           obscureText: true,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Inserisci la tua password';
+                              return localizations.password;
                             }
                             return null;
                           },
@@ -173,7 +175,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         TextFormField(
                           controller: _confirmPasswordController,
                             decoration: InputDecoration(
-    labelText: 'Conferma Password',
+    labelText: 'Confirm Password',
     border: OutlineInputBorder(
       borderSide: BorderSide(color: Colors.black), // Bordi neri
     ),
@@ -187,10 +189,10 @@ class _RegisterPageState extends State<RegisterPage> {
                           obscureText: true,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Conferma la tua password';
+                              return localizations.confirmPassword;
                             }
                             if (value != _passwordController.text) {
-                              return 'Le password non coincidono';
+                              return localizations.passwordsDoNotMatch;
                             }
                             return null;
                           },
@@ -200,7 +202,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           alignment: Alignment.bottomRight,
                           child: ElevatedButton(
                             onPressed: _register,
-                            child: Text('Register'),
+                            child: Text(localizations.registerButton),
                           ),
                         ),
                       ],
@@ -303,6 +305,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final localizations = LocalizationProvider.of(context);
     // Mostra schermata di caricamento finché stiamo verificando il token
     if (_isLoading) {
       return Scaffold(
@@ -367,7 +370,7 @@ class _LoginPageState extends State<LoginPage> {
   ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Inserisci il tuo username';
+                              return localizations.enterUsernameLogin;
                             }
                             return null;
                           },
@@ -390,7 +393,7 @@ class _LoginPageState extends State<LoginPage> {
                           obscureText: true,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Inserisci la tua password';
+                              return localizations.enterPasswordLogin;
                             }
                             return null;
                           },
@@ -409,10 +412,10 @@ class _LoginPageState extends State<LoginPage> {
                             onPressed: () {
                               Navigator.pushNamed(context, '/register');
                             },
-                            child: Text('Non hai un account? Registrati'),
+                            child: Text(localizations.noAccountRegisterPrompt,
                           ),
                         ),
-                      ],
+                    )],
                     ),
                   ),
                 ),
@@ -533,6 +536,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
   }
 
   void _deleteAccount() async {
+    final localizations = LocalizationProvider.of(context);
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -540,7 +544,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
         final TextEditingController passwordController = TextEditingController();
 
         return AlertDialog(
-          title: Text('Conferma Eliminazione Account'),
+          title: Text(localizations.confirmAccountDeletion),
                      backgroundColor: Colors.white, // Sfondo del popup
       elevation: 6, // Intensità dell'ombra
       shape: RoundedRectangleBorder(
@@ -566,13 +570,13 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
           ),
           actions: [
             TextButton(
-              child: Text('Annulla'),
+              child: Text(localizations.cancel),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
             ElevatedButton(
-              child: Text('Elimina',                    
+              child: Text(localizations.delete,                    
               style: TextStyle(color: Colors.white),
                   ),
                   style: ElevatedButton.styleFrom(
@@ -588,7 +592,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                       widget.user.email,
                     );
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('Account eliminato con successo!'),
+                      content: Text(localizations.confirmAccountDeletion),
                     ));
                     Navigator.of(context).pushReplacementNamed('/login');
                   } catch (e) {
@@ -611,6 +615,7 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
 
 @override
 Widget build(BuildContext context) {
+  final localizations = LocalizationProvider.of(context);
   return Scaffold(
     //appBar: AppBar(
     //  title: Text('Impostazioni Account'),
@@ -641,7 +646,7 @@ Widget build(BuildContext context) {
                     children: [
                       // Sezione "Modifica profilo"
                       Text(
-                        'Modifica profilo',
+                        localizations.editProfile,
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -725,7 +730,7 @@ Widget build(BuildContext context) {
                             ),
                           ),
                           child: Text(
-                            'Aggiorna profilo',
+                            localizations.updateProfile,
                             style: TextStyle(color: Colors.white),
                           ),
                         ),
@@ -735,7 +740,7 @@ Widget build(BuildContext context) {
 
                       // Sezione "Modifica password"
                       Text(
-                        'Modifica password',
+                        localizations.changePassword,
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -752,7 +757,7 @@ Widget build(BuildContext context) {
                             TextFormField(
                               controller: _oldPasswordController,
                               decoration: InputDecoration(
-                                hintText: 'Vecchia password...',
+                                hintText: localizations.oldPassword,
                                 prefixIcon: Icon(Icons.lock_outline),
                                 border: OutlineInputBorder(
                                   borderSide: BorderSide(color: Colors.black),
@@ -781,7 +786,7 @@ Widget build(BuildContext context) {
                             TextFormField(
                               controller: _newPasswordController,
                               decoration: InputDecoration(
-                                hintText: 'Nuova password...',
+                                hintText: localizations.newPassword,
                                 prefixIcon: Icon(Icons.lock_outline),
                                 border: OutlineInputBorder(
                                   borderSide: BorderSide(color: Colors.black),
@@ -810,7 +815,7 @@ Widget build(BuildContext context) {
                             TextFormField(
                               controller: _confirmNewPasswordController,
                               decoration: InputDecoration(
-                                hintText: 'Conferma nuova password...',
+                                hintText: localizations.confirmNewPassword,
                                 prefixIcon: Icon(Icons.lock_outline),
                                 border: OutlineInputBorder(
                                   borderSide: BorderSide(color: Colors.black),
@@ -853,7 +858,7 @@ Widget build(BuildContext context) {
                             ),
                           ),
                           child: Text(
-                            'Cambia password',
+                            localizations.changePassword,
                             style: TextStyle(color: Colors.white),
                           ),
                         ),
@@ -869,7 +874,7 @@ Widget build(BuildContext context) {
               ElevatedButton(
                 onPressed: _deleteAccount,
                 child: Text(
-                  'Elimina Account',
+                  localizations.deleteAccount,
                   style: TextStyle(color: Colors.white),
                 ),
                 style: ElevatedButton.styleFrom(

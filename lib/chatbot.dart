@@ -9,6 +9,7 @@ import 'package:flutter_app/ui_components/buttons/blue_button.dart';
 import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
 import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
 import 'package:flutter_app/user_manager/auth_pages.dart';
+import 'package:flutter_app/utilities/localization.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart'; // Aggiungi il pacchetto TTS
@@ -75,6 +76,8 @@ class ChatBotPage extends StatefulWidget {
 }
 
 class _ChatBotPageState extends State<ChatBotPage> {
+
+
   List<Map<String, dynamic>> messages = [];
 // Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
 final Map<String, Widget Function(Map<String, dynamic> data, void Function(String) onReply)> widgetMap = {
@@ -147,6 +150,9 @@ final Map<String, Widget Function(Map<String, dynamic> data, void Function(Strin
   List<dynamic> _chatHistory = [];
   String? _nlpApiUrl;
   int? _activeButtonIndex;
+
+  String? _latestChainId;
+  String? _latestConfigId;
 
 /// Risultato del parsing del testo chatbot:
 /// text: testo "pulito" dopo la rimozione dei blocchi widget, 
@@ -509,7 +515,9 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
 
   // Funzione per aprire il dialog con il ColorPicker
   void _showColorPickerDialog(
+    
       Color currentColor, Function(Color) onColorChanged) {
+        final localizations = LocalizationProvider.of(context);
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -519,7 +527,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
           elevation: 6, // Intensità dell'ombra
           shape: RoundedRectangleBorder(
             borderRadius:
-                BorderRadius.circular(4), // Arrotondamento degli angoli
+                BorderRadius.circular(8), // Arrotondamento degli angoli
             //side: BorderSide(
             //  color: Colors.blue, // Colore del bordo
             //  width: 2, // Spessore del bordo
@@ -539,7 +547,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
           ),
           actions: [
             ElevatedButton(
-              child: Text('Chiudi'),
+              child: Text(localizations.close),
               onPressed: () {
                 Navigator.of(context).pop();
               },
@@ -550,35 +558,6 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
     );
   }
 
-  Widget _buildMessageContent_(String content, bool isUser) {
-    return Stack(
-      children: [
-        // Markdown renderer (sotto)
-        MarkdownBody(
-          data: content, // Mostra il contenuto Markdown2
-          styleSheet: MarkdownStyleSheet(
-            p: TextStyle(
-              fontSize: 14.0,
-              color: isUser ? Colors.black : Colors.black,
-            ),
-          ),
-        ),
-        // Selectable layer (sopra)
-        IgnorePointer(
-          ignoring: false, // Permette la selezione del testo
-          child: SelectableText(
-            content, // Testo selezionabile
-            style: TextStyle(
-              fontSize: 14.0,
-              color: Colors
-                  .transparent, // Rende invisibile per non coprire Markdown
-            ),
-            enableInteractiveSelection: true, // Abilita la selezione
-          ),
-        ),
-      ],
-    );
-  }
 
 // Funzione che restituisce il widget per il messaggio Markdown, con formattazione avanzata
   Widget _buildMessageContent(
@@ -640,6 +619,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
   }
 
   void _showMessageInfoDialog(Map<String, dynamic> message) {
+    final localizations = LocalizationProvider.of(context);
     final String role = message['role'] ?? 'unknown'; // Ruolo del messaggio
     final String createdAt = message['createdAt'] ?? 'N/A'; // Data di creazione
     final int contentLength =
@@ -666,7 +646,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text("Dettagli del messaggio"),
+          title: Text(localizations.message_details),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -674,28 +654,28 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
               children: [
                 // Dettagli di base del messaggio
                 Text(
-                  "Ruolo: ${role == 'user' ? 'Utente' : 'Assistente'}",
+                  "${localizations.roleLabel} ${role == 'user' ? localizations.userRole : localizations.assistantRole}",
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                Text("Data: $createdAt"),
-                Text("Lunghezza in caratteri: $contentLength"),
+                Text("${localizations.dateLabel} $createdAt"),
+                Text("${localizations.charLength} $contentLength"),
                 Text(
-                    "Lunghezza in token: 0"), // Sostituisci se disponi di dati token
+                    "${localizations.tokenLength} 0"), // Sostituisci se disponi di dati token
 
                 // Divider per separare i dettagli base dai dettagli di configurazione
                 if (role == 'assistant' || agentConfig != null) ...[
                   const Divider(),
-                  Text("Dettagli della configurazione dell'agente:",
+                  Text(localizations.agentConfigDetails,
                       style: TextStyle(fontWeight: FontWeight.bold)),
 
                   // Mostra il modello selezionato
-                  if (model != null) Text("Modello: $model"),
+                  if (model != null) Text("${localizations.modelLabel} $model"),
                   const SizedBox(height: 8),
 
                   // Mostra i contesti utilizzati
                   if (contexts != null && contexts.isNotEmpty) ...[
-                    Text("Contesti selezionati:",
+                    Text(localizations.selectedContextsLabel,
                         style: TextStyle(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     ...contexts.map((context) => Text("- $context")).toList(),
@@ -704,15 +684,15 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
                   const SizedBox(height: 8),
 
                   // Mostra l'ID della chain
-                  if (chainId != null) Text("Chain ID: $chainId"),
+                  if (chainId != null) Text("${localizations.chainIdLabel} $chainId"),
 
                   // Divider aggiuntivo per eventuali altri dettagli
                   const Divider(),
-                  Text("Metriche aggiuntive:",
+                  Text(localizations.additionalMetrics,
                       style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text("Token ricevuti: $tokensReceived"),
-                  Text("Token generati: $tokensGenerated"),
-                  Text("Costo risposta: \$${responseCost.toStringAsFixed(4)}"),
+                  Text("${localizations.tokensGenerated} $tokensReceived"),
+                  Text("${localizations.tokensReceived} $tokensGenerated"),
+                  Text("${localizations.responseCost} \$${responseCost.toStringAsFixed(4)}"),
                 ],
               ],
             ),
@@ -722,7 +702,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
               onPressed: () {
                 Navigator.of(context).pop(); // Chiudi il dialog
               },
-              child: Text("Chiudi"),
+              child: Text(localizations.close)
             ),
           ],
         );
@@ -730,8 +710,202 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
     );
   }
 
+bool _isSameDay(DateTime d1, DateTime d2) {
+  return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
+}
+
+String _getDateSeparator(DateTime date) {
+  final today = DateTime.now();
+  final yesterday = today.subtract(Duration(days: 1));
+  if (_isSameDay(date, today)) {
+    return "Today";
+  } else if (_isSameDay(date, yesterday)) {
+    return "Yesterday";
+  } else {
+    return DateFormat('dd MMM yyyy').format(date);
+  }
+}
+
+
+List<Widget> _buildMessagesList(double containerWidth) {
+  final localizations = LocalizationProvider.of(context);
+  List<Widget> widgets = [];
+  for (int i = 0; i < messages.length; i++) {
+    final message = messages[i];
+    final bool isUser = (message['role'] == 'user');
+    final DateTime parsedTime = DateTime.tryParse(message['createdAt'] ?? '') ?? DateTime.now();
+    final String formattedTime = DateFormat('h:mm a').format(parsedTime);
+
+    // Se è il primo messaggio o se la data del messaggio corrente è diversa da quella del precedente,
+    // aggiungi un separatore.
+    if (i == 0) {
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Center(
+            child: Text(
+              _getDateSeparator(parsedTime),
+              style: const TextStyle(
+                fontSize: 12.0,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+        ),
+      );
+    } else {
+      final DateTime previousTime = DateTime.tryParse(messages[i - 1]['createdAt'] ?? '') ?? parsedTime;
+      if (!_isSameDay(parsedTime, previousTime)) {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Center(
+              child: Text(
+                _getDateSeparator(parsedTime),
+                style: const TextStyle(
+                  fontSize: 12.0,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    // Aggiungi il widget del messaggio (codice originale invariato)
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: containerWidth,
+                minWidth: 200,
+              ),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16.0),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 4.0,
+                      offset: Offset(2, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // RIGA 1: Avatar, nome e orario
+                    Row(
+                      children: [
+                        if (!isUser)
+                          CircleAvatar(
+                            backgroundColor: Colors.transparent,
+                            child: Image.network(
+                              'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
+                              height: 42,
+                              fit: BoxFit.contain,
+                              isAntiAlias: true,
+                            ),
+                          )
+                        else
+                          CircleAvatar(
+                            backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
+                            child: Icon(
+                              Icons.person,
+                              color: _avatarIconColor.withOpacity(_avatarIconOpacity),
+                            ),
+                          ),
+                        const SizedBox(width: 8.0),
+                        Text(
+                          isUser ? widget.user.username : 'boxed-ai',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 4),
+                        const VerticalDivider(
+                          thickness: 1,
+                          color: Colors.black,
+                          width: 4,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          formattedTime,
+                          style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8.0),
+                    // RIGA 2: Contenuto del messaggio (Markdown)
+                    _buildMixedContent(message),
+                    const SizedBox(height: 8.0),
+                    // RIGA 3: Icone (copia, feedback, TTS, info)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 14),
+                          tooltip: localizations.copy,
+                          onPressed: () {
+                            _copyToClipboard(message['content'] ?? '');
+                          },
+                        ),
+                        if (!isUser) ...[
+                          IconButton(
+                            icon: const Icon(Icons.thumb_up, size: 14),
+                            tooltip: localizations.positive_feedback,
+                            onPressed: () {
+                              print("Feedback positivo per il messaggio: ${message['content']}");
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.thumb_down, size: 14),
+                            tooltip: localizations.negative_feedback,
+                            onPressed: () {
+                              print("Feedback negativo per il messaggio: ${message['content']}");
+                            },
+                          ),
+                        ],
+                        IconButton(
+                          icon: const Icon(Icons.volume_up, size: 14),
+                          tooltip: localizations.volume,
+                          onPressed: () {
+                            _speak(message['content'] ?? '');
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.info_outline, size: 14),
+                          tooltip: localizations.messageInfoTitle,
+                          onPressed: () {
+                            _showMessageInfoDialog(message);
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  return widgets;
+}
+
   @override
   Widget build(BuildContext context) {
+    final localizations = LocalizationProvider.of(context);
     return Scaffold(
       backgroundColor: Colors.white,
    
@@ -860,7 +1034,7 @@ showSearchDialog(
         color: _buttonHoveredIndex == 99
             ? const Color.fromARGB(255, 224, 224, 224)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(4.0),
+        borderRadius: BorderRadius.circular(8),
       ),
       padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
       child: Row(
@@ -868,7 +1042,7 @@ showSearchDialog(
           Icon(Icons.search, color: Colors.black),
           const SizedBox(width: 8.0),
           Text(
-            'Cerca',
+            localizations.searchButton,
             style: TextStyle(color: Colors.black),
           ),
         ],
@@ -936,7 +1110,7 @@ showSearchDialog(
                                       height: 24),*/
                                   const SizedBox(width: 8.0),
                                   Text(
-                                    'Conversazione',
+                                    localizations.conversation,
                                     style: TextStyle(
                                         color: Colors
                                             .black), // Cambia colore in nero
@@ -1001,7 +1175,7 @@ showSearchDialog(
                                       color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
-                                    'Knowledge Boxes',
+                                      localizations.knowledgeBoxes,
                                     style: TextStyle(
                                         color: Colors
                                             .black), // Cambia colore in nero
@@ -1065,7 +1239,7 @@ showSearchDialog(
                                       color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
-                                    'Impostazioni',
+                                    localizations.settings,
                                     style: TextStyle(
                                         color: Colors
                                             .black), // Cambia colore in nero
@@ -1078,8 +1252,7 @@ showSearchDialog(
                         const SizedBox(height: 24),
 
 // Lista delle chat salvate
-SizedBox(
-  height: 500, // Altezza fissa
+Expanded(
   child: FutureBuilder(
                             future:
                                 _chatHistoryFuture, // Assicurati che le chat siano caricate
@@ -1102,7 +1275,7 @@ SizedBox(
                               if (nonEmptySections.isEmpty) {
                                 return Center(
                                   child: Text(
-                                    "Nessuna chat disponibile.",
+                                    localizations.noChatAvailable,
                                     style: TextStyle(color: Colors.white70),
                                   ),
                                 );
@@ -1244,6 +1417,8 @@ SizedBox(
                                                         ),
                                                       ),
                                                       PopupMenuButton<String>(
+                                                          borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
+                                                        color: Colors.white,
                                                         icon: Icon(
                                                           Icons.more_horiz,
                                                           color: (isHovered ||
@@ -1278,12 +1453,12 @@ SizedBox(
                                                             PopupMenuItem(
                                                               value: 'edit',
                                                               child: Text(
-                                                                  'Modifica'),
+                                                                  localizations.edit),
                                                             ),
                                                             PopupMenuItem(
                                                               value: 'delete',
                                                               child: Text(
-                                                                  'Elimina'),
+                                                                  localizations.delete),
                                                             ),
                                                           ];
                                                         },
@@ -1304,8 +1479,10 @@ SizedBox(
                             },
                           ),
                         ),
+                            const SizedBox(height: 8),
 // Pulsante "Nuova Chat"
 HoverableNewChatButton(
+  label: localizations.newChat,
   onPressed: () {
     _startNewChat();
     setState(() {
@@ -1314,52 +1491,8 @@ HoverableNewChatButton(
       showSettings = false;
       _activeChatIndex = null;
     });}),
-// Mantieni il pulsante di logout in basso, senza Spacer
-/*Align(
-  alignment: Alignment.bottomCenter,
-  child: Padding(
-    padding: const EdgeInsets.all(16.0),
-    child: ElevatedButton.icon(
-      icon: Icon(Icons.logout, color: Colors.red), // Icona rossa
-      label: Text(
-        'Logout',
-        style: TextStyle(color: Colors.red), // Testo rosso
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.white, // Riempimento bianco
-      ),
-      onPressed: () => _logout(context), // Chiama la funzione di logout
-    ),
-  ),
-),*/
+                            const SizedBox(height: 56),
 
-// Aggiungi qui il Container con padding leggero, bordi bianchi e angoli arrotondati
-/*Expanded(
-  child: Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 16.0), // Leggero padding orizzontale e verticale
-    child: Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white), // Bordi bianchi
-        color: Colors.transparent, // Sfondo trasparente
-        borderRadius: BorderRadius.circular(12.0), // Curvatura degli angoli
-      ),
-      child: Center(
-        child: Text(
-          'Spazio disponibile',
-          style: TextStyle(color: Colors.white), // Testo bianco, se necessario
-        ),
-      ),
-    ),
-  ),
-),*/
-                        // Contenuto scrollabile
-                        /*Expanded(
-            child: SingleChildScrollView(
-              child: showSettings
-                  ? _buildSettingsSection() // Mostra impostazioni TTS e customizzazione grafica
-                  : SizedBox.shrink(), // Placeholder per altre sezioni
-            ),
-          )*/
                       ],
                     )
                   : SizedBox.shrink(),
@@ -1430,90 +1563,184 @@ HoverableNewChatButton(
                           ),
                         ),
 
-                        // Lato destro: azioni utente
-                        PopupMenuButton<String>(
-                          icon: CircleAvatar(
-                            backgroundColor: Colors.black,
-                            child: Text(
-                              widget.user.email.substring(0, 2).toUpperCase(),
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                          onSelected: (value) {
-                            switch (value) {
-                              case 'Profilo':
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => AccountSettingsPage(
-                                      user: widget.user,
-                                      token: widget.token,
-                                    ),
-                                  ),
-                                );
-                                break;
-                              case 'Utilizzo':
-                                print('Naviga alla pagina di utilizzo');
-                                break;
-                              case 'Impostazioni':
-                                setState(() {
-                                  showSettings = true;
-                                  showKnowledgeBase = false;
-                                });
-                                break;
-                              case 'Logout':
-                                _logout(context);
-                                break;
-                            }
-                          },
-                          itemBuilder: (BuildContext context) {
-                            return [
-                              PopupMenuItem(
-                                value: 'Profilo',
-                                child: Row(
-                                  children: const [
-                                    Icon(Icons.person, color: Colors.black),
-                                    SizedBox(width: 8.0),
-                                    Text('Profilo'),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: 'Utilizzo',
-                                child: Row(
-                                  children: const [
-                                    Icon(Icons.bar_chart, color: Colors.black),
-                                    SizedBox(width: 8.0),
-                                    Text('Utilizzo'),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: 'Impostazioni',
-                                child: Row(
-                                  children: const [
-                                    Icon(Icons.settings, color: Colors.black),
-                                    SizedBox(width: 8.0),
-                                    Text('Impostazioni'),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: 'Logout',
-                                child: Row(
-                                  children: const [
-                                    Icon(Icons.logout, color: Colors.red),
-                                    SizedBox(width: 8.0),
-                                    Text(
-                                      'Logout',
-                                      style: TextStyle(color: Colors.red),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ];
-                          },
-                        ),
+PopupMenuButton<String>(
+  borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
+  color: Colors.white,
+  icon: Builder(
+    builder: (context) {
+      // Recupera la larghezza disponibile usando MediaQuery
+      final availableWidth = MediaQuery.of(context).size.width;
+      return Row(
+        mainAxisSize: MainAxisSize.min, // Occupa solo lo spazio necessario
+        children: [
+          CircleAvatar(
+            backgroundColor: Colors.black,
+            child: Text(
+              widget.user.email.substring(0, 2).toUpperCase(),
+              style: const TextStyle(color: Colors.white),
+            ),
+          ),
+          // Mostra nome ed email solo se la larghezza è almeno 450
+          if (availableWidth >= 450)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.user.username,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    widget.user.email,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // Aggiungi icona della lingua
+          //const SizedBox(width: 8.0),
+          //Icon(Icons.language, color: Colors.blue),
+        ],
+      );
+    },
+  ),
+  onSelected: (value) {
+    if (value == 'language') {
+      // Mostra un dialogo per selezionare la lingua
+      showDialog(
+        context: context,
+        builder: (context) {
+          return SimpleDialog(
+            title: Text(localizations.select_language),
+            children: [
+              SimpleDialogOption(
+                onPressed: () {
+                  // Aggiorna la lingua a Italiano
+                LocalizationProviderWrapper.of(context).setLanguage(Language.italian);
+                  Navigator.pop(context);
+                },
+                child: const Text("Italiano"),
+              ),
+              SimpleDialogOption(
+                onPressed: () {
+                  // Aggiorna la lingua a English
+                  LocalizationProviderWrapper.of(context).setLanguage(Language.english);
+                  Navigator.pop(context);
+                },
+                child: const Text("English"),
+              ),
+              SimpleDialogOption(
+                onPressed: () {
+                  // Aggiorna la lingua a Español
+                  LocalizationProviderWrapper.of(context).setLanguage(Language.spanish);
+                  Navigator.pop(context);
+                },
+                child: const Text("Español"),
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      // Altri casi di selezione
+      switch (value) {
+        case 'Profilo':
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AccountSettingsPage(
+                user: widget.user,
+                token: widget.token,
+              ),
+            ),
+          );
+          break;
+        case 'Utilizzo':
+          print('Naviga alla pagina di utilizzo');
+          break;
+        case 'Impostazioni':
+          setState(() {
+            showSettings = true;
+            showKnowledgeBase = false;
+          });
+          break;
+        case 'Logout':
+          _logout(context);
+          break;
+      }
+    }
+  },
+  itemBuilder: (BuildContext context) {
+    return [
+
+      PopupMenuItem(
+        value: 'Profilo',
+        child: Row(
+          children: [
+            Icon(Icons.person, color: Colors.black),
+            const SizedBox(width: 8.0),
+            Text(localizations.profile),
+          ],
+        ),
+      ),
+      PopupMenuItem(
+        value: 'Utilizzo',
+        child: Row(
+          children: [
+            Icon(Icons.bar_chart, color: Colors.black),
+            const SizedBox(width: 8.0),
+            Text(localizations.usage),
+          ],
+        ),
+      ),
+      PopupMenuItem(
+        value: 'Impostazioni',
+        child: Row(
+          children: [
+            Icon(Icons.settings, color: Colors.black),
+            const SizedBox(width: 8.0),
+            Text(localizations.settings),
+          ],
+        ),
+      ),
+            // Elemento per la selezione della lingua
+      PopupMenuItem(
+        value: 'language',
+        child: Row(
+          children: [
+            Icon(Icons.language, color: Colors.black),
+            const SizedBox(width: 8.0),
+            Text(localizations.select_language),
+          ],
+        ),
+      ),
+      PopupMenuItem(
+        value: 'Logout',
+        child: Row(
+          children: [
+            Icon(Icons.logout, color: Colors.red),
+            const SizedBox(width: 8.0),
+            Text(
+              localizations.logout,
+              style: const TextStyle(color: Colors.red),
+            ),
+          ],
+        ),
+      ),
+    ];
+  },
+)
+
+
+
                       ],
                     ),
                   ),
@@ -1600,233 +1827,7 @@ Expanded(
                 maxWidth: containerWidth,
               ),
               child: Column(
-                children: List.generate(messages.length, (index) {
-                  final message = messages[index];
-                  final isUser = (message['role'] == 'user');
-                  final DateTime parsedTime = DateTime.tryParse(
-                        message['createdAt'] ?? '',
-                      ) ??
-                      DateTime.now();
-                  final String formattedTime = DateFormat('h:mm a').format(parsedTime);
-
-                  return Padding(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        vertical: 8.0),
-                                                    child: Row(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .center,
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        ConstrainedBox(
-                                                          constraints:
-                                                              BoxConstraints(
-                                                            maxWidth:
-                                                                containerWidth,
-                                                            minWidth: 200,
-                                                          ),
-                                                          child: Container(
-                                                            width:
-                                                                double.infinity,
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .all(12.0),
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              color:
-                                                                  Colors.white,
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          16.0),
-                                                              boxShadow: const [
-                                                                BoxShadow(
-                                                                  color: Colors
-                                                                      .black12,
-                                                                  blurRadius:
-                                                                      4.0,
-                                                                  offset:
-                                                                      Offset(
-                                                                          2, 2),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            child: Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .start,
-                                                              children: [
-                                                                // RIGA 1: Avatar, nome e orario
-                                                                Row(
-                                                                  children: [
-                                                                    if (!isUser)
-                                                                      CircleAvatar(
-                                                                        backgroundColor:
-                                                                            Colors.transparent,
-                                                                        child: Image
-                                                                            .network(
-                                                                          'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
-                                                                          height:
-                                                                              42,
-                                                                          fit: BoxFit
-                                                                              .contain,
-                                                                          isAntiAlias:
-                                                                              true,
-                                                                        ),
-                                                                      )
-                                                                    else
-                                                                      CircleAvatar(
-                                                                        backgroundColor:
-                                                                            _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
-                                                                        child:
-                                                                            Icon(
-                                                                          Icons
-                                                                              .person,
-                                                                          color:
-                                                                              _avatarIconColor.withOpacity(_avatarIconOpacity),
-                                                                        ),
-                                                                      ),
-                                                                    const SizedBox(
-                                                                        width:
-                                                                            8.0),
-                                                                    Text(
-                                                                      isUser
-                                                                          ? widget
-                                                                              .user
-                                                                              .username
-                                                                          : 'boxed-ai',
-                                                                      style:
-                                                                          const TextStyle(
-                                                                        fontWeight:
-                                                                            FontWeight.bold,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(
-                                                                        width:
-                                                                            4),
-                                                                    const VerticalDivider(
-                                                                      thickness:
-                                                                          1,
-                                                                      color: Colors
-                                                                          .black,
-                                                                      width: 4,
-                                                                    ),
-                                                                    const SizedBox(
-                                                                        width:
-                                                                            4),
-                                                                    Text(
-                                                                      formattedTime,
-                                                                      style:
-                                                                          const TextStyle(
-                                                                        fontSize:
-                                                                            12,
-                                                                        color: Colors
-                                                                            .grey,
-                                                                      ),
-                                                                    ),
-                                                                  ],
-                                                                ),
-                                                                const SizedBox(
-                                                                    height:
-                                                                        8.0),
-                                                                // RIGA 2: Contenuto del messaggio (Markdown)
-                                                                _buildMixedContent(
-                                                                    message),
-                                                                const SizedBox(
-                                                                    height:
-                                                                        8.0),
-                                                                // RIGA 3: Icone (copia, feedback, TTS, info)
-                                                                Row(
-                                                                  mainAxisAlignment:
-                                                                      MainAxisAlignment
-                                                                          .start,
-                                                                  children: [
-                                                                    IconButton(
-                                                                      icon: const Icon(
-                                                                          Icons
-                                                                              .copy,
-                                                                          size:
-                                                                              14),
-                                                                      tooltip:
-                                                                          "Copia contenuto",
-                                                                      onPressed:
-                                                                          () {
-                                                                        _copyToClipboard(message['content'] ??
-                                                                            '');
-                                                                      },
-                                                                    ),
-                                                                    if (!isUser) ...[
-                                                                      IconButton(
-                                                                        icon: const Icon(
-                                                                            Icons
-                                                                                .thumb_up,
-                                                                            size:
-                                                                                14),
-                                                                        tooltip:
-                                                                            "Feedback positivo",
-                                                                        onPressed:
-                                                                            () {
-                                                                          print(
-                                                                              "Feedback positivo per il messaggio: ${message['content']}");
-                                                                        },
-                                                                      ),
-                                                                      IconButton(
-                                                                        icon: const Icon(
-                                                                            Icons
-                                                                                .thumb_down,
-                                                                            size:
-                                                                                14),
-                                                                        tooltip:
-                                                                            "Feedback negativo",
-                                                                        onPressed:
-                                                                            () {
-                                                                          print(
-                                                                              "Feedback negativo per il messaggio: ${message['content']}");
-                                                                        },
-                                                                      ),
-                                                                    ],
-                                                                    IconButton(
-                                                                      icon: const Icon(
-                                                                          Icons
-                                                                              .volume_up,
-                                                                          size:
-                                                                              14),
-                                                                      tooltip:
-                                                                          "Leggi il messaggio",
-                                                                      onPressed:
-                                                                          () {
-                                                                        _speak(message['content'] ??
-                                                                            '');
-                                                                      },
-                                                                    ),
-                                                                    IconButton(
-                                                                      icon: const Icon(
-                                                                          Icons
-                                                                              .info_outline,
-                                                                          size:
-                                                                              14),
-                                                                      tooltip:
-                                                                          "Informazioni sul messaggio",
-                                                                      onPressed:
-                                                                          () {
-                                                                        _showMessageInfoDialog(
-                                                                            message);
-                                                                      },
-                                                                    ),
-                                                                  ],
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                              ),
+                children: _buildMessagesList(containerWidth),
                                             ),
                                           ))));
                                         },
@@ -1880,9 +1881,9 @@ Expanded(
                                                       controller: _controller,
                                                       // onChanged: (_) => setState(() {}),
                                                       decoration:
-                                                          const InputDecoration(
+                                                           InputDecoration(
                                                         hintText:
-                                                            'Scrivi qui il tuo messaggio...',
+                                                            localizations.write_here_your_message,
                                                         border:
                                                             InputBorder.none,
                                                       ),
@@ -1910,7 +1911,7 @@ Expanded(
                                                         IconButton(
                                                           icon: const Icon(Icons
                                                               .book_outlined),
-                                                          tooltip: "Contesti",
+                                                          tooltip: localizations.knowledgeBoxes,
                                                           onPressed:
                                                               _showContextDialog,
                                                         ),
@@ -1919,11 +1920,11 @@ Expanded(
                                                           icon: const Icon(Icons
                                                               .description_outlined),
                                                           tooltip:
-                                                              "Carica documento (inattivo)",
+                                                              localizations.upload_document,
                                                           onPressed: () {
                                                             // in futuro: logica di upload
                                                             print(
-                                                                "Upload doc inattivo");
+                                                                localizations.upload_document);
                                                           },
                                                         ),
                                                         // Icona media (inattiva)
@@ -1931,11 +1932,11 @@ Expanded(
                                                           icon: const Icon(Icons
                                                               .image_outlined),
                                                           tooltip:
-                                                              "Carica media (inattivo)",
+                                                              localizations.upload_media,
                                                           onPressed: () {
                                                             // in futuro: logica di upload
                                                             print(
-                                                                "Upload media inattivo");
+                                                                localizations.upload_media);
                                                           },
                                                         ),
 
@@ -1952,7 +1953,7 @@ Expanded(
                                                                           .mic,
                                                                 ),
                                                                 tooltip:
-                                                                    "Attiva microfono",
+                                                                    localizations.enable_mic,
                                                                 onPressed:
                                                                     _listen,
                                                               )
@@ -1960,7 +1961,7 @@ Expanded(
                                                                 icon: const Icon(
                                                                     Icons.send),
                                                                 tooltip:
-                                                                    "Invia messaggio",
+                                                                    localizations.send_message,
                                                                 onPressed: () =>
                                                                     _handleUserInput(
                                                                         _controller
@@ -2015,6 +2016,7 @@ Expanded(
   }
 
   void _showEditChatDialog(int index) {
+    final localizations = LocalizationProvider.of(context);
     final chat = _chatHistory[index];
     final TextEditingController _nameController =
         TextEditingController(text: chat['name']);
@@ -2023,12 +2025,12 @@ Expanded(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('Modifica Nome Chat'),
+          title: Text(localizations.edit_chat_name),
           backgroundColor: Colors.white, // Sfondo del popup
           elevation: 6, // Intensità dell'ombra
           shape: RoundedRectangleBorder(
             borderRadius:
-                BorderRadius.circular(4), // Arrotondamento degli angoli
+                BorderRadius.circular(16), // Arrotondamento degli angoli
             //side: BorderSide(
             //  color: Colors.blue, // Colore del bordo
             //  width: 2, // Spessore del bordo
@@ -2036,17 +2038,17 @@ Expanded(
           ),
           content: TextField(
             controller: _nameController,
-            decoration: InputDecoration(labelText: 'Nome della Chat'),
+            decoration: InputDecoration(labelText: localizations.chat_name),
           ),
           actions: [
             TextButton(
-              child: Text('Annulla'),
+              child: Text(localizations.cancel),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
             TextButton(
-              child: Text('Salva'),
+              child: Text(localizations.save),
               onPressed: () {
                 final newName = _nameController.text.trim();
                 if (newName.isNotEmpty) {
@@ -2137,6 +2139,19 @@ Expanded(
         showSettings = false; // Nascondi Impostazioni
       });
 
+if (messages.isNotEmpty) {
+  // L'ultimo messaggio è in messages[messages.length - 1]
+  final lastMsg = messages[messages.length - 1];
+  final lastConfig = lastMsg['agentConfig'];
+  if (lastConfig != null) {
+    setState(() {
+      _latestChainId = lastConfig['chain_id'];
+      _latestConfigId = lastConfig['config_id'];
+    });
+    print("Ricaricata chain_id=$_latestChainId, config_id=$_latestConfigId dalla chat salvata.");
+  }
+}
+
       // Debug: Messaggi caricati
       print(
           'Messaggi caricati per chat ID $chatId (${chat['name']}): $chatMessages');
@@ -2156,14 +2171,14 @@ Expanded(
         uuid.v4(); // Genera un ID univoco per il messaggio dell'assistente
     final formattedContexts =
         _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
-    final chainId = "${formattedContexts.join('')}_agent_with_tools";
 
-    // Configurazione dell'agente
-    final agentConfiguration = {
-      'model': _selectedModel, // Modello selezionato
-      'contexts': formattedContexts, // Contesti selezionati
-      'chain_id': chainId // ID della chain
-    };
+// Usa i contesti formattati se ti servono in debug, ma la vera chain la prendi dallo state:
+final agentConfiguration = {
+  'model': _selectedModel,                      // Modello
+  'contexts': formattedContexts,                // Teniamo traccia dei contesti
+  'chain_id': _latestChainId,                   // Usa la chain ID reale dal backend
+  'config_id': _latestConfigId,                 // Salva anche il config ID
+};
 
     setState(() {
       // Aggiungi il messaggio dell'utente con le informazioni di configurazione
@@ -2248,15 +2263,17 @@ Expanded(
         return Map<String, dynamic>.from(message); // Copia ogni messaggio
       }).toList();
 
-      // Integra le informazioni di configurazione dell'agente nei messaggi
-      updatedMessages.forEach((message) {
-        message['agentConfig'] = {
-          'model': _selectedModel, // Modello selezionato (es. GPT-4)
-          'contexts': _selectedContexts, // Contesti selezionati
-          'chain_id':
-              "${_selectedContexts.join('')}_agent_with_tools", // ID della chain
-        };
-      });
+updatedMessages.forEach((message) {
+  final oldAgentConfig = message['agentConfig'] ?? {};
+  // Ricopia i campi esistenti, e aggiorna/rinfresca quelli basilari:
+  oldAgentConfig['model'] = _selectedModel;
+  oldAgentConfig['contexts'] = _selectedContexts;
+  // Se la chain_id era già presente la lascio stare, al limite la rimetto a _latestChainId
+  // oldAgentConfig['chain_id'] ??= _latestChainId;
+  // oldAgentConfig['config_id'] ??= _latestConfigId;
+
+  message['agentConfig'] = oldAgentConfig;
+});
 
       // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
       final currentChat = {
@@ -2379,53 +2396,34 @@ void _showContextDialog() async {
   );
 }
 
-// Funzione per creare il selettore di modelli
-  Widget _buildModelSelector(StateSetter setState) {
-    final List<String> models = ['gpt-4o', 'gpt-4o-mini', 'qwen2-7b'];
 
-    return Wrap(
-      spacing: 10.0,
-      children: models.map((model) {
-        final bool isSelected = _selectedModel == model;
-        return ChoiceChip(
-          label: Text(model),
-          selected: isSelected,
-          onSelected: (bool selected) {
-            setState(() {
-              _selectedModel = model; // Aggiorna il modello selezionato
-              // Passa anche il contesto selezionato ogni volta che cambia il modello
-              set_context(_selectedContexts, _selectedModel);
-            });
-          },
-          selectedColor: Colors.grey[700], // Colore selezionato
-          backgroundColor: Colors.grey[200], // Colore di default
-          labelStyle: TextStyle(
-            color: isSelected
-                ? Colors.white
-                : Colors.black, // Cambia il colore del testo quando selezionato
-          ),
-        );
-      }).toList(),
+
+void set_context(List<String> contexts, String model) async {
+  try {
+    final response = await _contextApiSdk.configureAndLoadChain(
+      widget.user.username,
+      widget.token.accessToken,
+      contexts,
+      model,
     );
-  }
+    print('Chain configurata e caricata con successo per i contesti: $contexts');
+    print('Risultato della configurazione: $response');
 
-  void set_context(List<String> contexts, String model) async {
-    try {
-      // Chiama la funzione dell'SDK per configurare e caricare la chain con i contesti selezionati
-      final response = await _contextApiSdk.configureAndLoadChain(
-          widget.user.username, widget.token.accessToken, contexts, model);
-      print(
-          'Chain configurata e caricata con successo per i contesti: $contexts');
-      print('Risultato della configurazione: $response');
+    // Estrai i dati dal JSON restituito
+    final chainIdFromResponse =
+        response['load_result'] != null ? response['load_result']['chain_id'] : null;
+    final configIdFromResponse =
+        response['config_result'] != null ? response['config_result']['config_id'] : null;
 
-      setState(() {
-        _selectedContexts =
-            contexts; // Aggiorna la lista dei contesti selezionati
-      });
-    } catch (e) {
-      print('Errore nella configurazione e caricamento della chain: $e');
-    }
+    setState(() {
+      _selectedContexts = contexts; 
+      _latestChainId = chainIdFromResponse;
+      _latestConfigId = configIdFromResponse;
+    });
+  } catch (e) {
+    print('Errore nella configurazione e caricamento della chain: $e');
   }
+}
 
   // Sezione impostazioni TTS e customizzazione grafica nella barra laterale
   Widget _buildSettingsSection() {
@@ -2702,9 +2700,10 @@ void _showContextDialog() async {
 
   // Funzione per copiare il messaggio negli appunti
   void _copyToClipboard(String message) {
+    final localizations = LocalizationProvider.of(context);
     Clipboard.setData(ClipboardData(text: message));
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Messaggio copiato negli appunti')),
+      SnackBar(content: Text(localizations.copyMessage)),
     );
   }
 
@@ -2716,19 +2715,20 @@ void _showContextDialog() async {
     final url = "$_nlpApiUrl/chains/stream_events_chain";
     final formattedContexts =
         _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
-    final chainId = "${formattedContexts.join('')}_agent_with_tools";
-    // ID della chain basato sui contesti selezionati
-    print('$chainId');
-    // Configurazione dell'agente
-    final agentConfiguration = {
-      'model': _selectedModel, // Modello selezionato
-      'contexts': _selectedContexts, // Contesti selezionati
-      'chain_id': chainId // ID della chain
-    };
+
+final chainIdToUse = _latestChainId ?? "${formattedContexts.join('')}_agent_with_tools";
+// Con fallback se _latestChainId è null, a tua scelta
+
+final agentConfiguration = {
+  'model': _selectedModel,          // Modello selezionato
+  'contexts': _selectedContexts,    // Contesti selezionati
+  'chain_id': chainIdToUse,         // Usa la chain ID dal backend (oppure fallback)
+  'config_id': _latestConfigId,     // Memorizza anche la config ID
+};
 
     // Prepara il payload da inviare all'API
     final payload = jsonEncode({
-      "chain_id": chainId,
+      "chain_id": chainIdToUse,
       "query": {
         "input": input,
         "chat_history": messages.map((message) {

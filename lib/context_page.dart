@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_app/ui_components/icons/cube.dart';
+import 'package:flutter_app/utilities/localization.dart';
 import 'context_api_sdk.dart';
 import 'dart:typed_data';
 
@@ -39,6 +40,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final ContextApiSdk _apiSdk = ContextApiSdk();
   List<ContextMetadata> _contexts = [];
   FilePickerResult? _selectedFile;
+
+
   bool _isLoading =
       false; // Variabile di stato per indicare il caricamento generale
   String? _loadingContext; // Contesto corrente per l'upload
@@ -209,7 +212,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Mostra il dialog per caricare file in contesti multipli
-  void _showUploadFileToMultipleContextsDialog() {
+  /*void _showUploadFileToMultipleContextsDialog() {
+    final localizations = LocalizationProvider.of(context);
     TextEditingController descriptionController = TextEditingController();
     List<String> selectedContexts = [];
     FilePickerResult? fileResult;
@@ -221,7 +225,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
-              title: Text('Carica File in Contesti Multipli'),
+              title: Text(localizations.upload_file_in_multiple_knowledge_boxes),
               backgroundColor: Colors.white, // Sfondo del popup
               elevation: 6, // Intensità dell'ombra
               shape: RoundedRectangleBorder(
@@ -245,8 +249,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }
                     },
                     child: Text(selectedFileName != null
-                        ? 'File Selezionato: $selectedFileName'
-                        : 'Seleziona File'),
+                        ? '${localizations.selected_file}: $selectedFileName'
+                        : localizations.select_file ),
                   ),
                   SizedBox(height: 10),
                   DropdownButtonFormField<String>(
@@ -320,7 +324,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       print('Errore: seleziona almeno un contesto e un file.');
                     }
                   },
-                  child: Text('Carica File'),
+                  child: Text(localizations.upload_file),
                 ),
               ],
             );
@@ -328,8 +332,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
-  }
+  }*/
+  
 Widget _buildSearchAreaWithTitle() {
+  final localizations = LocalizationProvider.of(context);
   return LayoutBuilder(
     builder: (context, constraints) {
       if (constraints.maxWidth > 900) {
@@ -340,7 +346,7 @@ Widget _buildSearchAreaWithTitle() {
           children: [
             // Titolo allineato a sinistra
             Text(
-              'Knowledge Boxes',
+              localizations.knowledgeBoxes,
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             // Campo di ricerca con larghezza massima fissata (ad es. 600)
@@ -352,7 +358,7 @@ Widget _buildSearchAreaWithTitle() {
                   _filterContexts();
                 },
                 decoration: InputDecoration(
-                  hintText: 'Cerca per nome o descrizione...',
+                  hintText: localizations.search_by_name_or_description,
                   prefixIcon: Icon(Icons.search),
                   contentPadding: EdgeInsets.symmetric(vertical: 8.0),
                   border: OutlineInputBorder(
@@ -371,7 +377,7 @@ Widget _buildSearchAreaWithTitle() {
           children: [
             // Titolo allineato a sinistra
             Text(
-              'Knowledge Boxes',
+              localizations.knowledgeBoxes,
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 8),
@@ -383,7 +389,7 @@ Widget _buildSearchAreaWithTitle() {
                   _filterContexts();
                 },
                 decoration: InputDecoration(
-                  hintText: 'Cerca per nome o descrizione...',
+                  hintText: localizations.search_by_name_or_description,
                   prefixIcon: Icon(Icons.search),
                   contentPadding: EdgeInsets.symmetric(vertical: 8.0),
                   border: OutlineInputBorder(
@@ -472,6 +478,7 @@ Widget _buildSearchAreaWithTitle() {
   // Funzione per mostrare il dialog per creare un contesto con caricamento obbligatorio di un file
   // Funzione per mostrare il dialog per creare un contesto senza obbligo di caricare un file subito
   void _showCreateContextDialog() {
+    final localizations = LocalizationProvider.of(context);
     TextEditingController contextNameController = TextEditingController();
     TextEditingController contextDescriptionController =
         TextEditingController();
@@ -480,7 +487,7 @@ Widget _buildSearchAreaWithTitle() {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Crea Nuovo Contesto'),
+          title: Text(localizations.create_new_knowledge_box),
           backgroundColor: Colors.white, // Sfondo del popup
           elevation: 6, // Intensità dell'ombra
           shape: RoundedRectangleBorder(
@@ -496,12 +503,12 @@ Widget _buildSearchAreaWithTitle() {
             children: [
               TextField(
                 controller: contextNameController,
-                decoration: InputDecoration(labelText: 'Nome del Contesto'),
+                decoration: InputDecoration(labelText: localizations.knowledge_box_name),
               ),
               TextField(
                 controller: contextDescriptionController,
                 decoration:
-                    InputDecoration(labelText: 'Descrizione del Contesto'),
+                    InputDecoration(labelText: localizations.knowledge_box_description),
               ),
             ],
           ),
@@ -519,7 +526,7 @@ Widget _buildSearchAreaWithTitle() {
                   print('Errore: nome del contesto obbligatorio.');
                 }
               },
-              child: Text('Crea Contesto'),
+              child: Text(localizations.create_knowledge_box ),
             ),
           ],
         );
@@ -528,6 +535,7 @@ Widget _buildSearchAreaWithTitle() {
   }
 
   void _showFilesForContextDialog(String contextPath) async {
+    final localizations = LocalizationProvider.of(context);
     // Carica i file per il contesto selezionato
     List<Map<String, dynamic>> filesForContext =
         await _loadFilesForContext(contextPath);
@@ -610,7 +618,7 @@ Widget _buildSearchAreaWithTitle() {
                       });
                     },
                     decoration: InputDecoration(
-                      hintText: 'Cerca file...',
+                      hintText: localizations.search_file,
                       prefixIcon: Icon(Icons.search),
                       contentPadding: EdgeInsets.symmetric(vertical: 8.0),
                   border: OutlineInputBorder(
@@ -704,9 +712,9 @@ Widget _buildSearchAreaWithTitle() {
                                     ),
                                     SizedBox(height: 5),
                                     // Dettagli aggiuntivi del file
-                                    Text('Tipo: $fileType'),
-                                    Text('Dimensione: $fileSize'),
-                                    Text('Data di caricamento: $uploadDate'),
+                                    Text('${localizations.file_type}: $fileType'),
+                                    Text('${localizations.file_size}: $fileSize'),
+                                    Text('${localizations.upload_date}: $uploadDate'),
                                     // Spazio per spostare il cestino in basso
                                     Spacer(),
                                     // Cestino in basso a destra
@@ -744,7 +752,7 @@ Widget _buildSearchAreaWithTitle() {
                   onPressed: () {
                     Navigator.of(context).pop();
                   },
-                  child: Text('Chiudi'),
+                  child: Text(localizations.close),
                 ),
               ],
             );
@@ -756,6 +764,7 @@ Widget _buildSearchAreaWithTitle() {
 
   @override
   Widget build(BuildContext context) {
+            final localizations = LocalizationProvider.of(context);
     return Scaffold(
       //appBar: //AppBar(
       //title: Text('Context API Dashboard'),
@@ -825,7 +834,7 @@ _buildSearchAreaWithTitle(),
                         ),
                         child: Center(
                           child: Text(
-                            'Crea Knowledge Box',
+                            localizations.create_new_knowledge_box,
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -909,6 +918,8 @@ WireframeCubeIcon(
                                 ),
                                 // Menu popup per azioni (Carica File ed Elimina Contesto)
                                 PopupMenuButton<String>(
+                                    borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
+                                    color: Colors.white,
                                   onSelected: (value) {
                                     if (value == 'delete') {
                                       _deleteContext(contextMetadata.path);
@@ -921,11 +932,11 @@ WireframeCubeIcon(
                                       <PopupMenuEntry<String>>[
                                     PopupMenuItem<String>(
                                       value: 'upload',
-                                      child: Text('Carica File'),
+                                      child: Text(localizations.upload_file),
                                     ),
                                     PopupMenuItem<String>(
                                       value: 'delete',
-                                      child: Text('Elimina'),
+                                      child: Text(localizations.delete),
                                     ),
                                   ],
                                 ),

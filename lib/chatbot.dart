@@ -3,6 +3,9 @@ import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/ui_components/chat/empty_chat_content.dart';
+import 'package:flutter_app/ui_components/chat/utilities_functions/rename_chat_instructions.dart';
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/ui_components/message/codeblock_md_builder.dart';
 import 'package:flutter_app/llm_ui_tools/tools.dart';
 import 'package:flutter_app/ui_components/buttons/blue_button.dart';
@@ -28,6 +31,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart'; // Per gestire il tap sui link
 import 'package:intl/intl.dart';
+import 'dart:async'; // Assicurati di importare il package Timer
 
 /*void main() {
   runApp(MyApp());
@@ -75,18 +79,95 @@ class ChatBotPage extends StatefulWidget {
   _ChatBotPageState createState() => _ChatBotPageState();
 }
 
+
 class _ChatBotPageState extends State<ChatBotPage> {
 
 
+String spinnerPlaceholder = "[WIDGET_IN_CARICAMENTO]";
+int _widgetCounter = 0; // Contatore globale nella classe per i placeholder
+
+String _finalizeWidgetBlock(String widgetBlock) {
+  // 1) Trovi la parte JSON (tra le due barre verticali)
+  final firstBar = widgetBlock.indexOf("|");
+  final secondBar = widgetBlock.indexOf("|", firstBar + 1);
+  if (firstBar == -1 || secondBar == -1) {
+    // Errore di formattazione => Ritorna un placeholder fisso o stringa vuota
+    return "[WIDGET_PLACEHOLDER_ERROR]";
+  }
+
+  final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
+  // 2) Trova WIDGET_ID='...'
+  final widgetIdSearch = "WIDGET_ID='";
+  final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
+  if (widgetIdStart == -1) {
+    return "[WIDGET_PLACEHOLDER_ERROR]";
+  }
+  final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
+  final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
+  if (widgetIdEnd == -1) {
+    return "[WIDGET_PLACEHOLDER_ERROR]";
+  }
+  final widgetId = widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
+
+  // 3) Decodifica JSON
+  Map<String, dynamic>? widgetJson;
+  try {
+    widgetJson = jsonDecode(jsonString);
+  } catch(e) {
+    return "[WIDGET_PLACEHOLDER_ERROR]";
+  }
+  if (widgetJson == null) {
+    return "[WIDGET_PLACEHOLDER_ERROR]";
+  }
+
+  // 4) Eventuale gestione is_first_time
+  if (!widgetJson.containsKey('is_first_time')) {
+    widgetJson['is_first_time'] = true;
+  } else {
+    // se esiste ed è true, metti false, ecc.
+  }
+
+  // 5) Genera un ID univoco
+  final widgetUniqueId = uuid.v4();
+
+  // 6) Costruisce un segnaposto
+  final placeholder = "[WIDGET_PLACEHOLDER_$_widgetCounter]";
+  _widgetCounter++;
+
+  // 7) Aggiungiamo questo widget alla widgetDataList dell'ULTIMO messaggio
+  final lastMsg = messages[messages.length - 1];
+  List<dynamic> wList = lastMsg['widgetDataList'] ?? [];
+  wList.add({
+    "_id": widgetUniqueId,
+    "widgetId": widgetId,
+    "jsonData": widgetJson,
+    "placeholder": placeholder,
+  });
+  lastMsg['widgetDataList'] = wList;
+
+  // 8) Ritorniamo il placeholder
+  return placeholder;
+}
+
+
+Future<void> _renameChat(String chatId, String newName) async {
+  // Trova l'indice della chat in base all'ID
+  int index = _chatHistory.indexWhere((chat) => chat['id'] == chatId);
+  if (index != -1) {
+    // Richiama la funzione già esistente per aggiornare il nome della chat
+    await _editChatName(index, newName);
+    // Facoltativo: mostra un messaggio di conferma
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Chat renamed to "$newName"')),
+    );
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Chat with ID "$chatId" not found.')),
+    );
+  }
+}
   List<Map<String, dynamic>> messages = [];
-// Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
-final Map<String, Widget Function(Map<String, dynamic> data, void Function(String) onReply)> widgetMap = {
-  "NButtonWidget": (data, onReply) => NButtonWidget(data: data, onReply: onReply),
-  "RadarChart": (data, onReply) => RadarChartWidgetTool(jsonData: data, onReply: onReply),
-  "TradingViewAdvancedChart": (data, onReply) => TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply),
-  "TradingViewMarketOverview": (data, onReply) => TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply),
-  "CustomChartWidget": (data, onReply) => CustomChartWidgetTool(jsonData: data, onReply: onReply),
-};
+
 
   final Map<String, Widget> _widgetCache = {}; // Cache dei widget
   final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
@@ -153,6 +234,8 @@ final Map<String, Widget Function(Map<String, dynamic> data, void Function(Strin
 
   String? _latestChainId;
   String? _latestConfigId;
+
+
 
 /// Risultato del parsing del testo chatbot:
 /// text: testo "pulito" dopo la rimozione dei blocchi widget, 
@@ -228,8 +311,22 @@ ParsedWidgetResult _parsePotentialWidgets(String fullText) {
       continue;
     }
 
+    // -------------- Integrazione logica is_first_time --------------
+    if (!widgetJson.containsKey('is_first_time')) {
+      // Se la chiave non esiste, la creiamo con valore true
+      widgetJson['is_first_time'] = true;
+    } else {
+      // Se esiste, controlliamo il valore
+      if (widgetJson['is_first_time'] == true) {
+        // Se era true, la mettiamo a false
+        widgetJson['is_first_time'] = false;
+      }
+      // Se è già false, non facciamo nulla
+    }
+    // ---------------------------------------------------------------
+
     // 7) Genera un _id univoco per il widget
-    final widgetUniqueId = uuid.v4(); 
+    final widgetUniqueId = uuid.v4();
     // Assicurati di aver dichiarato "final Uuid uuid = Uuid();" nella classe
 
     // 8) Costruisci un segnaposto univoco
@@ -258,12 +355,56 @@ ParsedWidgetResult _parsePotentialWidgets(String fullText) {
 }
 
 
+String _getCurrentChatId() {
+  if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
+    return _chatHistory[_activeChatIndex!]['id'] as String;
+  }
+  return "";
+}
+
+// Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
+Map<String, Widget Function(Map<String, dynamic> data, void Function(String) onReply)> get widgetMap {
+  return {
+    "NButtonWidget": (data, onReply) => NButtonWidget(data: data, onReply: onReply),
+    "RadarChart": (data, onReply) => RadarChartWidgetTool(jsonData: data, onReply: onReply),
+    "TradingViewAdvancedChart": (data, onReply) => TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply),
+    "TradingViewMarketOverview": (data, onReply) => TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply),
+    "CustomChartWidget": (data, onReply) => CustomChartWidgetTool(jsonData: data, onReply: onReply),
+    "ChangeChatNameWidget": (data, onReply) => ChangeChatNameWidgetTool(
+      jsonData: data,
+      // Modifica qui il callback onRenameChat per usare _getCurrentChatId se chatId risulta vuoto
+      onRenameChat: (chatId, newName) async {
+        // Se il chatId passato è vuoto, usiamo il metodo _getCurrentChatId
+        final effectiveChatId = chatId.isEmpty ? await _getCurrentChatId() : chatId;
+
+        if (effectiveChatId.isNotEmpty) {
+          await _renameChat(effectiveChatId, newName);
+          // Puoi eventualmente chiamare onReply per dare feedback all'utente
+          print('Chat renamed to "$newName"');
+        } else {
+          // Gestione dell'errore: nessuna chat selezionata
+          print('Errore: nessuna chat selezionata');
+        }
+      },
+      getCurrentChatId: () async => _getCurrentChatId(),
+    ),
+        "SpinnerPlaceholder": (data, onReply) => const Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Text("Caricamento widget in corso..."),
+          SizedBox(width: 8),
+          CircularProgressIndicator(),
+        ],
+      ),
+    ),
+  };
+}
 
 Widget _buildMixedContent(Map<String, dynamic> message) {
   // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
   final widgetDataList = message['widgetDataList'] as List<dynamic>?;
   if (widgetDataList == null || widgetDataList.isEmpty) {
-    // Non c'è widget => mostriamo solo testo
     final isUser = (message['role'] == 'user');
     return _buildMessageContent(
       context,
@@ -274,13 +415,13 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
     );
   }
 
-  // Abbiamo almeno un widget. Otteniamo il testo completo già "pulito"
-  // (dove i blocchi widget sono stati rimpiazzati da placeholder tipo [WIDGET_PLACEHOLDER_0], ecc.)
+  // Costante per lo spinner
+  const spinnerPlaceholder = "[WIDGET_SPINNER]";
+
+  // Otteniamo il testo completo “pulito” (con i placeholder) dal messaggio
   final textContent = message['content'] ?? '';
 
-  // Se vuoi essere sicuro di gestire i widget nell'ordine giusto,
-  // puoi ordinare i widget in base al nome/numero del placeholder
-  // Esempio: "[WIDGET_PLACEHOLDER_0]" < "[WIDGET_PLACEHOLDER_1]" ...
+  // Ordiniamo i widgetData in base al nome/numero del placeholder
   widgetDataList.sort((a, b) {
     final pa = a['placeholder'] as String;
     final pb = b['placeholder'] as String;
@@ -291,9 +432,8 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
   final segments = <_Segment>[];
   String temp = textContent;
 
-  // Estrapoliamo tutti i placeholder trovati in widgetDataList
   while (true) {
-    // Trova quale placeholder compare per primo nella stringa temp
+    // Troviamo il placeholder che compare prima nel testo
     int foundPos = temp.length;
     String foundPh = "";
     for (final w in widgetDataList) {
@@ -313,9 +453,8 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
       break;
     }
 
-    // Se abbiamo trovato un placeholder
+    // Aggiungiamo l’eventuale testo prima del placeholder
     if (foundPos > 0) {
-      // C'è del testo prima del placeholder
       final beforeText = temp.substring(0, foundPos);
       segments.add(_Segment(text: beforeText));
     }
@@ -327,12 +466,12 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
     temp = temp.substring(foundPos + foundPh.length);
   }
 
-  // Ora creiamo la lista di widget finali
+  // Ora costruiamo i widget finali
   final contentWidgets = <Widget>[];
 
   for (final seg in segments) {
+    // Se non è un placeholder (testo normale)
     if (seg.placeholder == null) {
-      // Segmento di testo
       final isUser = (message['role'] == 'user');
       if (seg.text != null && seg.text!.isNotEmpty) {
         contentWidgets.add(
@@ -345,42 +484,63 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
           ),
         );
       }
-    } else {
-      // Segmento che rappresenta un placeholder
+    }
+    // Altrimenti, è un placeholder
+    else {
       final ph = seg.placeholder!;
-      // Cerchiamo i dati del widget corrispondente
-      final wdata = widgetDataList.firstWhere((x) => x['placeholder'] == ph);
-      final widgetUniqueId = wdata['_id'] as String;
-      final widgetId = wdata['widgetId'] as String;
-      final jsonData = wdata['jsonData'] as Map<String, dynamic>? ?? {};
-
-      // Verifichiamo se abbiamo già un widget in cache
-      Widget? embeddedWidget = _widgetCache[widgetUniqueId];
-      if (embeddedWidget == null) {
-        // Creiamo il widget ora
-        final widgetBuilder = widgetMap[widgetId];
-        if (widgetBuilder != null) {
-          embeddedWidget = widgetBuilder(jsonData, (reply) => _handleUserInput(reply));
-        } else {
-          embeddedWidget = Text("Widget sconosciuto: $widgetId");
-        }
-        _widgetCache[widgetUniqueId] = embeddedWidget;
+      
+      // (1) Se è lo spinner "[WIDGET_SPINNER]", mostriamo la rotella di caricamento
+      if (ph == spinnerPlaceholder) {
+        contentWidgets.add(
+          Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Caricamento widget in corso..."),
+                const SizedBox(width: 8),
+                const CircularProgressIndicator(),
+              ],
+            ),
+          ),
+        );
       }
 
-      // Inseriamo il widget, centrato orizzontalmente
-      contentWidgets.add(
-        Container(
-          width: double.infinity,
-          child: Align(
-            alignment: Alignment.center,
-            child: embeddedWidget,
+      // (2) Altrimenti, potrebbe essere un segnaposto di un widget reale
+      else {
+        // Cerchiamo i dati del widget corrispondente
+        final wdata = widgetDataList.firstWhere((x) => x['placeholder'] == ph);
+        final widgetUniqueId = wdata['_id'] as String;
+        final widgetId = wdata['widgetId'] as String;
+        final jsonData = wdata['jsonData'] as Map<String, dynamic>? ?? {};
+
+        // Verifichiamo se abbiamo già un widget in cache
+        Widget? embeddedWidget = _widgetCache[widgetUniqueId];
+        if (embeddedWidget == null) {
+          // Creiamo il widget adesso
+          final widgetBuilder = widgetMap[widgetId];
+          if (widgetBuilder != null) {
+            embeddedWidget = widgetBuilder(jsonData, (reply) => _handleUserInput(reply));
+          } else {
+            embeddedWidget = Text("Widget sconosciuto: $widgetId");
+          }
+          _widgetCache[widgetUniqueId] = embeddedWidget;
+        }
+
+        // Inseriamo il widget, centrato orizzontalmente
+        contentWidgets.add(
+          Container(
+            width: double.infinity,
+            child: Align(
+              alignment: Alignment.center,
+              child: embeddedWidget,
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
   }
 
-  // Restituiamo la colonna
+  // Restituiamo i widget sotto forma di colonna
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: contentWidgets,
@@ -405,6 +565,28 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
     }
   }
 
+Future<void> _animateChatNameChange(int index, String finalName) async {
+  String currentName = "";
+  int charIndex = 0;
+  const duration = Duration(milliseconds: 100);
+  final completer = Completer<void>();
+
+  Timer.periodic(duration, (timer) {
+    if (charIndex < finalName.length) {
+      currentName += finalName[charIndex];
+      setState(() {
+        _chatHistory[index]['name'] = currentName;
+      });
+      charIndex++;
+    } else {
+      timer.cancel();
+      completer.complete();
+    }
+  });
+
+  return completer.future;
+}
+
 // Funzione di logout
   void _logout(BuildContext context) {
     // Rimuove il token dal localStorage
@@ -418,7 +600,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
   Future<void> _loadChatHistory() async {
     try {
       // Definisci il nome del database e della collection
-      final dbName = "${widget.user.username}-database";
+      final dbName = "${widget.user.username}-database11";
       final collectionName = 'chats';
 
       print('chats:');
@@ -456,7 +638,7 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
 
         // Crea la collection 'chats' se non esiste
         await _databaseService.createCollection(
-            "${widget.user.username}-database",
+            "${widget.user.username}-database11",
             'chats',
             widget.token.accessToken);
 
@@ -811,12 +993,7 @@ List<Widget> _buildMessagesList(double containerWidth) {
                         if (!isUser)
                           CircleAvatar(
                             backgroundColor: Colors.transparent,
-                            child: Image.network(
-                              'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
-                              height: 42,
-                              fit: BoxFit.contain,
-                              isAntiAlias: true,
-                            ),
+                            child: assistantAvatar,
                           )
                         else
                           CircleAvatar(
@@ -828,7 +1005,7 @@ List<Widget> _buildMessagesList(double containerWidth) {
                           ),
                         const SizedBox(width: 8.0),
                         Text(
-                          isUser ? widget.user.username : 'boxed-ai',
+                          isUser ? widget.user.username : assistantName,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(width: 4),
@@ -966,13 +1143,7 @@ List<Widget> _buildMessagesList(double containerWidth) {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               // Titolo a sinistra
-                              Image.network(
-                                'https://static.wixstatic.com/media/63b1fb_3e1530fd4a2e479983c1b3cd9f379290~mv2.png',
-                                height:
-                                    42, // Imposta l'altezza desiderata per il logo
-                                fit: BoxFit.contain,
-                                isAntiAlias: true,
-                              ),
+                              fullLogo,
                               // Icona di espansione/contrazione a destra
                               IconButton(
                                 icon: Icon(isExpanded
@@ -1552,12 +1723,7 @@ HoverableNewChatButton(
                                   },
                                 ),
                                 const SizedBox(width: 8),
-                                Image.network(
-                                  'https://static.wixstatic.com/media/63b1fb_3e1530fd4a2e479983c1b3cd9f379290~mv2.png',
-                                  height: 42,
-                                  fit: BoxFit.contain,
-                                  isAntiAlias: true,
-                                ),
+                              fullLogo,
                               ],
                             ],
                           ),
@@ -1794,7 +1960,13 @@ PopupMenuButton<String>(
                               : Column(
                                   children: [
                                     // Sezione principale con i messaggi
-Expanded(
+
+
+
+
+messages.isEmpty
+                      ? buildEmptyChatScreen(context, _handleUserInput)
+                      : Expanded(
   child: LayoutBuilder(
     builder: (context, constraints) {
       final double rightContainerWidth = constraints.maxWidth;
@@ -1995,7 +2167,7 @@ Expanded(
       // Rimuovi dal database, se la chat ha un ID esistente
       if (chatToDelete.containsKey('_id')) {
         await _databaseService.deleteCollectionData(
-          "${widget.user.username}-database",
+          "${widget.user.username}-database11",
           'chats',
           chatToDelete['_id'],
           widget.token.accessToken,
@@ -2063,34 +2235,38 @@ Expanded(
     );
   }
 
-  Future<void> _editChatName(int index, String newName) async {
-    try {
-      final chatToUpdate = _chatHistory[index];
+Future<void> _editChatName(int index, String newName) async {
+  try {
+    // Avvia l'animazione per cambiare il nome
+    await _animateChatNameChange(index, newName);
 
-      // Aggiorna il nome nello stato locale
-      setState(() {
-        chatToUpdate['name'] = newName;
-      });
+    // Dopo l'animazione, aggiorna il nome nel localStorage e nel database
+    final chatToUpdate = _chatHistory[index];
 
-      // Aggiorna il nome nel localStorage
-      final String jsonString = jsonEncode({'chatHistory': _chatHistory});
-      html.window.localStorage['chatHistory'] = jsonString;
+    // Aggiorna il localStorage
+    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+    html.window.localStorage['chatHistory'] = jsonString;
 
-      // Aggiorna il nome nel database
-      if (chatToUpdate.containsKey('_id')) {
-        await _databaseService.updateCollectionData(
-          "${widget.user.username}-database",
-          'chats',
-          chatToUpdate['_id'],
-          {'name': newName},
-          widget.token.accessToken,
-        );
-        print('Nome chat aggiornato con successo nel database.');
-      }
-    } catch (e) {
-      print('Errore durante l\'aggiornamento del nome della chat: $e');
+    // Aggiorna il database, se disponibile
+    if (chatToUpdate.containsKey('_id')) {
+      await _databaseService.updateCollectionData(
+        "${widget.user.username}-database11",
+        'chats',
+        chatToUpdate['_id'],
+        {'name': newName},
+        widget.token.accessToken,
+      );
+      print('Nome chat aggiornato con successo nel database.');
+    }  else {
+      // Se _id non è presente (caso di modifica tramite tool Chatbot)
+      // Chiamiamo _saveConversation per forzare la creazione/aggiornamento del record nel DB.
+      print('Nessun _id presente, forzo il salvataggio tramite _saveConversation.');
+      await _saveConversation(messages);
     }
+  } catch (e) {
+    print('Errore durante l\'aggiornamento del nome della chat: $e');
   }
+}
 
 // Funzione per caricare una nuova chat
   void _startNewChat() {
@@ -2103,6 +2279,8 @@ Expanded(
   }
 
   void _loadMessagesForChat(String chatId) {
+      // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
+  _widgetCache.clear();
     try {
       // Trova la chat corrispondente all'ID
       final chat = _chatHistory.firstWhere(
@@ -2164,6 +2342,26 @@ if (messages.isNotEmpty) {
   Future<void> _handleUserInput(String input) async {
     if (input.isEmpty) return;
 
+    
+  // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
+  String currentChatName = "New Chat";
+  if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
+    currentChatName = _chatHistory[_activeChatIndex!]['name'] as String;
+  }
+  
+  // Qui decidiamo quanti messaggi sono già stati inviati
+  // Puoi utilizzare messages.length oppure tenere un contatore separato
+  final int currentMessageCount = messages.length; 
+  
+  // Ottieni l'input modificato usando la funzione esterna
+  final modifiedInput = appendChatInstruction(
+    input,
+    currentChatName: currentChatName,
+    messageCount: currentMessageCount,
+  );
+
+
+
     final currentTime = DateTime.now().toIso8601String(); // Ora corrente
     final userMessageId =
         uuid.v4(); // Genera un ID univoco per il messaggio utente
@@ -2206,7 +2404,7 @@ final agentConfiguration = {
     _controller.clear();
 
     // Invia il messaggio all'API per ottenere la risposta
-    await _sendMessageToAPI(input);
+    await _sendMessageToAPI(modifiedInput);
 
     // Salva la conversazione con ID univoco per ogni messaggio
     _saveConversation(messages);
@@ -2245,135 +2443,141 @@ final agentConfiguration = {
 
     return groupedChats;
   }
+Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
+  try {
+    final currentTime = DateTime.now().toIso8601String(); // Ora corrente in formato ISO
+    final chatId = _activeChatIndex != null
+        ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
+        : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
+    final chatName = _activeChatIndex != null
+        ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
+        : 'New Chat'; // Nome predefinito per le nuove chat
 
-  Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
-    try {
-      final currentTime =
-          DateTime.now().toIso8601String(); // Ora corrente in formato ISO
-      final chatId = _activeChatIndex != null
-          ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
-          : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
-      final chatName = _activeChatIndex != null
-          ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
-          : 'New Chat'; // Nome predefinito per le nuove chat
+    // Effettua una copia profonda di tutti i messaggi
+    final List<Map<String, dynamic>> updatedMessages = messages.map((originalMessage) {
+      // Cloniamo l'intero messaggio (struttura annidata) con jsonDecode(jsonEncode(...))
+      final newMsg = jsonDecode(jsonEncode(originalMessage)) as Map<String, dynamic>;
 
-      // Prepara i messaggi con copia profonda per evitare riferimenti condivisi
-      final List<Map<String, dynamic>> updatedMessages =
-          messages.map((message) {
-        return Map<String, dynamic>.from(message); // Copia ogni messaggio
-      }).toList();
+      // Se il messaggio ha dei widget, forziamo is_first_time = false in ognuno
+      if (newMsg['widgetDataList'] != null) {
+        final List widgetList = newMsg['widgetDataList'];
+        for (int i = 0; i < widgetList.length; i++) {
+          final Map<String, dynamic> widgetMap =
+              widgetList[i] as Map<String, dynamic>;
+          final Map<String, dynamic> jsonData =
+              (widgetMap['jsonData'] ?? {}) as Map<String, dynamic>;
 
-updatedMessages.forEach((message) {
-  final oldAgentConfig = message['agentConfig'] ?? {};
-  // Ricopia i campi esistenti, e aggiorna/rinfresca quelli basilari:
-  oldAgentConfig['model'] = _selectedModel;
-  oldAgentConfig['contexts'] = _selectedContexts;
-  // Se la chain_id era già presente la lascio stare, al limite la rimetto a _latestChainId
-  // oldAgentConfig['chain_id'] ??= _latestChainId;
-  // oldAgentConfig['config_id'] ??= _latestConfigId;
-
-  message['agentConfig'] = oldAgentConfig;
-});
-
-      // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
-      final currentChat = {
-        'id': chatId, // ID della chat
-        'name': chatName, // Nome della chat
-        'createdAt': _activeChatIndex != null
-            ? _chatHistory[_activeChatIndex!]
-                ['createdAt'] // Mantieni la data di creazione originale
-            : currentTime, // Timestamp di creazione per nuove chat
-        'updatedAt': currentTime, // Aggiorna il timestamp di ultima modifica
-        'messages': updatedMessages, // Lista dei messaggi aggiornati
-      };
-
-      if (_activeChatIndex != null) {
-        // Aggiorna la chat esistente nella lista locale
-        _chatHistory[_activeChatIndex!] =
-            Map<String, dynamic>.from(currentChat); // Copia profonda della chat
-      } else {
-        // Aggiungi una nuova chat alla lista locale
-        _chatHistory.insert(
-            0,
-            Map<String, dynamic>.from(
-                currentChat)); // Inserisci in cima alla lista
-        _activeChatIndex = 0; // Imposta l'indice della nuova chat
+          // Se non esiste la chiave, la creiamo con false,
+          // altrimenti la forziamo a false
+          jsonData['is_first_time'] = false;
+          widgetMap['jsonData'] = jsonData;
+          widgetList[i] = widgetMap;
+        }
+        newMsg['widgetDataList'] = widgetList;
       }
 
-      // Salva la cronologia delle chat nel Local Storage
-      final String jsonString = jsonEncode({'chatHistory': _chatHistory});
-      html.window.localStorage['chatHistory'] = jsonString;
+      // Aggiorniamo la agentConfig per riflettere contesti e modello
+      final Map<String, dynamic> oldAgentConfig = (newMsg['agentConfig'] ?? {}) as Map<String, dynamic>;
+      oldAgentConfig['model'] = _selectedModel;
+      oldAgentConfig['contexts'] = _selectedContexts;
+      newMsg['agentConfig'] = oldAgentConfig;
 
-      print('Chat salvata correttamente nel Local Storage.');
+      return newMsg;
+    }).toList();
 
-      // Salva o aggiorna la chat nel database
-      final dbName =
-          "${widget.user.username}-database"; // Nome del database basato sull'utente
-      final collectionName = 'chats';
+    // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
+    final Map<String, dynamic> currentChat = {
+      'id': chatId, // ID della chat
+      'name': chatName, // Nome della chat
+      'createdAt': _activeChatIndex != null
+          ? _chatHistory[_activeChatIndex!]['createdAt']
+          : currentTime, // Se esisteva già, mantengo la data di creazione, altrimenti quella attuale
+      'updatedAt': currentTime,      // Aggiorna il timestamp di ultima modifica
+      'messages': updatedMessages,   // Lista di messaggi clonati e modificati
+    };
 
-      try {
-        // Carica le chat esistenti dal database
-        final existingChats = await _databaseService.fetchCollectionData(
+    if (_activeChatIndex != null) {
+      // Aggiorna la chat esistente nella lista locale
+      _chatHistory[_activeChatIndex!] = jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>;
+    } else {
+      // Aggiungi una nuova chat alla lista locale
+      _chatHistory.insert(0, jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>);
+      _activeChatIndex = 0; // Imposta l'indice della nuova chat
+    }
+
+    // Salva la cronologia delle chat nel Local Storage
+    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+    html.window.localStorage['chatHistory'] = jsonString;
+    print('Chat salvata correttamente nel Local Storage.');
+
+    // Salva o aggiorna la chat nel database
+    final dbName = "${widget.user.username}-database11"; // Nome del DB basato sull'utente
+    final collectionName = 'chats';
+
+    try {
+      // Carica le chat esistenti dal database
+      final existingChats = await _databaseService.fetchCollectionData(
+        dbName,
+        collectionName,
+        widget.token.accessToken,
+      );
+
+      // Trova la chat corrente nel database
+      final existingChat = existingChats.firstWhere(
+        (chat) => chat['id'] == chatId,
+        orElse: () => <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
+      );
+
+      if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
+        // Chat esistente: aggiorniamo i campi
+        await _databaseService.updateCollectionData(
           dbName,
           collectionName,
+          existingChat['_id'], // ID del documento esistente
+          {
+            'name': currentChat['name'],   // Aggiorna il nome della chat
+            'updatedAt': currentTime,      // Aggiorna la data di ultima modifica
+            'messages': updatedMessages,   // Aggiorna i messaggi
+          },
+          widget.token.accessToken,
+        );
+        print('Chat aggiornata nel database.');
+      } else {
+        // Chat non esistente, aggiungiamone una nuova
+        await _databaseService.addDataToCollection(
+          dbName,
+          collectionName,
+          currentChat,
+          widget.token.accessToken,
+        );
+        print('Nuova chat aggiunta al database.');
+      }
+    } catch (e) {
+      if (e.toString().contains('Failed to load collection data')) {
+        // Se la collection non esiste, la creiamo e aggiungiamo la chat
+        print('Collection "chats" non esistente. Creazione in corso...');
+        await _databaseService.createCollection(dbName, collectionName, widget.token.accessToken);
+
+        // Aggiungi la nuova chat
+        await _databaseService.addDataToCollection(
+          dbName,
+          collectionName,
+          currentChat,
           widget.token.accessToken,
         );
 
-        // Trova la chat corrente nel database
-        final existingChat = existingChats.firstWhere(
-          (chat) => chat['id'] == chatId, // Cerca in base all'ID della chat
-          orElse: () =>
-              <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
-        );
-
-        if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
-          // La chat esiste, aggiorna i campi nel database
-          await _databaseService.updateCollectionData(
-            dbName,
-            collectionName,
-            existingChat['_id'], // ID del documento esistente
-            {
-              'name': currentChat['name'], // Aggiorna il nome della chat
-              'updatedAt': currentTime, // Aggiorna la data di ultima modifica
-              'messages': updatedMessages, // Aggiorna i messaggi
-            },
-            widget.token.accessToken,
-          );
-          print('Chat aggiornata nel database.');
-        } else {
-          // La chat non esiste nel database, aggiungi una nuova
-          await _databaseService.addDataToCollection(
-            dbName,
-            collectionName,
-            currentChat,
-            widget.token.accessToken,
-          );
-          print('Nuova chat aggiunta al database.');
-        }
-      } catch (e) {
-        if (e.toString().contains('Failed to load collection data')) {
-          // Se la collection non esiste, creala e aggiungi la chat
-          print('Collection "chats" non esistente. Creazione in corso...');
-          await _databaseService.createCollection(
-              dbName, collectionName, widget.token.accessToken);
-
-          // Aggiungi la nuova chat alla collection appena creata
-          await _databaseService.addDataToCollection(
-            dbName,
-            collectionName,
-            currentChat,
-            widget.token.accessToken,
-          );
-
-          print('Collection "chats" creata e chat aggiunta al database.');
-        } else {
-          throw e; // Propaga altri errori
-        }
+        print('Collection "chats" creata e chat aggiunta al database.');
+      } else {
+        throw e; // Propaga eventuali altri errori
       }
-    } catch (e) {
-      print('Errore durante il salvataggio della conversazione: $e');
     }
+  } catch (e) {
+    print('Errore durante il salvataggio della conversazione: $e');
   }
+}
+
+
+
 
 void _showContextDialog() async {
   // Carichiamo i contesti (se serve farlo qui) ...
@@ -2708,161 +2912,262 @@ void set_context(List<String> contexts, String model) async {
   }
 
   Future<void> _sendMessageToAPI(String input) async {
-    if (_nlpApiUrl == null)
-      await _loadConfig(); // Assicurati che l'URL sia caricato
+  if (_nlpApiUrl == null) {
+    await _loadConfig(); // Assicurati che l'URL sia caricato
+  }
 
-    // URL della chain API
-    final url = "$_nlpApiUrl/chains/stream_events_chain";
-    final formattedContexts =
-        _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
+  // URL della chain API
+  final url = "$_nlpApiUrl/chains/stream_events_chain";
 
-final chainIdToUse = _latestChainId ?? "${formattedContexts.join('')}_agent_with_tools";
-// Con fallback se _latestChainId è null, a tua scelta
+  // Prepara i contesti
+  final formattedContexts = _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
+  final chainIdToUse = _latestChainId ?? "${formattedContexts.join('')}_agent_with_tools";
 
-final agentConfiguration = {
-  'model': _selectedModel,          // Modello selezionato
-  'contexts': _selectedContexts,    // Contesti selezionati
-  'chain_id': chainIdToUse,         // Usa la chain ID dal backend (oppure fallback)
-  'config_id': _latestConfigId,     // Memorizza anche la config ID
-};
+  // Configurazione dell'agente
+  final agentConfiguration = {
+    'model': _selectedModel,       // Modello selezionato
+    'contexts': _selectedContexts, // Contesti selezionati
+    'chain_id': chainIdToUse,      // Usa la chain ID dal backend (oppure fallback)
+    'config_id': _latestConfigId,  // Memorizza anche la config ID
+  };
 
-    // Prepara il payload da inviare all'API
-    final payload = jsonEncode({
-      "chain_id": chainIdToUse,
-      "query": {
-        "input": input,
-        "chat_history": messages.map((message) {
-          // Filtra e converte i messaggi in un formato compatibile con l'API
-          return {
-            "id": message['id'],
-            "role": message['role'],
-            "content": message['content'],
-            "createdAt": message['createdAt'],
-            "agentConfig":
-                message['agentConfig'], // Include la configurazione dell'agente
-          };
-        }).toList(),
-      },
-      "inference_kwargs": {}
-    });
 
-    try {
-      // Invia la richiesta all'API
-      final response = await js_util.promiseToFuture(js_util.callMethod(
-        html.window,
-        'fetch',
-        [
-          url,
-          js_util.jsify({
-            'method': 'POST',
-            'headers': {'Content-Type': 'application/json'},
-            'body': payload,
-          }),
-        ],
-      ));
-
-      // Controlla lo stato della risposta
-      final ok = js_util.getProperty(response, 'ok') as bool;
-      if (!ok) {
-        throw Exception('Network response was not ok');
-      }
-
-      // Recupera il corpo della risposta
-      final body = js_util.getProperty(response, 'body');
-      if (body == null) {
-        throw Exception('Response body is null');
-      }
-
-      // Ottieni il reader per leggere i chunk della risposta
-      final reader = js_util.callMethod(body, 'getReader', []);
-
-      String nonDecodedChunk = '';
-      fullResponse = '';
-
-      // Funzione per leggere i chunk della risposta
-      void readChunk() {
-        js_util
-            .promiseToFuture(js_util.callMethod(reader, 'read', []))
-            .then((result) {
-          final done = js_util.getProperty(result, 'done') as bool;
-          if (!done) {
-            final value = js_util.getProperty(result, 'value');
-
-            // Converti il chunk in una stringa
-            final bytes = _convertJSArrayBufferToDartUint8List(value);
-            final chunkString = utf8.decode(bytes);
-
-            setState(() {
-              // Accumula la risposta man mano che arriva
-              fullResponse += chunkString;
-              messages[messages.length - 1]['content'] = fullResponse + "▌";
-            });
-
-            try {
-              // Gestione del buffer per il parsing
-              if (nonDecodedChunk.contains('"answer":')) {
-                final splitChunks = nonDecodedChunk.split('\n');
-                for (var line in splitChunks) {
-                  if (line.contains('"answer":')) {
-                    line = '{' + line.trim() + '}';
-                    final decodedChunk = jsonDecode(line);
-                    final answerChunk = decodedChunk['answer'] as String;
-
-                    setState(() {
-                      fullResponse += answerChunk;
-                      messages[messages.length - 1]['content'] =
-                          fullResponse + "▌";
-                    });
-                  }
-                }
-                nonDecodedChunk = ''; // Pulisci il buffer
-              }
-            } catch (e) {
-              print("Errore durante il parsing del chunk: $e");
-            }
-
-            // Continua a leggere il prossimo chunk
-            readChunk();
-          } else {
-            // Fine lettura: finalizza la risposta
-            setState(() {
-              messages[messages.length - 1]['content'] = fullResponse;
-
-              // Associa la configurazione dell'agente alla risposta completata
-              messages[messages.length - 1]['agentConfig'] = agentConfiguration;
-            });
-
-final parsed = _parsePotentialWidgets(fullResponse);
-
-// Sovrascrivi il contenuto e aggiungi widgetData
-setState(() {
-  messages[messages.length - 1]['content'] = parsed.text;
-
-  // Invece di 'widgetData', ora useremo, per esempio, 'widgetDataList'
-  messages[messages.length - 1]['widgetDataList'] = parsed.widgetList;
-});
-            // Salva la conversazione solo dopo che la risposta è stata completata
-            _saveConversation(messages);
-          }
-        }).catchError((error) {
-          // Gestione degli errori durante la lettura del chunk
-          print('Errore durante la lettura del chunk: $error');
-          setState(() {
-            messages[messages.length - 1]['content'] = 'Errore: $error';
-          });
-        });
-      }
-
-      // Avvia la lettura dei chunk
-      readChunk();
-    } catch (e) {
-      // Gestione degli errori durante la richiesta
-      print('Errore durante il fetch dei dati: $e');
-      setState(() {
-        messages[messages.length - 1]['content'] = 'Errore: $e';
-      });
+// Trasforma la chat history sostituendo i placeholder dei widget con i JSON reali
+final transformedChatHistory = messages.map((message) {
+  String content = message['content'] as String;
+  if (message.containsKey('widgetDataList')) {
+    final List widgetList = message['widgetDataList'];
+    for (final widgetEntry in widgetList) {
+      final String placeholder = widgetEntry['placeholder'] as String;
+      // Sostituisce il placeholder nel contenuto con il JSON serializzato
+      final String widgetJsonStr = jsonEncode(widgetEntry['jsonData']);
+      final String widgetFormattedStr = "< TYPE='WIDGET' WIDGET_ID='${widgetEntry['widgetId'] as String}' | $widgetJsonStr | TYPE='WIDGET' WIDGET_ID='${widgetEntry['widgetId'] as String}' >";
+      content = content.replaceAll(placeholder, widgetFormattedStr);
     }
   }
+  return {
+    "id": message['id'],
+    "role": message['role'],
+    "content": content,
+    "createdAt": message['createdAt'],
+    "agentConfig": message['agentConfig'],
+  };
+}).toList();
+
+  // Prepara il payload per l'API
+  final payload = jsonEncode({
+    "chain_id": chainIdToUse,
+    "query": {
+      "input": input,
+      "chat_history": transformedChatHistory
+    },
+    "inference_kwargs": {}
+  });
+
+  try {
+    // Esegui la fetch
+    final response = await js_util.promiseToFuture(js_util.callMethod(
+      html.window,
+      'fetch',
+      [
+        url,
+        js_util.jsify({
+          'method': 'POST',
+          'headers': {'Content-Type': 'application/json'},
+          'body': payload,
+        }),
+      ],
+    ));
+
+    // Verifica lo stato della risposta
+    final ok = js_util.getProperty(response, 'ok') as bool;
+    if (!ok) {
+      throw Exception('Network response was not ok');
+    }
+
+    // Recupera il body dello stream
+    final body = js_util.getProperty(response, 'body');
+    if (body == null) {
+      throw Exception('Response body is null');
+    }
+
+    // Ottieni un reader per leggere lo stream chunk-by-chunk
+    final reader = js_util.callMethod(body, 'getReader', []);
+
+    // Qui memorizziamo l'intero testo completo (con i widget originali)
+    final StringBuffer fullOutput = StringBuffer();
+
+    // Qui memorizziamo solo ciò che mostriamo in tempo reale
+    final StringBuffer displayOutput = StringBuffer();
+
+    // Variabili per la logica di scanning
+    bool insideWidgetBlock = false;      // Siamo dentro < TYPE='WIDGET' ... > ?
+    final StringBuffer widgetBuffer = StringBuffer(); // Accumula i caratteri mentre siamo dentro il blocco widget
+
+    final String startPattern = "< TYPE='WIDGET'";
+    final int patternLength = startPattern.length;
+
+    // Un piccolo buffer circolare per rilevare retroattivamente la comparsa di startPattern
+    final List<int> ringBuffer = [];
+
+    // Funzione locale che processa un chunk di testo
+void processChunk(String chunk) {
+  // Costante per mostrare la rotella di caricamento durante la costruzione del widget
+  const String spinnerPlaceholder = "[WIDGET_SPINNER]";
+
+  for (int i = 0; i < chunk.length; i++) {
+    final c = chunk[i];
+
+    // Aggiungiamo SEMPRE il carattere al fullOutput (testo completo, inclusi widget)
+    fullOutput.write(c);
+
+    if (!insideWidgetBlock) {
+      // Non siamo ancora dentro un blocco < TYPE='WIDGET', quindi:
+      // 1) Aggiorniamo il ringBuffer
+      ringBuffer.add(c.codeUnitAt(0));
+      if (ringBuffer.length > 32) {
+        ringBuffer.removeAt(0);
+      }
+
+      // 2) Aggiungiamo il carattere visibile al displayOutput
+      displayOutput.write(c);
+
+      // 3) Controlliamo se negli ultimi caratteri di ringBuffer compare la stringa "< TYPE='WIDGET'"
+      if (ringBuffer.length >= patternLength) {
+        final startIndex = ringBuffer.length - patternLength;
+        final recent = String.fromCharCodes(ringBuffer.sublist(startIndex));
+        if (recent == startPattern) {
+          // Abbiamo riconosciuto retroattivamente l'inizio di un blocco widget
+
+          // a) Rimuoviamo dal displayOutput i caratteri del pattern
+          final newLength = displayOutput.length - patternLength;
+          if (newLength >= 0) {
+            final soFar = displayOutput.toString();
+            displayOutput.clear();
+            displayOutput.write(soFar.substring(0, newLength));
+          }
+
+          // b) Entriamo nel blocco widget e puliamo il widgetBuffer
+          insideWidgetBlock = true;
+          widgetBuffer.clear();
+          widgetBuffer.write(startPattern);
+
+          // c) Mostriamo subito una rotella di caricamento
+          displayOutput.write(spinnerPlaceholder);
+
+            // d) AGGIUNGI anche un “fake widget” in widgetDataList, associato allo stesso placeholder
+  final lastMsg = messages[messages.length - 1];
+  List<dynamic> wList = lastMsg['widgetDataList'] ?? [];
+  wList.add({
+    "_id": "SpinnerFake_" + DateTime.now().millisecondsSinceEpoch.toString(),
+    "widgetId": "SpinnerPlaceholder",
+    "jsonData": {}, // Nessun dato extra
+    "placeholder": spinnerPlaceholder
+  });
+  lastMsg['widgetDataList'] = wList;
+
+  // e) setState per ridisegnare subito
+  setState(() {
+    messages[messages.length - 1]['content'] = displayOutput.toString() + "▌";
+  });
+
+        }
+      }
+    } else {
+      // Siamo dentro un blocco < TYPE='WIDGET' ... >
+      widgetBuffer.write(c);
+
+      // Se incontriamo il carattere di chiusura '>', consideriamo il blocco completato
+      if (c == '>') {
+        // 1) Rimuoviamo subito la rotella di caricamento dal displayOutput
+        String currentText = displayOutput.toString();
+        if (currentText.contains(spinnerPlaceholder)) {
+          currentText = currentText.replaceFirst(spinnerPlaceholder, "");
+          displayOutput.clear();
+          displayOutput.write(currentText);
+        }
+
+        // 2) Finalizziamo subito il blocco widget chiamando la funzione di parsing
+        final widgetBlock = widgetBuffer.toString();
+        final placeholder = _finalizeWidgetBlock(widgetBlock);
+        // Inseriamo il placeholder restituito al posto dello spinner
+        displayOutput.write(placeholder);
+
+        // 3) Uscita dal blocco widget
+        insideWidgetBlock = false;
+      }
+    }
+  }
+
+  // Aggiorniamo la UI con il contenuto visibile corrente (aggiungendo un cursore "▌")
+  setState(() {
+    messages[messages.length - 1]['content'] = displayOutput.toString();
+  });
+}
+
+
+    // Legge ricorsivamente i chunk
+    void readChunk() {
+      js_util
+          .promiseToFuture(js_util.callMethod(reader, 'read', []))
+          .then((result) {
+        final done = js_util.getProperty(result, 'done') as bool;
+        if (!done) {
+          final value = js_util.getProperty(result, 'value');
+          // Converte in stringa
+          final bytes = _convertJSArrayBufferToDartUint8List(value);
+          final chunkString = utf8.decode(bytes);
+
+          // Processa il chunk (token per token)
+          processChunk(chunkString);
+
+          // Continua a leggere
+          readChunk();
+        } else {
+          // Fine streaming
+          // A questo punto, fullOutput contiene TUTTO il testo (inclusi < TYPE='WIDGET'...>)
+          // displayOutput conteneva la parte "visibile" durante lo stream
+          // Ora finalizziamo
+          setState(() {
+            // Mettiamo dentro 'content' tutto il displayOutput
+            messages[messages.length - 1]['content'] = displayOutput.toString();
+            // Associa la configurazione dell'agente al messaggio
+            messages[messages.length - 1]['agentConfig'] = agentConfiguration;
+          });
+
+          // Ora effettuiamo il parse effettivo di fullOutput
+          final parsed = _parsePotentialWidgets(fullOutput.toString());
+
+          // Sovrascriviamo il content finale con il testo pulito e la widgetDataList
+          setState(() {
+            messages[messages.length - 1]['content'] = parsed.text;
+            messages[messages.length - 1]['widgetDataList'] = parsed.widgetList;
+          });
+
+          // Salviamo la conversazione (DB/localStorage)
+          _saveConversation(messages);
+        }
+      }).catchError((error) {
+        // Errore durante la lettura del chunk
+        print('Errore durante la lettura del chunk: $error');
+        setState(() {
+          messages[messages.length - 1]['content'] = 'Errore: $error';
+        });
+      });
+    }
+
+    // Avvia la lettura dei chunk
+    readChunk();
+
+  } catch (e) {
+    // Gestione errori fetch
+    print('Errore durante il fetch dei dati: $e');
+    setState(() {
+      messages[messages.length - 1]['content'] = 'Errore: $e';
+    });
+  }
+}
+
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {
     final buffer = js_util.getProperty(jsArrayBuffer, 'buffer') as ByteBuffer;

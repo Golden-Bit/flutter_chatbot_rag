@@ -252,3 +252,163 @@ class CustomChartWidgetTool extends StatelessWidget {
     );
   }
 }
+
+
+
+class ChangeChatNameWidgetTool extends StatefulWidget {
+  final Map<String, dynamic> jsonData;
+  final Future<void> Function(String chatId, String newName) onRenameChat;
+  final Future<String> Function() getCurrentChatId; // Callback per ottenere l'ID della chat attuale
+
+  const ChangeChatNameWidgetTool({
+    Key? key,
+    required this.jsonData,
+    required this.onRenameChat,
+    required this.getCurrentChatId,
+  }) : super(key: key);
+
+  @override
+  _ChangeChatNameWidgetToolState createState() => _ChangeChatNameWidgetToolState();
+}
+
+class _ChangeChatNameWidgetToolState extends State<ChangeChatNameWidgetTool> {
+  bool _operationCompleted = false;
+  String _effectiveChatId = "";
+  bool _isFirstTime = true; // Per memorizzare se è la prima volta
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Leggiamo is_first_time dal jsonData (se non c'è, di default è true)
+    _isFirstTime = widget.jsonData['is_first_time'] ?? true;
+
+    // Ricaviamo chatId (se vuoto, useremo getCurrentChatId)
+    final String providedChatId = widget.jsonData['chatId'] ?? '';
+    if (providedChatId.isEmpty) {
+      // Se non viene fornito un chatId, usa quello della chat attuale
+      widget.getCurrentChatId().then((id) {
+        setState(() {
+          _effectiveChatId = id;
+          // Se è la prima volta, facciamo subito la rinomina
+          if (_isFirstTime && !_operationCompleted) {
+            _autoRename();
+          }
+        });
+      });
+    } else {
+      // Abbiamo un chatId esplicito
+      _effectiveChatId = providedChatId;
+      // Se è la prima volta, facciamo subito la rinomina
+      if (_isFirstTime && !_operationCompleted) {
+        _autoRename();
+      }
+    }
+  }
+
+  /// Funzione che esegue la rinomina automatica
+  Future<void> _autoRename() async {
+    final String newName = widget.jsonData['newName'] ?? '';
+    await widget.onRenameChat(_effectiveChatId, newName);
+    setState(() {
+      _operationCompleted = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String providedChatId = widget.jsonData['chatId'] ?? '';
+    final String newName = widget.jsonData['newName'] ?? '';
+
+    // Se is_first_time è false, mostriamo solo una card con un messaggio sintetico
+    if (!_isFirstTime) {
+      return Card(
+        margin: const EdgeInsets.all(8.0),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.grey, Colors.black54],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(8.0),
+          ),
+          child: const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text(
+              'Rinomina chat già eseguita (is_first_time: false).',
+              style: TextStyle(fontSize: 16, color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Messaggio finale dopo la rinomina
+    final String messageText = providedChatId.isEmpty 
+      ? 'La chat attuale (ID: $_effectiveChatId) è stata rinominata in "$newName".'
+      : 'La chat con ID "$_effectiveChatId" è stata rinominata in "$newName".';
+
+    // Se _isFirstTime è true, ci troviamo in due possibili stati:
+    //  - _operationCompleted = false => la rinomina è in corso (ma la facciamo in initState)
+    //  - _operationCompleted = true  => la rinomina è terminata
+
+    return Card(
+      margin: const EdgeInsets.all(8.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+      child: Container(
+        decoration: BoxDecoration(
+          // Sfondo verde sfumato per il messaggio d’esito
+          gradient: LinearGradient(
+            colors: [Colors.greenAccent, Colors.green],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(8.0),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: _operationCompleted 
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'OPERAZIONE EFFETTUATA',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8.0),
+                    Text(
+                      messageText,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ],
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    // Qui potresti mettere un messaggio di "Rinomino in corso..."
+                    // o uno spinner, se vuoi
+                    Text(
+                      'Rinominazione in corso...',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.white,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 8.0),
+                    CircularProgressIndicator(color: Colors.white),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}

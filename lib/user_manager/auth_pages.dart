@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'auth_service.dart';
 import 'user_model.dart';
-import '../main.dart'; // Importa main.dart per navigazione
+import '../main_no_auth.dart'; // Importa main.dart per navigazione
 import 'package:flutter_app/chatbot.dart';
 import 'dart:html' as html;  // Importa per accedere a localStorage
 
@@ -242,8 +242,11 @@ class _LoginPageState extends State<LoginPage> {
     if (token != null) {
       try {
         // Verifica se il token è ancora valido
+
+
         User user = await _authService.fetchCurrentUser(token);
 
+        print(user.toJson());
         // Se il token è valido, naviga alla ChatBotPage
         Navigator.pushReplacement(
           context,
@@ -283,7 +286,9 @@ class _LoginPageState extends State<LoginPage> {
 
         // Ottieni e memorizza anche l'utente
         User user = await _authService.fetchCurrentUser(token.accessToken);
-        html.window.localStorage['user'] = user.toJson().toString();
+
+
+html.window.localStorage['user'] = user.toJson().toString();
 
         // Naviga alla ChatBotPage
         Navigator.pushReplacement(

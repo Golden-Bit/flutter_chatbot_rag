@@ -57,8 +57,9 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
     //"chatbot_nlp_api": "http://127.0.0.1:8080"
+    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }
@@ -97,15 +98,14 @@ Future<void> deleteContext(String contextName, String username, String token) as
 
   final fullContextName = '$username-$contextName';  // Usa il formato corretto
 
-  final uri = Uri.parse('$baseUrl/contexts/$fullContextName');
+final uri = Uri.parse('$baseUrl/contexts/$fullContextName?token=$token');
 
-  final response = await http.delete(
-    uri,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token'  // Se il backend usa token di autorizzazione
-    },
-  );
+final response = await http.delete(
+  uri,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+);
 
   if (response.statusCode != 200) {
     throw ApiException('Errore durante l\'eliminazione del contesto: ${response.body}');
@@ -114,6 +114,11 @@ Future<void> deleteContext(String contextName, String username, String token) as
 
 
 Future<List<ContextMetadata>> listContexts(String username, String token) async {
+
+
+  print('$username');
+
+
   if (baseUrl == null) await loadConfig();
 
   final uri = Uri.parse('$baseUrl/list_contexts');
@@ -194,9 +199,11 @@ Future<List<Map<String, dynamic>>> listFiles(String username, String token, {Lis
     // Aggiunge il prefisso 'username-' ai nomi dei contesti
     formattedContexts = contexts.map((ctx) => '$username-$ctx').toList();
 
-    uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
-      'contexts': formattedContexts.join(','),
-    });
+uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
+  if (formattedContexts.isNotEmpty) 'contexts': formattedContexts.join(','),
+  'token': token,
+});
+
   } else {
     uri = Uri.parse('$baseUrl/files');
   }
@@ -248,10 +255,11 @@ Future<void> deleteFile(String username, String token, {String? fileId, String? 
     }
   }
 
-  Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
-    if (fileId != null) 'file_id': fileId,
-    if (filePath != null) 'file_path': filePath,
-  });
+Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
+  if (fileId != null) 'file_id': fileId,
+  if (filePath != null) 'file_path': filePath,
+  'token': token, // 💡 Aggiunto correttamente
+});
 
   final response = await http.delete(
     uri,
@@ -280,7 +288,7 @@ Future<Map<String, dynamic>> configureAndLoadChain(
   // Costruisci il corpo della richiesta (invio dati in formato JSON)
   final body = {
     //'username': username,      // Passiamo username per verifica lato server
-    //'token': token,            // Passiamo il token per autenticazione
+    'token': token,            // Passiamo il token per autenticazione
     'contexts': formattedContexts, // Contesti aggiornati con prefisso
     'model_name': model,
   };

@@ -1,0 +1,312 @@
+import 'package:flutter_app/chatbot_auth.dart';
+import 'package:flutter_app/databases_manager/database_service_auth.dart';
+import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:flutter_app/user_manager/auth_sdk/models/get_user_info_request.dart';
+import 'package:flutter_app/user_manager/auth_sdk/models/sign_in_request.dart';
+import 'package:flutter_app/user_manager/pages/forgot_password_page.dart';
+import 'package:flutter_app/user_manager/pages/settings_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_app/user_manager/user_model.dart';
+import 'dart:html' as html;  // Importa per accedere a localStorage
+
+
+class LoginPasswordPage extends StatefulWidget {
+  final String email;
+
+  /// Ricevi l'email come parametro dal "primo step" (pagina inserimento email)
+  const LoginPasswordPage({
+    Key? key,
+    required this.email,
+  }) : super(key: key);
+
+  @override
+  State<LoginPasswordPage> createState() => _LoginPasswordPageState();
+}
+
+
+class _LoginPasswordPageState extends State<LoginPasswordPage> {
+  final TextEditingController _passwordController = TextEditingController();
+  final CognitoApiClient _apiClient = CognitoApiClient();
+  //final CognitoApiClient _apiClient = CognitoApiClient();
+final DatabaseService _databaseService = DatabaseService();
+  bool _obscurePassword = true; // Mostra/nascondi la password
+  bool _isLoading = false; // Indica se stiamo effettuando la chiamata login
+  String _errorMessage = ''; // Per mostrare eventuali errori a schermo
+
+  
+  Future<void> _onContinuePressed() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    final password = _passwordController.text.trim();
+
+    try {
+      // Creiamo il SignInRequest con email e password
+      final signInRequest = SignInRequest(
+        username: widget.email, // username == email
+        password: password,
+      );
+
+      // Chiamata reale alla tua API Cognito
+      final signInResponse = await _apiClient.signIn(signInRequest);
+
+      debugPrint(
+          'Login effettuato con successo: ${signInResponse.accessToken}');
+
+      // Naviga alla pagina di Settings passando l'accessToken ottenuto
+      /*Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => accessToken: signInResponse.accessToken!,
+      ),
+    );*/
+      try {
+        // Ottieni il token di accesso dopo il login
+
+        // Memorizza il token nel localStorage
+        //html.window.localStorage['token'] = token.accessToken;
+
+        // Ottieni e memorizza anche l'utente
+        //User user = await _authService.fetchCurrentUser(signInResponse.accessToken);
+        //html.window.localStorage['user'] = user.toJson().toString();
+
+        Token token = Token(
+            accessToken: signInResponse.accessToken!,
+            refreshToken: signInResponse.refreshToken!);
+        //String username = _apiClient.getUsernameFromAccessToken(token.accessToken);
+
+        final getUserInfoRequest = GetUserInfoRequest(
+          accessToken: token.accessToken, // username == email
+        );
+
+        Map<String, dynamic> userInfo =
+            await _apiClient.getUserInfo(getUserInfoRequest);
+
+// Estrai il valore di username direttamente dal campo "Username"
+        String username = userInfo['Username'] ?? '';
+
+// Inizializza la variabile email
+        String email = '';
+
+// Se sono presenti gli attributi utente, cerca quello relativo all'email
+        if (userInfo['UserAttributes'] != null) {
+          List attributes = userInfo['UserAttributes'];
+          for (var attribute in attributes) {
+            if (attribute['Name'] == 'email') {
+              email = attribute['Value'];
+              break;
+            }
+          }
+        }
+
+// Costruisci l'oggetto User impostando fullName uguale a username
+        User user = User(
+          username: username,
+          email: email,
+          fullName: username,
+        );
+
+        // Memorizza il token nel localStorage
+        html.window.localStorage['token'] = token.accessToken;
+        html.window.localStorage['refreshToken'] = token.refreshToken;
+        html.window.localStorage['user'] = user.toJson().toString();
+
+        // Naviga alla ChatBotPage
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatBotPage(user: user, token: token),
+          ),
+        );
+      } catch (e) {
+        setState(() {
+          _isLoading =
+              false; // Rimuovi lo stato di caricamento se c'è un errore
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Errore durante il login: $e'),
+        ));
+      }
+    } catch (e) {
+      // In caso di errore, mostriamo un messaggio
+      setState(() {
+        _errorMessage = e.toString();
+      });
+    } finally {
+      // Terminato il tentativo di login, disabilitiamo il caricamento
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        // SingleChildScrollView per scrollare su schermi ridotti o con tastiera aperta
+        child: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Titolo principale
+                  Text(
+                    'Inserisci la password',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Campo "Indirizzo e-mail" disabilitato (o semplice testo), con pulsante "Modifica"
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          controller: TextEditingController(text: widget.email),
+                          decoration: InputDecoration(
+                            labelText: 'Indirizzo e-mail',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            enabled: false, // Campo disabilitato
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          // Torna alla pagina precedente per modificare l'email
+                          Navigator.pop(context);
+                        },
+                        child: const Text('Modifica'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Campo password con icona "occhio" (mostra/nascondi)
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      labelStyle: const TextStyle(color: Colors.grey),
+                      floatingLabelStyle: MaterialStateTextStyle.resolveWith(
+                        (Set<MaterialState> states) {
+                          if (states.contains(MaterialState.focused)) {
+                            return const TextStyle(color: Colors.lightBlue);
+                          }
+                          return const TextStyle(color: Colors.grey);
+                        },
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: const BorderSide(
+                          color: Colors.lightBlue,
+                          width: 2,
+                        ),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.remove_red_eye_outlined
+                              : Icons.remove_red_eye,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Bottone "Continua" - nero
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                      onPressed: _isLoading ? null : _onContinuePressed,
+                      child: _isLoading
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text(
+                              'Continua',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Link "Password dimenticata?"
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () {
+                        // Naviga alla pagina di ForgotPasswordPage
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ForgotPasswordPage()),
+                        );
+                      },
+                      child: const Text('Password dimenticata?'),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Mostriamo l'errore, se presente
+                  if (_errorMessage.isNotEmpty) ...[
+                    Text(
+                      _errorMessage,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // Link Condizioni d'uso e Informativa sulla privacy
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          debugPrint('Apri condizioni d\'uso');
+                        },
+                        child: const Text('Condizioni d’uso'),
+                      ),
+                      const SizedBox(width: 16),
+                      TextButton(
+                        onPressed: () {
+                          debugPrint('Apri informativa sulla privacy');
+                        },
+                        child: const Text('Informativa sulla privacy'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

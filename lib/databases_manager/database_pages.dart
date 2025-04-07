@@ -3,7 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; // Importa foundation.dart per kIsWeb
 import 'database_model.dart';
-import 'database_service.dart';
+import 'database_service_auth.dart';
 import 'expandable_card.dart';
 //import 'json_viewer.dart';
 import '../user_manager/user_model.dart';

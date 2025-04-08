@@ -2,12 +2,13 @@ import 'dart:convert';
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot_auth.dart';
+import 'package:flutter_app/chatbot.dart';
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/get_user_info_request.dart';
 import 'package:flutter_app/user_manager/components/social_button.dart';
 import 'package:flutter_app/user_manager/pages/registration_page_1.dart';
-import 'package:flutter_app/user_manager/user_model.dart';
+import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
 import 'login_page_2.dart';
 
 class LoginPage extends StatefulWidget {
@@ -130,6 +131,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     if (_isCheckingToken) {
       return Scaffold(
+        backgroundColor: Colors.white,
         body: Center(
           child: Image.network(
             'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
@@ -142,15 +144,18 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     return Scaffold(
+              backgroundColor: Colors.white,
       body: Center(
         child: SingleChildScrollView(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 350),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                smallFullLogo,
                 Text(
                   'Ci fa piacere ritrovarti',
+                  textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),

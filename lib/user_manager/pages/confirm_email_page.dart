@@ -1,13 +1,23 @@
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/confirm_sign_up_request.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/resend_confirm_request.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/user_manager/pages/login_page_2.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 
+String generateUserName(String email) {
+  // Calcola l'hash SHA-256 dell'email
+  var bytes = utf8.encode(email);
+  var digest = sha256.convert(bytes);
 
-String transformEmail(String email) {
-  return email.replaceAll('@', '_').replaceAll('.', '-');
+  // Codifica l'hash in Base64 e rimuove eventuali caratteri non alfanumerici
+  var base64Str = base64Url.encode(digest.bytes).replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+
+  // Tronca la stringa a 9 caratteri
+  return 'user-${base64Str.substring(0, 9)}';
 }
-
 class ConfirmEmailPage extends StatefulWidget {
   final String email;
 
@@ -42,7 +52,7 @@ class _ConfirmEmailPageState extends State<ConfirmEmailPage> {
     try {
       // Creiamo la richiesta
       final requestData = ConfirmSignUpRequest(
-        username: transformEmail(widget.email),     // username == email
+        username: generateUserName(widget.email),     // username == email
         confirmationCode: code,     // codice inserito
       );
 
@@ -54,10 +64,10 @@ class _ConfirmEmailPageState extends State<ConfirmEmailPage> {
 
       // Se tutto ok, naviga al passaggio successivo o mostra un messaggio di successo
       // Esempio:
-      // Navigator.pushReplacement(
-      //   context,
-      //   MaterialPageRoute(builder: (_) => const LoginPage()),
-      // );
+       Navigator.pushReplacement(
+         context,
+         MaterialPageRoute(builder: (_) => LoginPasswordPage(email: widget.email)),
+       );
 
     } catch (e) {
       // In caso di errore, lo mostriamo a schermo
@@ -101,17 +111,20 @@ class _ConfirmEmailPageState extends State<ConfirmEmailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+              backgroundColor: Colors.white,
       body: Center(
         // SingleChildScrollView per evitare overflow su schermi piccoli
         child: SingleChildScrollView(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 350),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                                smallFullLogo,
                 // Titolo principale
                 Text(
                   'Controlla la posta in arrivo',
+                                    textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -121,6 +134,7 @@ class _ConfirmEmailPageState extends State<ConfirmEmailPage> {
                 // Testo descrittivo
                 Text(
                   'Inserisci il codice di verifica che abbiamo appena inviato all’indirizzo ${widget.email}.',
+                                    textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 16),
                 ),
                 const SizedBox(height: 24),

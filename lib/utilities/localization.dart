@@ -1712,16 +1712,17 @@ class LocalizationProvider extends InheritedWidget {
 
   
 }
-
 class LocalizationProviderWrapper extends StatefulWidget {
   final Widget child;
 
   const LocalizationProviderWrapper({Key? key, required this.child})
       : super(key: key);
 
-  // Metodo statico per accedere allo stato del wrapper
+  /// Metodo statico per accedere allo stato del wrapper ovunque nel widget tree
   static _LocalizationProviderWrapperState of(BuildContext context) {
-    return context.findAncestorStateOfType<_LocalizationProviderWrapperState>()!;
+    final state = context.findAncestorStateOfType<_LocalizationProviderWrapperState>();
+    assert(state != null, 'LocalizationProviderWrapper not found in context');
+    return state!;
   }
 
   @override
@@ -1730,14 +1731,19 @@ class LocalizationProviderWrapper extends StatefulWidget {
 }
 
 class _LocalizationProviderWrapperState extends State<LocalizationProviderWrapper> {
-  // Lingua corrente inizialmente impostata, ad esempio a Italiano
+  /// Lingua corrente
   Language _currentLanguage = Language.english;
 
-  // Metodo per cambiare la lingua
+  /// Getter per ottenere la lingua corrente
+  Language get currentLanguage => _currentLanguage;
+
+  /// Metodo per aggiornare la lingua
   void setLanguage(Language newLanguage) {
-    setState(() {
-      _currentLanguage = newLanguage;
-    });
+    if (_currentLanguage != newLanguage) {
+      setState(() {
+        _currentLanguage = newLanguage;
+      });
+    }
   }
 
   @override

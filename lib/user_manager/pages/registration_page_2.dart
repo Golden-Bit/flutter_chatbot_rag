@@ -1,10 +1,23 @@
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/sign_up_request.dart';
 import 'package:flutter_app/user_manager/pages/confirm_email_page.dart';
 import 'package:flutter/material.dart';
 
-String transformEmail(String email) {
-  return email.replaceAll('@', '_').replaceAll('.', '-');
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+
+
+String generateUserName(String email) {
+  // Calcola l'hash SHA-256 dell'email
+  var bytes = utf8.encode(email);
+  var digest = sha256.convert(bytes);
+
+  // Codifica l'hash in Base64 e rimuove eventuali caratteri non alfanumerici
+  var base64Str = base64Url.encode(digest.bytes).replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+
+  // Tronca la stringa a 9 caratteri
+  return 'user-${base64Str.substring(0, 9)}';
 }
 
 class RegistrationPasswordPage extends StatefulWidget {
@@ -46,7 +59,7 @@ Future<void> _onContinuePressed() async {
   try {
     // 1) Prepariamo la richiesta
     final signUpRequest = SignUpRequest(
-      username: transformEmail(widget.email),
+      username: generateUserName(widget.email),
       password: password,
       email: widget.email,
     );
@@ -72,6 +85,7 @@ Future<void> _onContinuePressed() async {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+              backgroundColor: Colors.white,
       body: Center(
         // Usiamo SingleChildScrollView per adattarci a schermi piccoli o tastiera aperta
         child: SingleChildScrollView(
@@ -80,11 +94,13 @@ Future<void> _onContinuePressed() async {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                                  smallFullLogo,
                   // Titolo principale
                   Text(
                     'Crea un account',
+                                      textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -94,6 +110,7 @@ Future<void> _onContinuePressed() async {
                   const SizedBox(height: 8),
                   const Text(
                     'Per continuare, imposta la tua password per Boxed AI',
+                                      textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 16),
                   ),
                   const SizedBox(height: 24),

@@ -11,7 +11,6 @@ import 'package:flutter_app/llm_ui_tools/tools.dart';
 import 'package:flutter_app/ui_components/buttons/blue_button.dart';
 import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
 import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
-import 'package:flutter_app/user_manager/auth_pages.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -23,7 +22,7 @@ import 'package:flutter/services.dart'
     show rootBundle; // Import necessario per caricare file JSON
 import 'dart:convert'; // Per il parsing JSON
 import 'context_api_sdk.dart'; // Importa lo script SDK
-import 'package:flutter_app/user_manager/user_model.dart';
+import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
 import 'databases_manager/database_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:uuid/uuid.dart'; // Importa il pacchetto UUID (assicurati di averlo aggiunto a pubspec.yaml)
@@ -32,6 +31,8 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart'; // Per gestire il tap sui link
 import 'package:intl/intl.dart';
 import 'dart:async'; // Assicurati di importare il package Timer
+import 'package:flutter_svg/flutter_svg.dart';
+
 
 /*void main() {
   runApp(MyApp());
@@ -600,7 +601,7 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
   Future<void> _loadChatHistory() async {
     try {
       // Definisci il nome del database e della collection
-      final dbName = "${widget.user.username}-database11";
+      final dbName = "${widget.user.username}-database";
       final collectionName = 'chats';
 
       print('chats:');
@@ -638,7 +639,7 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
 
         // Crea la collection 'chats' se non esiste
         await _databaseService.createCollection(
-            "${widget.user.username}-database11",
+            "${widget.user.username}-database",
             'chats',
             widget.token.accessToken);
 
@@ -671,6 +672,16 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
     _controller.addListener(() {
       setState(() {});
     });
+
+    
+
+
+
+    _databaseService.createDatabase('database', widget.token.accessToken);
+
+
+
+
   }
 
   /*@override
@@ -1146,10 +1157,11 @@ List<Widget> _buildMessagesList(double containerWidth) {
                               fullLogo,
                               // Icona di espansione/contrazione a destra
                               IconButton(
-                                icon: Icon(isExpanded
-                                    ? Icons.close
-                                    : Icons
-                                        .menu), // Usa l'icona che preferisci (qui ad esempio menu/close)
+                                icon:SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey),
+
                                 onPressed: () {
                                   setState(() {
                                     isExpanded = !isExpanded;
@@ -1210,7 +1222,8 @@ showSearchDialog(
       padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
       child: Row(
         children: [
-          Icon(Icons.search, color: Colors.black),
+          const Icon(Icons.search,  size: 24.0,
+            color: Colors.black),
           const SizedBox(width: 8.0),
           Text(
             localizations.searchButton,
@@ -1273,12 +1286,12 @@ showSearchDialog(
                                   vertical: 12.0, horizontal: 16.0),
                               child: Row(
                                 children: [
-                                  Icon(Icons.chat_bubble_outline_outlined,
-                                      color: Colors.black),
-                                  /*Image.network(
-                                      'https://static.wixstatic.com/media/63b1fb_4dbfd84d1b554c9bb8879550f47b97d8~mv2.png',
-                                      width: 24,
-                                      height: 24),*/
+                                  //Icon(Icons.chat_bubble_outline_outlined,
+                                  //    color: Colors.black),
+SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element.svg',
+            width: 24,
+            height: 24,
+            color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
                                     localizations.conversation,
@@ -1342,8 +1355,10 @@ showSearchDialog(
                                   vertical: 12.0, horizontal: 16.0),
                               child: Row(
                                 children: [
-                                  Icon(Icons.book_outlined,
-                                      color: Colors.black),
+SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
+            width: 24,
+            height: 24,
+            color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
                                       localizations.knowledgeBoxes,
@@ -1406,8 +1421,10 @@ showSearchDialog(
                                   vertical: 12.0, horizontal: 16.0),
                               child: Row(
                                 children: [
-                                  Icon(Icons.settings_outlined,
-                                      color: Colors.black),
+SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Icon.svg',
+            width: 24,
+            height: 24,
+            color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
                                     localizations.settings,
@@ -1587,7 +1604,18 @@ Expanded(
                                                           ),
                                                         ),
                                                       ),
-                                                      PopupMenuButton<String>(
+                                                      Theme(
+  data: Theme.of(context).copyWith(
+    popupMenuTheme: PopupMenuThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      color: Colors.white,
+    ),
+  ),
+  child: 
+PopupMenuButton<String>(
+  offset: const Offset(0, 32),
                                                           borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
                                                         color: Colors.white,
                                                         icon: Icon(
@@ -1633,7 +1661,7 @@ Expanded(
                                                             ),
                                                           ];
                                                         },
-                                                      ),
+                                                      )),
                                                     ],
                                                   ),
                                                 ),
@@ -1708,8 +1736,11 @@ HoverableNewChatButton(
                             children: [
                               if (sidebarWidth == 0.0) ...[
                                 IconButton(
-                                  icon: const Icon(Icons.menu,
-                                      color: Colors.black),
+                                  icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey),//const Icon(Icons.menu,
+                                      //color: Colors.black),
                                   onPressed: () {
                                     setState(() {
                                       isExpanded = true;
@@ -1728,8 +1759,18 @@ HoverableNewChatButton(
                             ],
                           ),
                         ),
-
+Theme(
+  data: Theme.of(context).copyWith(
+    popupMenuTheme: PopupMenuThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      color: Colors.white,
+    ),
+  ),
+  child: 
 PopupMenuButton<String>(
+  offset: const Offset(0, 50),
   borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
   color: Colors.white,
   icon: Builder(
@@ -1781,53 +1822,92 @@ PopupMenuButton<String>(
   onSelected: (value) {
     if (value == 'language') {
       // Mostra un dialogo per selezionare la lingua
-      showDialog(
-        context: context,
-        builder: (context) {
-          return SimpleDialog(
-            title: Text(localizations.select_language),
+showDialog(
+  context: context,
+  builder: (context) {
+    final selectedLanguage = LocalizationProviderWrapper.of(context).currentLanguage;
+
+    Widget languageOption({
+      required String label,
+      required Language language,
+      required String countryCode, // es: "it", "us", "es"
+    }) {
+      final isSelected = selectedLanguage == language;
+      return SimpleDialogOption(
+        onPressed: () {
+          LocalizationProviderWrapper.of(context).setLanguage(language);
+          Navigator.pop(context);
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.grey.shade200 : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              SimpleDialogOption(
-                onPressed: () {
-                  // Aggiorna la lingua a Italiano
-                LocalizationProviderWrapper.of(context).setLanguage(Language.italian);
-                  Navigator.pop(context);
-                },
-                child: const Text("Italiano"),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: Colors.black,
+                ),
               ),
-              SimpleDialogOption(
-                onPressed: () {
-                  // Aggiorna la lingua a English
-                  LocalizationProviderWrapper.of(context).setLanguage(Language.english);
-                  Navigator.pop(context);
-                },
-                child: const Text("English"),
-              ),
-              SimpleDialogOption(
-                onPressed: () {
-                  // Aggiorna la lingua a Español
-                  LocalizationProviderWrapper.of(context).setLanguage(Language.spanish);
-                  Navigator.pop(context);
-                },
-                child: const Text("Español"),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.network(
+                  'https://flagcdn.com/w40/$countryCode.png',
+                  width: 24,
+                  height: 18,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.flag),
+                ),
               ),
             ],
-          );
-        },
+          ),
+        ),
       );
+    }
+
+    return SimpleDialog(
+      backgroundColor: Colors.white,
+      title: Text(localizations.select_language),
+      children: [
+        languageOption(
+          label: 'Italiano',
+          language: Language.italian,
+          countryCode: 'it',
+        ),
+        languageOption(
+          label: 'English',
+          language: Language.english,
+          countryCode: 'us',
+        ),
+        languageOption(
+          label: 'Español',
+          language: Language.spanish,
+          countryCode: 'es',
+        ),
+      ],
+    );
+  },
+);
+
+
     } else {
       // Altri casi di selezione
       switch (value) {
         case 'Profilo':
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => AccountSettingsPage(
-                user: widget.user,
-                token: widget.token,
-              ),
-            ),
-          );
+          //Navigator.push(
+            //context,
+            //MaterialPageRoute(
+            //  builder: (context) => AccountSettingsPage(
+            //    user: widget.user,
+            //    token: widget.token,
+            //  ),
+            //),
+          //);
           break;
         case 'Utilizzo':
           print('Naviga alla pagina di utilizzo');
@@ -1903,7 +1983,7 @@ PopupMenuButton<String>(
       ),
     ];
   },
-)
+))
 
 
 
@@ -1952,10 +2032,10 @@ PopupMenuButton<String>(
                                   ),
                                   constraints:
                                       const BoxConstraints(maxWidth: 600),
-                                  child: AccountSettingsPage(
-                                    user: widget.user,
-                                    token: widget.token,
-                                  ),
+                                  //child: AccountSettingsPage(
+                                  //  user: widget.user,
+                                  //  token: widget.token,
+                                  //),
                                 )
                               : Column(
                                   children: [
@@ -2081,16 +2161,20 @@ messages.isEmpty
                                                       children: [
                                                         // Icona contesti
                                                         IconButton(
-                                                          icon: const Icon(Icons
-                                                              .book_outlined),
+                                                          icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey),
                                                           tooltip: localizations.knowledgeBoxes,
                                                           onPressed:
                                                               _showContextDialog,
                                                         ),
                                                         // Icona doc (inattiva)
                                                         IconButton(
-                                                          icon: const Icon(Icons
-                                                              .description_outlined),
+                                                          icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element7.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey),
                                                           tooltip:
                                                               localizations.upload_document,
                                                           onPressed: () {
@@ -2101,8 +2185,10 @@ messages.isEmpty
                                                         ),
                                                         // Icona media (inattiva)
                                                         IconButton(
-                                                          icon: const Icon(Icons
-                                                              .image_outlined),
+                                                          icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element8.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey),
                                                           tooltip:
                                                               localizations.upload_media,
                                                           onPressed: () {
@@ -2167,7 +2253,7 @@ messages.isEmpty
       // Rimuovi dal database, se la chat ha un ID esistente
       if (chatToDelete.containsKey('_id')) {
         await _databaseService.deleteCollectionData(
-          "${widget.user.username}-database11",
+          "${widget.user.username}-database",
           'chats',
           chatToDelete['_id'],
           widget.token.accessToken,
@@ -2250,7 +2336,7 @@ Future<void> _editChatName(int index, String newName) async {
     // Aggiorna il database, se disponibile
     if (chatToUpdate.containsKey('_id')) {
       await _databaseService.updateCollectionData(
-        "${widget.user.username}-database11",
+        "${widget.user.username}-database",
         'chats',
         chatToUpdate['_id'],
         {'name': newName},
@@ -2282,11 +2368,16 @@ Future<void> _editChatName(int index, String newName) async {
       // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
   _widgetCache.clear();
     try {
-      // Trova la chat corrispondente all'ID
-      final chat = _chatHistory.firstWhere(
-        (chat) => chat['id'] == chatId,
-        orElse: () => null, // Se la chat non esiste, ritorna null
-      );
+final chat = _chatHistory.firstWhere(
+  (chat) => chat['id'] == chatId,
+  orElse: () => null, // se non trova nulla, restituisce null
+);
+
+if (chat == null) {
+  // gestisci il caso in cui la chat NON esiste
+} else {
+  // gestisci la chat trovata
+}
 
       if (chat == null) {
         print('Errore: Nessuna chat trovata con ID $chatId');
@@ -2443,6 +2534,7 @@ final agentConfiguration = {
 
     return groupedChats;
   }
+  
 Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
   try {
     final currentTime = DateTime.now().toIso8601String(); // Ora corrente in formato ISO
@@ -2511,7 +2603,7 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
     print('Chat salvata correttamente nel Local Storage.');
 
     // Salva o aggiorna la chat nel database
-    final dbName = "${widget.user.username}-database11"; // Nome del DB basato sull'utente
+    final dbName = "${widget.user.username}-database"; // Nome del DB basato sull'utente
     final collectionName = 'chats';
 
     try {
@@ -2575,8 +2667,6 @@ Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
     print('Errore durante il salvataggio della conversazione: $e');
   }
 }
-
-
 
 
 void _showContextDialog() async {

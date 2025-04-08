@@ -917,7 +917,18 @@ WireframeCubeIcon(
                                   ),
                                 ),
                                 // Menu popup per azioni (Carica File ed Elimina Contesto)
-                                PopupMenuButton<String>(
+                                Theme(
+  data: Theme.of(context).copyWith(
+    popupMenuTheme: PopupMenuThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      color: Colors.white,
+    ),
+  ),
+  child: 
+PopupMenuButton<String>(
+  offset: const Offset(0, 32),
                                     borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
                                     color: Colors.white,
                                   onSelected: (value) {
@@ -939,7 +950,7 @@ WireframeCubeIcon(
                                       child: Text(localizations.delete),
                                     ),
                                   ],
-                                ),
+                                )),
                               ],
                             ),
                             SizedBox(height: 5),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/components/social_button.dart';
 import 'package:flutter_app/user_manager/pages/login_page_1.dart';
 import 'package:flutter_app/user_manager/pages/registration_page_2.dart';
@@ -63,17 +64,20 @@ class _RegistrationPageState extends State<RegistrationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+              backgroundColor: Colors.white,
       body: Center(
         // SingleChildScrollView per scrollare se la tastiera copre i campi
         child: SingleChildScrollView(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 350),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                                smallFullLogo,
                 // Titolo principale
                 Text(
                   'Crea un account',
+                                    textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),

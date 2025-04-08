@@ -13,6 +13,14 @@ dynamic fullLogo = // Titolo a sinistra
   isAntiAlias: true,
 );
 
+dynamic smallFullLogo = // Titolo a sinistra
+    Image.network(
+  'https://static.wixstatic.com/media/63b1fb_3e1530fd4a2e479983c1b3cd9f379290~mv2.png',
+  height: 32, // Imposta l'altezza desiderata per il logo
+  fit: BoxFit.contain,
+  isAntiAlias: true,
+);
+
 dynamic assistantAvatar = CircleAvatar(
   backgroundColor: Colors.transparent,
   child: Image.network(

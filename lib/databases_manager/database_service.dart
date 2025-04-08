@@ -1,233 +1,165 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/services.dart' show rootBundle;
 import 'database_model.dart';
 
 class DatabaseService {
-  String? baseUrl;
-
-  // Funzione per caricare la configurazione dal file config.json
-  Future<void> loadConfig() async {
-    //final String response = await rootBundle.loadString('assets/config.json');
-    //final data = jsonDecode(response);
-     final data = {
-    "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
-    "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag"
-
-    
-    };
-    baseUrl = data['backend_api'];
-  }
+  // Attenzione: metti l'URL del tuo FastAPI reale
+  //String baseUrl = 'https://teatek-llm.theia-innovation.com/database/v1/mongo';
+  String baseUrl = 'https://teatek-llm.theia-innovation.com/database/v1/mongo';
 
   Future<List<Database>> fetchDatabases(String token) async {
-    // Controlla se baseUrl è stato caricato
-    if (baseUrl == null) await loadConfig();
-
-    final response = await http.get(
-      Uri.parse("$baseUrl/databases/"),
+    // Passiamo il token come query param: ?token=$token
+    final uri = Uri.parse('$baseUrl/list_databases/?token=$token');
+    
+    // (facoltativo) potresti tenere l'header di Authorization
+    final res = await http.get(
+      uri,
       headers: {
-        "Authorization": "Bearer $token",
+        'Authorization': 'Bearer $token', // eventuale, se la tua API lo usa
       },
     );
 
-    if (response.statusCode == 200) {
-      print("FetchDatabases Response: ${response.body}");
-      return (jsonDecode(utf8.decode(response.bodyBytes)) as List)
-          .map((db) => Database.fromJson(db))
-          .toList();
-    } else {
-      print("Failed to load databases: ${response.statusCode} - ${response.body}");
-      throw Exception('Failed to load databases');
+    if (res.statusCode != 200) {
+      throw Exception('Errore nel recupero dei database: ${res.body}');
     }
+final rawBytes = res.bodyBytes;
+final rawString = utf8.decode(rawBytes);
+print("fetchCollections raw JSON: $rawString");
+final data = jsonDecode(rawString);
+    return (data['databases'] as List)
+        .map((e) => Database.fromJson(e))
+        .toList();
   }
 
   Future<void> createDatabase(String dbName, String token) async {
-    if (baseUrl == null) await loadConfig();
+    // ?token=$token nella query
+    final uri = Uri.parse('$baseUrl/create_user_database/?token=$token');
+    final body = jsonEncode({'db_name': dbName});
 
-    final response = await http.post(
-      Uri.parse("$baseUrl/mongo/create_user_database/"),
+    final res = await http.post(
+      uri,
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
+        //'Authorization': 'Bearer $token', // se non serve, puoi toglierlo
+        'Content-Type': 'application/json',
       },
-      body: jsonEncode({"db_name": dbName}),
+      body: body,
     );
-
-    if (response.statusCode != 200) {
-      print("Failed to create database: ${response.statusCode}");
-      throw Exception('Failed to create database');
-    } else {
-      print("Database created successfully");
+    print(res.body);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nella creazione del database: ${res.body}');
     }
   }
 
   Future<void> deleteDatabase(String databaseName, String token) async {
-    if (baseUrl == null) await loadConfig();
-
-    final response = await http.delete(
-      Uri.parse("$baseUrl/mongo/delete_database/$databaseName"),
-      headers: {
-        "Authorization": "Bearer $token",
-      },
-    );
-
-    if (response.statusCode != 200) {
-      print("Failed to delete database: ${response.statusCode}");
-      throw Exception('Failed to delete database');
-    } else {
-      print("Database deleted successfully");
+    final uri = Uri.parse('$baseUrl/delete_database/$databaseName/?token=$token');
+    final res = await http.delete(uri/*, headers: {'Authorization': 'Bearer $token'}*/);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nell\'eliminazione del database: ${res.body}');
     }
   }
 
   Future<List<Collection>> fetchCollections(String dbName, String token) async {
-    if (baseUrl == null) await loadConfig();
-
-    final response = await http.get(
-      Uri.parse("$baseUrl/mongo/$dbName/list_collections/"),
-      headers: {
-        "Authorization": "Bearer $token",
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
-      final List<dynamic> collectionsJson = jsonResponse['collections'];
-      print("FetchCollections Response: $jsonResponse");
-      return collectionsJson.map((col) => Collection(name: col as String)).toList();
-    } else {
-      print("Failed to load collections: ${response.statusCode}");
-      throw Exception('Failed to load collections');
+    final uri = Uri.parse('$baseUrl/$dbName/list_collections/?token=$token');
+    final res = await http.get(uri/*, headers: {'Authorization': 'Bearer $token'}*/);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nel recupero delle collezioni: ${res.body}');
     }
+final rawBytes = res.bodyBytes;
+final rawString = utf8.decode(rawBytes);
+print("fetchCollections raw JSON: $rawString");
+final data = jsonDecode(rawString);
+    return (data as List).map((e) => Collection(name: e)).toList();
   }
 
   Future<void> createCollection(String dbName, String collectionName, String token) async {
-    if (baseUrl == null) await loadConfig();
-
-    final url = Uri.parse("$baseUrl/mongo/$dbName/create_collection/")
-      .replace(queryParameters: {"collection_name": collectionName});
-
-    final response = await http.post(
-      url,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
-    );
-
-    if (response.statusCode != 200) {
-      print("Failed to create collection: ${response.statusCode}");
-      throw Exception('Failed to create collection');
-    } else {
-      print("Collection created successfully");
+    // Passiamo la query: /{db_name}/create_collection/?collection_name=XYZ&token=...
+    final uri = Uri.parse('$baseUrl/$dbName/create_collection/?collection_name=$collectionName&token=$token');
+    final res = await http.post(uri/*, headers: {'Authorization': 'Bearer $token'}*/);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nella creazione della collezione: ${res.body}');
     }
   }
 
   Future<void> deleteCollection(String dbName, String collectionName, String token) async {
-    if (baseUrl == null) await loadConfig();
-
-    final url = Uri.parse("$baseUrl/mongo/$dbName/delete_collection/$collectionName/");
-
-    final response = await http.delete(
-      url,
-      headers: {
-        "Authorization": "Bearer $token",
-        "accept": "application/json",
-      },
-    );
-
-    if (response.statusCode != 200) {
-      print("Failed to delete collection: ${response.statusCode}");
-      throw Exception('Failed to delete collection: ${utf8.decode(response.bodyBytes)}');
-    } else {
-      print("Collection deleted successfully");
+    final uri = Uri.parse('$baseUrl/$dbName/delete_collection/$collectionName/?token=$token');
+    final res = await http.delete(uri/*, headers: {'Authorization': 'Bearer $token'}*/);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nell\'eliminazione della collezione: ${res.body}');
     }
   }
 
-  Future<Map<String, dynamic>> addDataToCollection(String dbName, String collectionName, Map<String, dynamic> data, String token) async {
-    if (baseUrl == null) await loadConfig();
+  Future<Map<String, dynamic>> addDataToCollection(
+    String dbName, String collectionName, Map<String, dynamic> data, String token) async {
+    final uri = Uri.parse('$baseUrl/$dbName/$collectionName/add_item/?token=$token');
 
-    final url = Uri.parse("$baseUrl/mongo/$dbName/$collectionName/add_item");
 
-    final response = await http.post(
-      url,
+final body = jsonEncode(data);
+print('Sending: ${utf8.decode(utf8.encode(body))}'); // debug: forzatura UTF-8 visiva
+
+final res = await http.post(
+  uri,
+  headers: {
+    'Content-Type': 'application/json; charset=utf-8', // FORZA charset
+  },
+  body: utf8.encode(body), // <-- encode in UTF-8 esplicitamente
+);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nell\'aggiunta del dato: ${res.body}');
+    }
+    return jsonDecode(res.body);
+  }
+
+  Future<void> updateCollectionData(
+    String dbName, String collectionName, String itemId, Map<String, dynamic> data, String token) async {
+
+final body = jsonEncode(data);
+print('Sending: ${utf8.decode(utf8.encode(body))}'); // debug: forzatura UTF-8 visiva
+
+
+      
+    final uri = Uri.parse('$baseUrl/$dbName/update_item/$collectionName/$itemId/?token=$token');
+
+    final res = await http.put(
+      uri,
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
+        'Content-Type': 'application/json; charset=utf-8',
       },
-      body: jsonEncode(data),
+      body: utf8.encode(body),
     );
-
-    if (response.statusCode == 200) {
-      final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
-      print("AddDataToCollection Response: $jsonResponse");
-      return jsonResponse;
-    } else {
-      print("Failed to add data to collection: ${response.statusCode}");
-      throw Exception('Failed to add data to collection');
+    if (res.statusCode != 200) {
+      throw Exception('Errore nell\'aggiornamento del dato: ${res.body}');
     }
   }
 
-  Future<void> updateCollectionData(String dbName, String collectionName, String itemId, Map<String, dynamic> data, String token) async {
-    if (baseUrl == null) await loadConfig();
+  Future<void> deleteCollectionData(
+    String dbName, String collectionName, String itemId, String token) async {
+    final uri = Uri.parse('$baseUrl/$dbName/delete_item/$collectionName/$itemId/?token=$token');
 
-    final url = Uri.parse("$baseUrl/mongo/$dbName/update_item/$collectionName/$itemId");
-
-    final response = await http.put(
-      url,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
-      body: jsonEncode(data),
-    );
-
-    if (response.statusCode != 200) {
-      print("Failed to update data in collection: ${response.statusCode}");
-      throw Exception('Failed to update data in collection');
-    } else {
-      print("Data updated successfully in collection");
+    final res = await http.delete(uri/*, headers: {'Authorization': 'Bearer $token'}*/);
+    if (res.statusCode != 200) {
+      throw Exception('Errore nell\'eliminazione del dato: ${res.body}');
     }
   }
 
-  Future<void> deleteCollectionData(String dbName, String collectionName, String itemId, String token) async {
-    if (baseUrl == null) await loadConfig();
+  Future<List<Map<String, dynamic>>> fetchCollectionData(
+    String dbName, String collectionName, String token) async {
+    // Per get_items, passiamo token e inviamo un body con un filtro vuoto
+    final uri = Uri.parse('$baseUrl/$dbName/get_items/$collectionName/?token=$token');
 
-    final url = Uri.parse("$baseUrl/mongo/$dbName/delete_item/$collectionName/$itemId");
-
-    final response = await http.delete(
-      url,
+    final res = await http.post(
+      uri,
       headers: {
-        "Authorization": "Bearer $token",
-        "accept": "application/json",
+        'Content-Type': 'application/json',
       },
+      body: jsonEncode({}), // Nessun filtro
     );
-
-    if (response.statusCode != 200) {
-      print("Failed to delete item: ${response.statusCode}");
-      throw Exception('Failed to delete item: ${utf8.decode(response.bodyBytes)}');
-    } else {
-      print("Item deleted successfully");
+    if (res.statusCode != 200) {
+      throw Exception('Errore nel recupero dei dati della collezione: ${res.body}');
     }
-  }
-
-  Future<List<Map<String, dynamic>>> fetchCollectionData(String dbName, String collectionName, String token) async {
-    if (baseUrl == null) await loadConfig();
-
-    final response = await http.post(
-      Uri.parse("$baseUrl/mongo/$dbName/get_items/$collectionName"),
-      headers: {
-        "Authorization": "Bearer $token",
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final jsonResponse = (jsonDecode(utf8.decode(response.bodyBytes)) as List).cast<Map<String, dynamic>>();
-      print("FetchCollectionData Response: ${response.statusCode}");
-      return jsonResponse;
-    } else {
-      print("Failed to load collection data: ${response.statusCode}");
-      throw Exception('Failed to load collection data');
-    }
+final rawBytes = res.bodyBytes;
+final rawString = utf8.decode(rawBytes);
+print("fetchCollections raw JSON: $rawString");
+final data = jsonDecode(rawString);
+    return List<Map<String, dynamic>>.from(data);
   }
 }

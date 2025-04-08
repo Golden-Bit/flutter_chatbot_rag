@@ -1,14 +1,29 @@
-import 'package:flutter_app/chatbot_auth.dart';
-import 'package:flutter_app/databases_manager/database_service_auth.dart';
+import 'package:flutter_app/chatbot.dart';
+import 'package:flutter_app/databases_manager/database_service.dart';
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/get_user_info_request.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/sign_in_request.dart';
 import 'package:flutter_app/user_manager/pages/forgot_password_page.dart';
 import 'package:flutter_app/user_manager/pages/settings_page.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/user_manager/user_model.dart';
+import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
 import 'dart:html' as html;  // Importa per accedere a localStorage
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 
+
+String generateUserName(String email) {
+  // Calcola l'hash SHA-256 dell'email
+  var bytes = utf8.encode(email);
+  var digest = sha256.convert(bytes);
+
+  // Codifica l'hash in Base64 e rimuove eventuali caratteri non alfanumerici
+  var base64Str = base64Url.encode(digest.bytes).replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+
+  // Tronca la stringa a 9 caratteri
+  return 'user-${base64Str.substring(0, 9)}';
+}
 
 class LoginPasswordPage extends StatefulWidget {
   final String email;
@@ -45,7 +60,7 @@ final DatabaseService _databaseService = DatabaseService();
     try {
       // Creiamo il SignInRequest con email e password
       final signInRequest = SignInRequest(
-        username: widget.email, // username == email
+        username: generateUserName(widget.email), // username == email
         password: password,
       );
 
@@ -55,13 +70,6 @@ final DatabaseService _databaseService = DatabaseService();
       debugPrint(
           'Login effettuato con successo: ${signInResponse.accessToken}');
 
-      // Naviga alla pagina di Settings passando l'accessToken ottenuto
-      /*Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => accessToken: signInResponse.accessToken!,
-      ),
-    );*/
       try {
         // Ottieni il token di accesso dopo il login
 
@@ -145,6 +153,7 @@ final DatabaseService _databaseService = DatabaseService();
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+              backgroundColor: Colors.white,
       body: Center(
         // SingleChildScrollView per scrollare su schermi ridotti o con tastiera aperta
         child: SingleChildScrollView(
@@ -153,11 +162,13 @@ final DatabaseService _databaseService = DatabaseService();
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                                  smallFullLogo,
                   // Titolo principale
                   Text(
                     'Inserisci la password',
+                                      textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -256,7 +267,7 @@ final DatabaseService _databaseService = DatabaseService();
 
                   // Link "Password dimenticata?"
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: Alignment.center,
                     child: TextButton(
                       onPressed: () {
                         // Naviga alla pagina di ForgotPasswordPage

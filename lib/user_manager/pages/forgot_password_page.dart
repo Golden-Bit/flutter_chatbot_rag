@@ -1,8 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/confirm_forgot_password_request.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/forgot_password_request.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:flutter_app/user_manager/pages/login_page_2.dart';
 
+String generateUserName(String email) {
+  // Calcola l'hash SHA-256 dell'email
+  var bytes = utf8.encode(email);
+  var digest = sha256.convert(bytes);
+
+  // Codifica l'hash in Base64 e rimuove eventuali caratteri non alfanumerici
+  var base64Str = base64Url.encode(digest.bytes).replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+
+  // Tronca la stringa a 9 caratteri
+  return 'user-${base64Str.substring(0, 9)}';
+}
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({Key? key}) : super(key: key);
@@ -47,7 +62,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     }
 
     try {
-      final request = ForgotPasswordRequest(username: email);
+      final request = ForgotPasswordRequest(username: generateUserName(email));
       final response = await _apiClient.forgotPassword(request);
       // Esempio di output: { "CodeDeliveryDetails": {...}, "ResponseMetadata": {...} }
       debugPrint('Codice di reset inviato: $response');
@@ -106,7 +121,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       debugPrint('Password reimpostata con successo: $response');
 
       // Potresti navigare alla pagina di login
-      // Navigator.pushReplacement(...);
+       Navigator.pushReplacement(
+         context,
+         MaterialPageRoute(builder: (_) => LoginPasswordPage(email: email)),
+       );
 
     } catch (e) {
       setState(() {
@@ -121,10 +139,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
   Widget _buildStep0() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+                                smallFullLogo,
         Text(
           'Password dimenticata?',
+          textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -132,6 +152,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         const SizedBox(height: 8),
         const Text(
           'Inserisci il tuo indirizzo e-mail per ricevere un codice di reset.',
+                    textAlign: TextAlign.center,
           style: TextStyle(fontSize: 16),
         ),
         const SizedBox(height: 24),
@@ -191,10 +212,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   Widget _buildStep1() {
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+                        smallFullLogo,
         Text(
           'Codice ricevuto?',
+                            textAlign: TextAlign.center,
+                            
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -202,6 +226,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         const SizedBox(height: 8),
         const Text(
           'Inserisci il codice di verifica e imposta la tua nuova password.',
+                            textAlign: TextAlign.center,
           style: TextStyle(fontSize: 16),
         ),
         const SizedBox(height: 24),
@@ -345,6 +370,7 @@ decoration: InputDecoration(
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+              backgroundColor: Colors.white,
       body: Center(
         // Scroll se la tastiera copre i campi
         child: SingleChildScrollView(

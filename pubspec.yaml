@@ -63,6 +63,7 @@ dependencies:
   flutter_html: ^3.0.0-beta.2
   flutter_svg: ^1.1.6
   google_fonts: ^6.2.1
+  dropdown_button2: ^2.3.9
   #syncfusion_flutter_xlsio: ^26.2.10
   #open_file: ^3.4.0
   #excel: ^4.0.6

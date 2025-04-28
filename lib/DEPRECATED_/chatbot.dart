@@ -2342,7 +2342,7 @@ if (messages.isNotEmpty) {
   Future<void> _handleUserInput(String input) async {
     if (input.isEmpty) return;
 
-    
+      print('$_latestChainId - $_latestChainId');
   // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
   String currentChatName = "New Chat";
   if (_activeChatIndex != null && _chatHistory.isNotEmpty) {

@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
+
 import 'models/change_password_request.dart';
 import 'models/confirm_forgot_password_request.dart';
 import 'models/confirm_sign_up_request.dart';
@@ -12,6 +14,69 @@ import 'package:http/http.dart' as http;
 
 import 'models/sign_in_request.dart';
 import 'models/sign_in_response.dart';
+
+// --- ECCEZIONI TIPIZZATE ---
+
+abstract class CognitoException implements Exception {
+  final String message;
+  const CognitoException(this.message);
+  @override String toString() => message;
+}
+/// Eccezione di ripiego quando il messaggio AWS non è riconosciuto
+class UnknownCognitoException extends CognitoException {
+  const UnknownCognitoException([String m = 'Si è verificato un errore inatteso'])
+      : super(m);
+}
+
+class InvalidPassword     extends CognitoException { const InvalidPassword([String m='Password non valida'])      : super(m); }
+class UsernameExists      extends CognitoException { const UsernameExists([String m='Utente già registrato'])      : super(m); }
+class UserNotFound        extends CognitoException { const UserNotFound([String m='Utente inesistente'])          : super(m); }
+class UserNotConfirmed    extends CognitoException { const UserNotConfirmed([String m='Utente non confermato'])   : super(m); }
+class NotAuthorized       extends CognitoException { const NotAuthorized([String m='Credenziali errate'])         : super(m); }
+class CodeMismatch        extends CognitoException { const CodeMismatch([String m='Codice errato'])               : super(m); }
+class ExpiredCode         extends CognitoException { const ExpiredCode([String m='Codice scaduto'])               : super(m); }
+class LimitExceeded       extends CognitoException { const LimitExceeded([String m='Troppe richieste, riprova'])  : super(m); }
+
+
+typedef ErrorSetter = void Function(String);
+
+void showCognitoError(State state, ErrorSetter setError, Object e) {
+  final msg = (e is CognitoException)
+      ? e.message
+      : 'Si è verificato un errore inatteso';
+  // setState solo per il rebuild
+  state.setState(() => setError(msg));
+}
+CognitoException _parseError(String rawBody) {
+  // Se il backend FastAPI risponde con JSON { "detail": "UserNotConfirmedException: ..." }
+  String detail;
+  try {
+    final body = jsonDecode(rawBody);
+    detail = (body['detail'] ?? '').toString().toLowerCase();
+  } catch (_) {
+    detail = rawBody.toLowerCase();        // fallback: non è JSON
+  }
+
+  if (detail.contains('invalidpassword'))       return const InvalidPassword();
+  if (detail.contains('usernameexists'))        return const UsernameExists();
+  if (detail.contains('usernotfound'))          return const UserNotFound();
+  if (detail.contains('usernotconfirmed'))      return const UserNotConfirmed();
+  if (detail.contains('notauthorized'))         return const NotAuthorized();
+  if (detail.contains('codemismatch'))          return const CodeMismatch();
+  if (detail.contains('expiredcode'))           return const ExpiredCode();
+  if (detail.contains('limitexceeded'))         return const LimitExceeded();
+
+  return const UnknownCognitoException();       // concrete fallback
+}
+
+
+class UserNotConfirmedException implements Exception {
+  final String message;
+  UserNotConfirmedException([this.message = 'Utente non confermato']);
+  @override
+  String toString() => message;
+}
+
 
 class CognitoApiClient {
   // Imposta qui il tuo endpoint base; ad esempio, se la tua API
@@ -67,7 +132,9 @@ class CognitoApiClient {
       lastExpiration = _getExpirationFromToken(signInResponse.accessToken!);
       return signInResponse;
     } else {
-      throw Exception('Errore nella chiamata signIn: ${response.body}');
+       final body = response.body;
+ // Cognito trasmette "UserNotConfirmedException" nel campo detail
+throw _parseError(response.body);   // ✅ restituisce la classe giusta
     }
   }
 
@@ -88,7 +155,8 @@ Future<SignUpResponse> signUp(SignUpRequest request) async {
     // Creiamo un SignUpResponse dal JSON
     return SignUpResponse.fromJson(jsonBody);
   } else {
-    throw Exception('Errore nella chiamata signUp: ${response.body}');
+       // UsernameExistsException, InvalidPasswordException, ecc. :contentReference[oaicite:0]{index=0}
+     throw _parseError(response.body);  
   }
 }
   // 1) Conferma registrazione utente

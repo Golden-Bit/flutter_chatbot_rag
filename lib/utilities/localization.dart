@@ -1686,7 +1686,62 @@ String get search_by_name_or_description {
     }
   }
 
+  /// Etichetta nel popup‑menu (fra “Modifica” e “Elimina”)
+  String get archive {
+    switch (language) {
+      case Language.italian:
+        return 'Archivia';
+      case Language.spanish:
+        return 'Archivar';
+      case Language.english:
+      default:
+        return 'Archive';
+    }
+  }
+
+  /// Snack‑bar di conferma quando la chat è stata archiviata
+  String get chat_archived {
+    switch (language) {
+      case Language.italian:
+        return 'Chat archiviata';
+      case Language.spanish:
+        return 'Chat archivada';
+      case Language.english:
+      default:
+        return 'Chat archived';
+    }
+  }
+
+  /// Messaggio di fallback per errori generici
+  String get genericError {
+    switch (language) {
+      case Language.italian:
+        return 'Si è verificato un errore';
+      case Language.spanish:
+        return 'Se produjo un error';
+      case Language.english:
+      default:
+        return 'An error occurred';
+    }
+  }
+
+  String get all_chats_deleted {
+  switch (language) {
+    case Language.italian:  return 'Tutte le chat eliminate';
+    case Language.spanish:  return 'Todas las conversaciones eliminadas';
+    default:                return 'All chats deleted';
+  }
 }
+
+String get all_chats_archived {
+  switch (language) {
+    case Language.italian:  return 'Tutte le chat archiviate';
+    case Language.spanish:  return 'Todas las conversaciones archivadas';
+    default:                return 'All chats archived';
+  }
+}
+}
+
 
 
 class LocalizationProvider extends InheritedWidget {

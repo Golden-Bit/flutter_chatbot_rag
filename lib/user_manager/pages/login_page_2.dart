@@ -1,3 +1,4 @@
+import 'package:flutter_app/DEPRECATED_/user_manager/pages/confirm_email_page.dart';
 import 'package:flutter_app/chatbot.dart';
 import 'package:flutter_app/databases_manager/database_service.dart';
 import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
@@ -47,7 +48,7 @@ final DatabaseService _databaseService = DatabaseService();
   bool _obscurePassword = true; // Mostra/nascondi la password
   bool _isLoading = false; // Indica se stiamo effettuando la chiamata login
   String _errorMessage = ''; // Per mostrare eventuali errori a schermo
-
+void _setError(String msg) => _errorMessage = msg;
   
   Future<void> _onContinuePressed() async {
     setState(() {
@@ -137,12 +138,17 @@ final DatabaseService _databaseService = DatabaseService();
           content: Text('Errore durante il login: $e'),
         ));
       }
-    } catch (e) {
-      // In caso di errore, mostriamo un messaggio
-      setState(() {
-        _errorMessage = e.toString();
-      });
-    } finally {
+    } on UserNotConfirmedException {
+  // 👉 reindirizzo alla schermata di conferma e-mail
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ConfirmEmailPage(email: widget.email),
+    ),
+  );
+} catch (e) {
+    showCognitoError(this, _setError, e);
+} finally {
       // Terminato il tentativo di login, disabilitiamo il caricamento
       setState(() {
         _isLoading = false;

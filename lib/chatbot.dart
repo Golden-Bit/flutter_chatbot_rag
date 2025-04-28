@@ -3,6 +3,8 @@ import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/llm_ui_tools/utilities/auto_sequence_widget.dart';
+import 'package:flutter_app/llm_ui_tools/utilities/js_runner_widget.dart';
 import 'package:flutter_app/ui_components/chat/empty_chat_content.dart';
 import 'package:flutter_app/ui_components/chat/utilities_functions/rename_chat_instructions.dart';
 import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
@@ -11,6 +13,9 @@ import 'package:flutter_app/llm_ui_tools/tools.dart';
 import 'package:flutter_app/ui_components/buttons/blue_button.dart';
 import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
 import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
+import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:flutter_app/user_manager/components/settings_dialog.dart';
+import 'package:flutter_app/user_manager/components/usage_analytics_dialog.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -32,7 +37,6 @@ import 'package:url_launcher/url_launcher.dart'; // Per gestire il tap sui link
 import 'package:intl/intl.dart';
 import 'dart:async'; // Assicurati di importare il package Timer
 import 'package:flutter_svg/flutter_svg.dart';
-
 
 /*void main() {
   runApp(MyApp());
@@ -61,14 +65,12 @@ class ParsedWidgetResult {
   ParsedWidgetResult(this.text, this.widgetList);
 }
 
-
 /// Classe di appoggio per segmenti di testo o placeholder
 class _Segment {
   final String? text;
   final String? placeholder;
   _Segment({this.text, this.placeholder});
 }
-
 
 class ChatBotPage extends StatefulWidget {
   final User user;
@@ -77,98 +79,106 @@ class ChatBotPage extends StatefulWidget {
   ChatBotPage({required this.user, required this.token});
 
   @override
-  _ChatBotPageState createState() => _ChatBotPageState();
+  ChatBotPageState createState() => ChatBotPageState();
 }
 
+class ChatBotPageState extends State<ChatBotPage> {
+  final CognitoApiClient _apiClient = CognitoApiClient();
+  final _inputScroll = ScrollController();
+// Controller già esistente usato dallo ScrollView dei messaggi:
+  final ScrollController _messagesScrollController = ScrollController();
+  double _lastScrollPosition = 0;
+// Nuova flag per mostrare/nascondere il FloatingActionButton
+  bool _showScrollToBottomButton = false;
 
-class _ChatBotPageState extends State<ChatBotPage> {
+  /// ++ ogni volta che l’assistente **ha finito** di rispondere
+  static final ValueNotifier<int> assistantTurnCompleted =
+      ValueNotifier<int>(0);
+  static const String kArchiveCollection = 'archived_chats';
+  String spinnerPlaceholder = "[WIDGET_IN_CARICAMENTO]";
+  int _widgetCounter = 0; // Contatore globale nella classe per i placeholder
 
+  String _finalizeWidgetBlock(String widgetBlock) {
+    // 1) Trovi la parte JSON (tra le due barre verticali)
+    final firstBar = widgetBlock.indexOf("|");
+    final secondBar = widgetBlock.indexOf("|", firstBar + 1);
+    if (firstBar == -1 || secondBar == -1) {
+      // Errore di formattazione => Ritorna un placeholder fisso o stringa vuota
+      return "[WIDGET_PLACEHOLDER_ERROR]";
+    }
 
-String spinnerPlaceholder = "[WIDGET_IN_CARICAMENTO]";
-int _widgetCounter = 0; // Contatore globale nella classe per i placeholder
+    final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
+    // 2) Trova WIDGET_ID='...'
+    final widgetIdSearch = "WIDGET_ID='";
+    final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
+    if (widgetIdStart == -1) {
+      return "[WIDGET_PLACEHOLDER_ERROR]";
+    }
+    final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
+    final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
+    if (widgetIdEnd == -1) {
+      return "[WIDGET_PLACEHOLDER_ERROR]";
+    }
+    final widgetId = widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
 
-String _finalizeWidgetBlock(String widgetBlock) {
-  // 1) Trovi la parte JSON (tra le due barre verticali)
-  final firstBar = widgetBlock.indexOf("|");
-  final secondBar = widgetBlock.indexOf("|", firstBar + 1);
-  if (firstBar == -1 || secondBar == -1) {
-    // Errore di formattazione => Ritorna un placeholder fisso o stringa vuota
-    return "[WIDGET_PLACEHOLDER_ERROR]";
+    // 3) Decodifica JSON
+    Map<String, dynamic>? widgetJson;
+    try {
+      widgetJson = jsonDecode(jsonString);
+    } catch (e) {
+      return "[WIDGET_PLACEHOLDER_ERROR]";
+    }
+    if (widgetJson == null) {
+      return "[WIDGET_PLACEHOLDER_ERROR]";
+    }
+
+    // 4) Eventuale gestione is_first_time
+    if (!widgetJson.containsKey('is_first_time')) {
+      widgetJson['is_first_time'] = true;
+    } else {
+      // se esiste ed è true, metti false, ecc.
+    }
+
+    // 5) Genera un ID univoco
+    final widgetUniqueId = uuid.v4();
+
+    // 6) Costruisce un segnaposto
+    final placeholder = "[WIDGET_PLACEHOLDER_$_widgetCounter]";
+    _widgetCounter++;
+
+    // 7) Aggiungiamo questo widget alla widgetDataList dell'ULTIMO messaggio
+    final lastMsg = messages[messages.length - 1];
+    List<dynamic> wList = lastMsg['widgetDataList'] ?? [];
+    wList.add({
+      "_id": widgetUniqueId,
+      "widgetId": widgetId,
+      "jsonData": widgetJson,
+      "placeholder": placeholder,
+    });
+    lastMsg['widgetDataList'] = wList;
+
+    // 8) Ritorniamo il placeholder
+    return placeholder;
   }
 
-  final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
-  // 2) Trova WIDGET_ID='...'
-  final widgetIdSearch = "WIDGET_ID='";
-  final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
-  if (widgetIdStart == -1) {
-    return "[WIDGET_PLACEHOLDER_ERROR]";
-  }
-  final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
-  final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
-  if (widgetIdEnd == -1) {
-    return "[WIDGET_PLACEHOLDER_ERROR]";
-  }
-  final widgetId = widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
-
-  // 3) Decodifica JSON
-  Map<String, dynamic>? widgetJson;
-  try {
-    widgetJson = jsonDecode(jsonString);
-  } catch(e) {
-    return "[WIDGET_PLACEHOLDER_ERROR]";
-  }
-  if (widgetJson == null) {
-    return "[WIDGET_PLACEHOLDER_ERROR]";
+  Future<void> _renameChat(String chatId, String newName) async {
+    // Trova l'indice della chat in base all'ID
+    int index = _chatHistory.indexWhere((chat) => chat['id'] == chatId);
+    if (index != -1) {
+      // Richiama la funzione già esistente per aggiornare il nome della chat
+      await _editChatName(index, newName);
+      // Facoltativo: mostra un messaggio di conferma
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Chat renamed to "$newName"')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Chat with ID "$chatId" not found.')),
+      );
+    }
   }
 
-  // 4) Eventuale gestione is_first_time
-  if (!widgetJson.containsKey('is_first_time')) {
-    widgetJson['is_first_time'] = true;
-  } else {
-    // se esiste ed è true, metti false, ecc.
-  }
-
-  // 5) Genera un ID univoco
-  final widgetUniqueId = uuid.v4();
-
-  // 6) Costruisce un segnaposto
-  final placeholder = "[WIDGET_PLACEHOLDER_$_widgetCounter]";
-  _widgetCounter++;
-
-  // 7) Aggiungiamo questo widget alla widgetDataList dell'ULTIMO messaggio
-  final lastMsg = messages[messages.length - 1];
-  List<dynamic> wList = lastMsg['widgetDataList'] ?? [];
-  wList.add({
-    "_id": widgetUniqueId,
-    "widgetId": widgetId,
-    "jsonData": widgetJson,
-    "placeholder": placeholder,
-  });
-  lastMsg['widgetDataList'] = wList;
-
-  // 8) Ritorniamo il placeholder
-  return placeholder;
-}
-
-
-Future<void> _renameChat(String chatId, String newName) async {
-  // Trova l'indice della chat in base all'ID
-  int index = _chatHistory.indexWhere((chat) => chat['id'] == chatId);
-  if (index != -1) {
-    // Richiama la funzione già esistente per aggiornare il nome della chat
-    await _editChatName(index, newName);
-    // Facoltativo: mostra un messaggio di conferma
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Chat renamed to "$newName"')),
-    );
-  } else {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Chat with ID "$chatId" not found.')),
-    );
-  }
-}
   List<Map<String, dynamic>> messages = [];
-
 
   final Map<String, Widget> _widgetCache = {}; // Cache dei widget
   final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
@@ -236,318 +246,412 @@ Future<void> _renameChat(String chatId, String newName) async {
   String? _latestChainId;
   String? _latestConfigId;
 
+  /// Risultato del parsing del testo chatbot:
+  /// text: testo "pulito" dopo la rimozione dei blocchi widget,
+  ///       in cui ogni widget è sostituito da un segnaposto [WIDGET_PLACEHOLDER_X]
+  /// widgetList: lista di dati dei widget estratti
+// ————————————————————————————————————————————————————————————————
+// ARCHIVIA TUTTE LE CHAT NON ARCHIVIATE
+  Future<void> _archiveAllChats() async {
+    final loc = LocalizationProvider.of(context);
+    final dbName = "${widget.user.username}-database";
+    final token = widget.token.accessToken;
 
-
-/// Risultato del parsing del testo chatbot:
-/// text: testo "pulito" dopo la rimozione dei blocchi widget, 
-///       in cui ogni widget è sostituito da un segnaposto [WIDGET_PLACEHOLDER_X]
-/// widgetList: lista di dati dei widget estratti
-
-ParsedWidgetResult _parsePotentialWidgets(String fullText) {
-  String updatedText = fullText;
-  final List<Map<String, dynamic>> widgetList = [];
-  int widgetCounter = 0;
-
-  while (true) {
-    // 1) Trova l'indice di inizio del pattern "< TYPE='WIDGET'"
-    final startIndex = updatedText.indexOf("< TYPE='WIDGET'");
-    if (startIndex == -1) {
-      // Se non troviamo più il pattern, interrompi
-      break;
-    }
-
-    // 2) Trova l'indice di chiusura ">"
-    final endIndex = updatedText.indexOf(">", startIndex);
-    if (endIndex == -1) {
-      // Se manca '>', il blocco non è valido: interrompi
-      break;
-    }
-
-    // Estrarre il sottoblocco
-    final widgetBlock = updatedText.substring(startIndex, endIndex + 1);
-
-    // 3) Cerchiamo la prima e la seconda barra verticale "|"
-    final firstBar = widgetBlock.indexOf("|");
-    final secondBar = widgetBlock.indexOf("|", firstBar + 1);
-
-    if (firstBar == -1 || secondBar == -1) {
-      // Pattern non valido, rimuoviamo e proseguiamo
-      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-      continue;
-    }
-
-    // 4) Estrarre la parte JSON
-    final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
-
-    // 5) Estrarre widgetId (dopo WIDGET_ID=' ... ')
-    final widgetIdSearch = "WIDGET_ID='";
-    final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
-    if (widgetIdStart == -1) {
-      // Pattern non valido
-      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-      continue;
-    }
-    final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
-    final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
-    if (widgetIdEnd == -1 || widgetIdEnd <= widgetIdStartAdjusted) {
-      // Pattern non valido
-      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-      continue;
-    }
-
-    final widgetId = widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
-
-    // 6) Decodifica del JSON
-    Map<String, dynamic>? widgetJson;
     try {
-      widgetJson = jsonDecode(jsonString) as Map<String, dynamic>;
+      // assicura che la collezione di archivio esista
+      await _databaseService
+          .createCollection(dbName, kArchiveCollection, token)
+          .catchError((_) {});
+
+      // prendi tutte le chat correnti
+      final chats = await _databaseService.fetchCollectionData(
+        dbName,
+        'chats',
+        token,
+      );
+
+      // sposta ogni chat
+      for (final chat in chats) {
+        await _databaseService.addDataToCollection(
+            dbName, kArchiveCollection, chat, token);
+
+        if (chat.containsKey('_id')) {
+          await _databaseService.deleteCollectionData(
+              dbName, 'chats', chat['_id'], token);
+        }
+      }
+
+      // stato locale & localStorage
+      setState(() => _chatHistory.clear());
+      html.window.localStorage.remove('chatHistory');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(loc.chat_archived)), // <Chat archiviate>
+      );
     } catch (e) {
-      print("Errore parse JSON widget: $e");
-      widgetJson = null;
+      print("Archive‑all error: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(loc.genericError)),
+      );
     }
+  }
 
-    if (widgetJson == null) {
-      // Pattern non valido, rimuoviamo
-      updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-      continue;
+// ————————————————————————————————————————————————————————————————
+// ELIMINA TUTTE LE CHAT NON ARCHIVIATE
+  Future<void> _deleteAllChats() async {
+    final loc = LocalizationProvider.of(context);
+    final dbName = "${widget.user.username}-database";
+    final token = widget.token.accessToken;
+
+    try {
+      // Cancella l’intera collezione…
+      await _databaseService
+          .deleteCollection(dbName, 'chats', token)
+          .catchError((_) {}); // se non esiste, ignora
+      // …e la ricrea vuota così l’app non va in errore più tardi
+      await _databaseService.createCollection(dbName, 'chats', token);
+
+      // pulizia stato locale
+      setState(() => _chatHistory.clear());
+      html.window.localStorage.remove('chatHistory');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(loc.all_chats_deleted)), // <Chat eliminate>
+      );
+    } catch (e) {
+      print("Delete‑all error: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(loc.genericError)),
+      );
     }
+  }
 
-    // -------------- Integrazione logica is_first_time --------------
-    if (!widgetJson.containsKey('is_first_time')) {
-      // Se la chiave non esiste, la creiamo con valore true
-      widgetJson['is_first_time'] = true;
-    } else {
-      // Se esiste, controlliamo il valore
-      if (widgetJson['is_first_time'] == true) {
-        // Se era true, la mettiamo a false
+  ParsedWidgetResult _parsePotentialWidgets(String fullText) {
+    String updatedText = fullText;
+    final List<Map<String, dynamic>> widgetList = [];
+    int widgetCounter = 0;
+
+    while (true) {
+      // 1) Trova l'indice di inizio del pattern "< TYPE='WIDGET'"
+      final startIndex = updatedText.indexOf("< TYPE='WIDGET'");
+      if (startIndex == -1) break;
+
+      // 2) Trova il marker di chiusura "| TYPE='WIDGET'" **dopo** startIndex
+      const String endMarker = "| TYPE='WIDGET'";
+      final markerIndex = updatedText.indexOf(endMarker, startIndex);
+      if (markerIndex == -1) break;
+
+      // 3) Trova il carattere '>' **dopo** il marker
+      final endIndex = updatedText.indexOf(">", markerIndex + endMarker.length);
+      if (endIndex == -1) break;
+
+      // 4) Estrarre il sottoblocco completo
+      final widgetBlock = updatedText.substring(startIndex, endIndex + 1);
+
+      // 5) Cerchiamo la prima e la seconda barra verticale "|"
+      final firstBar = widgetBlock.indexOf("|");
+      final secondBar = widgetBlock.indexOf("|", firstBar + 1);
+      if (firstBar == -1 || secondBar == -1) {
+        // Pattern non valido, rimuoviamo e proseguiamo
+        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+        continue;
+      }
+
+      // 6) Estrarre la parte JSON
+      final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
+
+      // 7) Estrarre widgetId (dopo WIDGET_ID=' ... ')
+      const String widgetIdSearch = "WIDGET_ID='";
+      final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
+      if (widgetIdStart == -1) {
+        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+        continue;
+      }
+      final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
+      final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
+      if (widgetIdEnd == -1 || widgetIdEnd <= widgetIdStartAdjusted) {
+        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+        continue;
+      }
+      final widgetId =
+          widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
+
+      // 8) Decodifica del JSON
+      Map<String, dynamic>? widgetJson;
+      try {
+        widgetJson = jsonDecode(jsonString) as Map<String, dynamic>;
+      } catch (e) {
+        print("Errore parse JSON widget: $e");
+        widgetJson = null;
+      }
+      if (widgetJson == null) {
+        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
+        continue;
+      }
+
+      // 9) Integrazione logica is_first_time
+      if (!widgetJson.containsKey('is_first_time')) {
+        widgetJson['is_first_time'] = true;
+      } else if (widgetJson['is_first_time'] == true) {
         widgetJson['is_first_time'] = false;
       }
-      // Se è già false, non facciamo nulla
+
+      // 10) Genera un _id univoco e placeholder
+      final widgetUniqueId = uuid.v4();
+      final placeholder = "[WIDGET_PLACEHOLDER_$widgetCounter]";
+
+      // 11) Aggiunge alla lista
+      widgetList.add({
+        "_id": widgetUniqueId,
+        "widgetId": widgetId,
+        "jsonData": widgetJson,
+        "placeholder": placeholder,
+      });
+
+      // 12) Sostituisce il blocco nel testo
+      updatedText = updatedText.replaceRange(
+        startIndex,
+        endIndex + 1,
+        placeholder,
+      );
+
+      widgetCounter++;
     }
-    // ---------------------------------------------------------------
 
-    // 7) Genera un _id univoco per il widget
-    final widgetUniqueId = uuid.v4();
-    // Assicurati di aver dichiarato "final Uuid uuid = Uuid();" nella classe
-
-    // 8) Costruisci un segnaposto univoco
-    final placeholder = "[WIDGET_PLACEHOLDER_$widgetCounter]";
-
-    // 9) Aggiungi questo widget alla lista
-    widgetList.add({
-      "_id": widgetUniqueId,
-      "widgetId": widgetId,
-      "jsonData": widgetJson,
-      "placeholder": placeholder,
-    });
-
-    // 10) Sostituisci nel testo
-    updatedText = updatedText.replaceRange(
-      startIndex,
-      endIndex + 1,
-      placeholder,
-    );
-
-    widgetCounter++;
+    return ParsedWidgetResult(updatedText, widgetList);
   }
 
-  // Restituisci il testo aggiornato e la lista di widget
-  return ParsedWidgetResult(updatedText, widgetList);
-}
+// 🔹 Helper: configura una chain di default se ne manca una
+  Future<void> _ensureDefaultChainConfigured() async {
+    // se c’è già una chain attiva usciamo subito
+    print('$_latestChainId - $_latestChainId');
+    if (_latestChainId != null && _latestChainId!.isNotEmpty) return;
 
+    // modello di default
+    const String _defaultModel = 'gpt-4o';
 
-String _getCurrentChatId() {
-  if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
-    return _chatHistory[_activeChatIndex!]['id'] as String;
+    try {
+      // nessun contesto = []   →   chiama già la tua API
+      set_context([], _defaultModel);
+
+      // Aggiorna lo stato locale per coerenza UI
+      setState(() {
+        _selectedContexts = [];
+        _selectedModel = _defaultModel;
+      });
+
+      debugPrint('[init] Default chain creata con modello $_defaultModel');
+    } catch (e) {
+      debugPrint('[init] Errore creazione default-chain: $e');
+    }
   }
-  return "";
-}
+
+  String _getCurrentChatId() {
+    if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
+      return _chatHistory[_activeChatIndex!]['id'] as String;
+    }
+    return "";
+  }
 
 // Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
-Map<String, Widget Function(Map<String, dynamic> data, void Function(String) onReply)> get widgetMap {
-  return {
-    "NButtonWidget": (data, onReply) => NButtonWidget(data: data, onReply: onReply),
-    "RadarChart": (data, onReply) => RadarChartWidgetTool(jsonData: data, onReply: onReply),
-    "TradingViewAdvancedChart": (data, onReply) => TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply),
-    "TradingViewMarketOverview": (data, onReply) => TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply),
-    "CustomChartWidget": (data, onReply) => CustomChartWidgetTool(jsonData: data, onReply: onReply),
-    "ChangeChatNameWidget": (data, onReply) => ChangeChatNameWidgetTool(
-      jsonData: data,
-      // Modifica qui il callback onRenameChat per usare _getCurrentChatId se chatId risulta vuoto
-      onRenameChat: (chatId, newName) async {
-        // Se il chatId passato è vuoto, usiamo il metodo _getCurrentChatId
-        final effectiveChatId = chatId.isEmpty ? await _getCurrentChatId() : chatId;
+  Map<
+          String,
+          Widget Function(
+              Map<String, dynamic> data, void Function(String) onReply)>
+      get widgetMap {
+    return {
+      "JSRunnerWidget": (data, onReply) => JSRunnerWidgetTool(jsonData: data),
+      "AutoSequenceWidget": (data, onReply) =>
+          AutoSequenceWidgetTool(jsonData: data, onReply: onReply),
+      "NButtonWidget": (data, onReply) =>
+          NButtonWidget(data: data, onReply: onReply),
+      "RadarChart": (data, onReply) =>
+          RadarChartWidgetTool(jsonData: data, onReply: onReply),
+      "TradingViewAdvancedChart": (data, onReply) =>
+          TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply),
+      "TradingViewMarketOverview": (data, onReply) =>
+          TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply),
+      "CustomChartWidget": (data, onReply) =>
+          CustomChartWidgetTool(jsonData: data, onReply: onReply),
+      "ChangeChatNameWidget": (data, onReply) => ChangeChatNameWidgetTool(
+            jsonData: data,
+            // Modifica qui il callback onRenameChat per usare _getCurrentChatId se chatId risulta vuoto
+            onRenameChat: (chatId, newName) async {
+              // Se il chatId passato è vuoto, usiamo il metodo _getCurrentChatId
+              final effectiveChatId =
+                  chatId.isEmpty ? await _getCurrentChatId() : chatId;
 
-        if (effectiveChatId.isNotEmpty) {
-          await _renameChat(effectiveChatId, newName);
-          // Puoi eventualmente chiamare onReply per dare feedback all'utente
-          print('Chat renamed to "$newName"');
-        } else {
-          // Gestione dell'errore: nessuna chat selezionata
-          print('Errore: nessuna chat selezionata');
-        }
-      },
-      getCurrentChatId: () async => _getCurrentChatId(),
-    ),
-        "SpinnerPlaceholder": (data, onReply) => const Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: const [
-          Text("Caricamento widget in corso..."),
-          SizedBox(width: 8),
-          CircularProgressIndicator(),
-        ],
-      ),
-    ),
-  };
-}
-
-Widget _buildMixedContent(Map<String, dynamic> message) {
-  // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
-  final widgetDataList = message['widgetDataList'] as List<dynamic>?;
-  if (widgetDataList == null || widgetDataList.isEmpty) {
-    final isUser = (message['role'] == 'user');
-    return _buildMessageContent(
-      context,
-      message['content'] ?? '',
-      isUser,
-      userMessageColor: Colors.white,
-      assistantMessageColor: Colors.white,
-    );
-  }
-
-  // Costante per lo spinner
-  const spinnerPlaceholder = "[WIDGET_SPINNER]";
-
-  // Otteniamo il testo completo “pulito” (con i placeholder) dal messaggio
-  final textContent = message['content'] ?? '';
-
-  // Ordiniamo i widgetData in base al nome/numero del placeholder
-  widgetDataList.sort((a, b) {
-    final pa = a['placeholder'] as String;
-    final pb = b['placeholder'] as String;
-    return pa.compareTo(pb);
-  });
-
-  // Costruiamo un array di segmenti di testo o "placeholder"
-  final segments = <_Segment>[];
-  String temp = textContent;
-
-  while (true) {
-    // Troviamo il placeholder che compare prima nel testo
-    int foundPos = temp.length;
-    String foundPh = "";
-    for (final w in widgetDataList) {
-      final ph = w['placeholder'] as String;
-      final idx = temp.indexOf(ph);
-      if (idx != -1 && idx < foundPos) {
-        foundPos = idx;
-        foundPh = ph;
-      }
-    }
-
-    if (foundPos == temp.length) {
-      // Nessun placeholder trovato
-      if (temp.isNotEmpty) {
-        segments.add(_Segment(text: temp));
-      }
-      break;
-    }
-
-    // Aggiungiamo l’eventuale testo prima del placeholder
-    if (foundPos > 0) {
-      final beforeText = temp.substring(0, foundPos);
-      segments.add(_Segment(text: beforeText));
-    }
-
-    // Aggiungiamo il placeholder come segment
-    segments.add(_Segment(placeholder: foundPh));
-
-    // Rimuoviamo la parte elaborata
-    temp = temp.substring(foundPos + foundPh.length);
-  }
-
-  // Ora costruiamo i widget finali
-  final contentWidgets = <Widget>[];
-
-  for (final seg in segments) {
-    // Se non è un placeholder (testo normale)
-    if (seg.placeholder == null) {
-      final isUser = (message['role'] == 'user');
-      if (seg.text != null && seg.text!.isNotEmpty) {
-        contentWidgets.add(
-          _buildMessageContent(
-            context,
-            seg.text!,
-            isUser,
-            userMessageColor: Colors.white,
-            assistantMessageColor: Colors.white,
+              if (effectiveChatId.isNotEmpty) {
+                await _renameChat(effectiveChatId, newName);
+                // Puoi eventualmente chiamare onReply per dare feedback all'utente
+                print('Chat renamed to "$newName"');
+              } else {
+                // Gestione dell'errore: nessuna chat selezionata
+                print('Errore: nessuna chat selezionata');
+              }
+            },
+            getCurrentChatId: () async => _getCurrentChatId(),
           ),
-        );
-      }
-    }
-    // Altrimenti, è un placeholder
-    else {
-      final ph = seg.placeholder!;
-      
-      // (1) Se è lo spinner "[WIDGET_SPINNER]", mostriamo la rotella di caricamento
-      if (ph == spinnerPlaceholder) {
-        contentWidgets.add(
-          Center(
+      "SpinnerPlaceholder": (data, onReply) => const Center(
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text("Caricamento widget in corso..."),
-                const SizedBox(width: 8),
-                const CircularProgressIndicator(),
+              children: const [
+                Text("Caricamento widget in corso..."),
+                SizedBox(width: 8),
+                CircularProgressIndicator(),
               ],
             ),
           ),
-        );
-      }
-
-      // (2) Altrimenti, potrebbe essere un segnaposto di un widget reale
-      else {
-        // Cerchiamo i dati del widget corrispondente
-        final wdata = widgetDataList.firstWhere((x) => x['placeholder'] == ph);
-        final widgetUniqueId = wdata['_id'] as String;
-        final widgetId = wdata['widgetId'] as String;
-        final jsonData = wdata['jsonData'] as Map<String, dynamic>? ?? {};
-
-        // Verifichiamo se abbiamo già un widget in cache
-        Widget? embeddedWidget = _widgetCache[widgetUniqueId];
-        if (embeddedWidget == null) {
-          // Creiamo il widget adesso
-          final widgetBuilder = widgetMap[widgetId];
-          if (widgetBuilder != null) {
-            embeddedWidget = widgetBuilder(jsonData, (reply) => _handleUserInput(reply));
-          } else {
-            embeddedWidget = Text("Widget sconosciuto: $widgetId");
-          }
-          _widgetCache[widgetUniqueId] = embeddedWidget;
-        }
-
-        // Inseriamo il widget, centrato orizzontalmente
-        contentWidgets.add(
-          Container(
-            width: double.infinity,
-            child: Align(
-              alignment: Alignment.center,
-              child: embeddedWidget,
-            ),
-          ),
-        );
-      }
-    }
+    };
   }
 
-  // Restituiamo i widget sotto forma di colonna
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: contentWidgets,
-  );
-}
+  Widget _buildMixedContent(Map<String, dynamic> message) {
+    // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
+    final widgetDataList = message['widgetDataList'] as List<dynamic>?;
+    if (widgetDataList == null || widgetDataList.isEmpty) {
+      final isUser = (message['role'] == 'user');
+      return _buildMessageContent(
+        context,
+        message['content'] ?? '',
+        isUser,
+        userMessageColor: Colors.white,
+        assistantMessageColor: Colors.white,
+      );
+    }
 
+    // Costante per lo spinner
+    const spinnerPlaceholder = "[WIDGET_SPINNER]";
+
+    // Otteniamo il testo completo “pulito” (con i placeholder) dal messaggio
+    final textContent = message['content'] ?? '';
+
+    // Ordiniamo i widgetData in base al nome/numero del placeholder
+    widgetDataList.sort((a, b) {
+      final pa = a['placeholder'] as String;
+      final pb = b['placeholder'] as String;
+      return pa.compareTo(pb);
+    });
+
+    // Costruiamo un array di segmenti di testo o "placeholder"
+    final segments = <_Segment>[];
+    String temp = textContent;
+
+    while (true) {
+      // Troviamo il placeholder che compare prima nel testo
+      int foundPos = temp.length;
+      String foundPh = "";
+      for (final w in widgetDataList) {
+        final ph = w['placeholder'] as String;
+        final idx = temp.indexOf(ph);
+        if (idx != -1 && idx < foundPos) {
+          foundPos = idx;
+          foundPh = ph;
+        }
+      }
+
+      if (foundPos == temp.length) {
+        // Nessun placeholder trovato
+        if (temp.isNotEmpty) {
+          segments.add(_Segment(text: temp));
+        }
+        break;
+      }
+
+      // Aggiungiamo l’eventuale testo prima del placeholder
+      if (foundPos > 0) {
+        final beforeText = temp.substring(0, foundPos);
+        segments.add(_Segment(text: beforeText));
+      }
+
+      // Aggiungiamo il placeholder come segment
+      segments.add(_Segment(placeholder: foundPh));
+
+      // Rimuoviamo la parte elaborata
+      temp = temp.substring(foundPos + foundPh.length);
+    }
+
+    // Ora costruiamo i widget finali
+    final contentWidgets = <Widget>[];
+
+    for (final seg in segments) {
+      // Se non è un placeholder (testo normale)
+      if (seg.placeholder == null) {
+        final isUser = (message['role'] == 'user');
+        if (seg.text != null && seg.text!.isNotEmpty) {
+          contentWidgets.add(
+            _buildMessageContent(
+              context,
+              seg.text!,
+              isUser,
+              userMessageColor: Colors.white,
+              assistantMessageColor: Colors.white,
+            ),
+          );
+        }
+      }
+      // Altrimenti, è un placeholder
+      else {
+        final ph = seg.placeholder!;
+
+        // (1) Se è lo spinner "[WIDGET_SPINNER]", mostriamo la rotella di caricamento
+        if (ph == spinnerPlaceholder) {
+          contentWidgets.add(
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Caricamento widget in corso..."),
+                  const SizedBox(width: 8),
+                  const CircularProgressIndicator(),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // (2) Altrimenti, potrebbe essere un segnaposto di un widget reale
+        else {
+          // Cerchiamo i dati del widget corrispondente
+          final wdata =
+              widgetDataList.firstWhere((x) => x['placeholder'] == ph);
+          final widgetUniqueId = wdata['_id'] as String;
+          final widgetId = wdata['widgetId'] as String;
+          final jsonData = wdata['jsonData'] as Map<String, dynamic>? ?? {};
+
+          // Verifichiamo se abbiamo già un widget in cache
+          Widget? embeddedWidget = _widgetCache[widgetUniqueId];
+          if (embeddedWidget == null) {
+            // Creiamo il widget adesso
+            final widgetBuilder = widgetMap[widgetId];
+            if (widgetBuilder != null) {
+              embeddedWidget =
+                  widgetBuilder(jsonData, (reply) => _handleUserInput(reply));
+            } else {
+              embeddedWidget = Text("Widget sconosciuto: $widgetId");
+            }
+            _widgetCache[widgetUniqueId] = embeddedWidget;
+          }
+
+          // Inseriamo il widget, centrato orizzontalmente
+          contentWidgets.add(
+            Container(
+              width: double.infinity,
+              child: Align(
+                alignment: Alignment.center,
+                child: embeddedWidget,
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    // Restituiamo i widget sotto forma di colonna
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: contentWidgets,
+    );
+  }
 
   Future<void> _loadConfig() async {
     try {
@@ -566,27 +670,27 @@ Widget _buildMixedContent(Map<String, dynamic> message) {
     }
   }
 
-Future<void> _animateChatNameChange(int index, String finalName) async {
-  String currentName = "";
-  int charIndex = 0;
-  const duration = Duration(milliseconds: 100);
-  final completer = Completer<void>();
+  Future<void> _animateChatNameChange(int index, String finalName) async {
+    String currentName = "";
+    int charIndex = 0;
+    const duration = Duration(milliseconds: 100);
+    final completer = Completer<void>();
 
-  Timer.periodic(duration, (timer) {
-    if (charIndex < finalName.length) {
-      currentName += finalName[charIndex];
-      setState(() {
-        _chatHistory[index]['name'] = currentName;
-      });
-      charIndex++;
-    } else {
-      timer.cancel();
-      completer.complete();
-    }
-  });
+    Timer.periodic(duration, (timer) {
+      if (charIndex < finalName.length) {
+        currentName += finalName[charIndex];
+        setState(() {
+          _chatHistory[index]['name'] = currentName;
+        });
+        charIndex++;
+      } else {
+        timer.cancel();
+        completer.complete();
+      }
+    });
 
-  return completer.future;
-}
+    return completer.future;
+  }
 
 // Funzione di logout
   void _logout(BuildContext context) {
@@ -662,26 +766,41 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
   @override
   void initState() {
     super.initState();
+    _bootstrap();
     _speech = stt.SpeechToText();
     _flutterTts = FlutterTts();
-    _chatHistoryFuture =
-        _loadChatHistory(); // Carica la cronologia solo una volta
-    _loadAvailableContexts();
 
-    // Aggiungi questo per aggiornare la UI quando cambia il testo
-    _controller.addListener(() {
-      setState(() {});
+    _chatHistoryFuture = _loadChatHistory();
+    //_loadAvailableContexts();
+    //_loadConfig();                   // se non la chiamavi già qui
+    _controller.addListener(() => setState(() {}));
+
+    _messagesScrollController.addListener(() {
+      final maxScroll = _messagesScrollController.position.maxScrollExtent;
+      final currentScroll = _messagesScrollController.position.pixels;
+      // se siamo lontani dal fondo di più di 20px → mostra
+      // ma anche se scrolliamo verso il basso di almeno 50px, nascondi
+      final shouldShow = currentScroll < maxScroll - 20;
+      final scrolledDown = currentScroll > _lastScrollPosition + 50;
+      _lastScrollPosition = currentScroll;
+      final newValue = shouldShow && !scrolledDown;
+      if (newValue != _showScrollToBottomButton) {
+        setState(() {
+          _showScrollToBottomButton = newValue;
+        });
+      }
     });
 
-    
-
-
-
     _databaseService.createDatabase('database', widget.token.accessToken);
+    _latestChainId = html.window.localStorage['latestChainId'];
+    _latestConfigId = html.window.localStorage['latestConfigId'];
+  }
 
-
-
-
+  Future<void> _bootstrap() async {
+    await _loadConfig();
+    //await _loadChatHistory();
+    await _loadAvailableContexts();
+    await _ensureDefaultChainConfigured(); // <-- attendiamo
   }
 
   /*@override
@@ -708,9 +827,8 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
 
   // Funzione per aprire il dialog con il ColorPicker
   void _showColorPickerDialog(
-    
       Color currentColor, Function(Color) onColorChanged) {
-        final localizations = LocalizationProvider.of(context);
+    final localizations = LocalizationProvider.of(context);
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -751,7 +869,6 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
     );
   }
 
-
 // Funzione che restituisce il widget per il messaggio Markdown, con formattazione avanzata
   Widget _buildMessageContent(
     BuildContext context,
@@ -779,6 +896,7 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
         borderRadius: BorderRadius.circular(8.0),
       ),
       child: MarkdownBody(
+        selectable: true,
         data: content,
         // Inserisci il builder personalizzato per i blocchi di codice
         builders: {
@@ -877,7 +995,8 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
                   const SizedBox(height: 8),
 
                   // Mostra l'ID della chain
-                  if (chainId != null) Text("${localizations.chainIdLabel} $chainId"),
+                  if (chainId != null)
+                    Text("${localizations.chainIdLabel} $chainId"),
 
                   // Divider aggiuntivo per eventuali altri dettagli
                   const Divider(),
@@ -885,71 +1004,53 @@ Future<void> _animateChatNameChange(int index, String finalName) async {
                       style: TextStyle(fontWeight: FontWeight.bold)),
                   Text("${localizations.tokensGenerated} $tokensReceived"),
                   Text("${localizations.tokensReceived} $tokensGenerated"),
-                  Text("${localizations.responseCost} \$${responseCost.toStringAsFixed(4)}"),
+                  Text(
+                      "${localizations.responseCost} \$${responseCost.toStringAsFixed(4)}"),
                 ],
               ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(); // Chiudi il dialog
-              },
-              child: Text(localizations.close)
-            ),
+                onPressed: () {
+                  Navigator.of(context).pop(); // Chiudi il dialog
+                },
+                child: Text(localizations.close)),
           ],
         );
       },
     );
   }
 
-bool _isSameDay(DateTime d1, DateTime d2) {
-  return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
-}
-
-String _getDateSeparator(DateTime date) {
-  final today = DateTime.now();
-  final yesterday = today.subtract(Duration(days: 1));
-  if (_isSameDay(date, today)) {
-    return "Today";
-  } else if (_isSameDay(date, yesterday)) {
-    return "Yesterday";
-  } else {
-    return DateFormat('dd MMM yyyy').format(date);
+  bool _isSameDay(DateTime d1, DateTime d2) {
+    return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
   }
-}
 
-
-List<Widget> _buildMessagesList(double containerWidth) {
-  final localizations = LocalizationProvider.of(context);
-  List<Widget> widgets = [];
-  for (int i = 0; i < messages.length; i++) {
-    final message = messages[i];
-    final bool isUser = (message['role'] == 'user');
-    final DateTime parsedTime = DateTime.tryParse(message['createdAt'] ?? '') ?? DateTime.now();
-    final String formattedTime = DateFormat('h:mm a').format(parsedTime);
-
-    // Se è il primo messaggio o se la data del messaggio corrente è diversa da quella del precedente,
-    // aggiungi un separatore.
-    if (i == 0) {
-      widgets.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Center(
-            child: Text(
-              _getDateSeparator(parsedTime),
-              style: const TextStyle(
-                fontSize: 12.0,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-          ),
-        ),
-      );
+  String _getDateSeparator(DateTime date) {
+    final today = DateTime.now();
+    final yesterday = today.subtract(Duration(days: 1));
+    if (_isSameDay(date, today)) {
+      return "Today";
+    } else if (_isSameDay(date, yesterday)) {
+      return "Yesterday";
     } else {
-      final DateTime previousTime = DateTime.tryParse(messages[i - 1]['createdAt'] ?? '') ?? parsedTime;
-      if (!_isSameDay(parsedTime, previousTime)) {
+      return DateFormat('dd MMM yyyy').format(date);
+    }
+  }
+
+  List<Widget> _buildMessagesList(double containerWidth) {
+    final localizations = LocalizationProvider.of(context);
+    List<Widget> widgets = [];
+    for (int i = 0; i < messages.length; i++) {
+      final message = messages[i];
+      final bool isUser = (message['role'] == 'user');
+      final DateTime parsedTime =
+          DateTime.tryParse(message['createdAt'] ?? '') ?? DateTime.now();
+      final String formattedTime = DateFormat('h:mm a').format(parsedTime);
+
+      // Se è il primo messaggio o se la data del messaggio corrente è diversa da quella del precedente,
+      // aggiungi un separatore.
+      if (i == 0) {
         widgets.add(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -965,138 +1066,207 @@ List<Widget> _buildMessagesList(double containerWidth) {
             ),
           ),
         );
-      }
-    }
-
-    // Aggiungi il widget del messaggio (codice originale invariato)
-    widgets.add(
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: containerWidth,
-                minWidth: 200,
-              ),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12.0),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16.0),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 4.0,
-                      offset: Offset(2, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // RIGA 1: Avatar, nome e orario
-                    Row(
-                      children: [
-                        if (!isUser)
-                          CircleAvatar(
-                            backgroundColor: Colors.transparent,
-                            child: assistantAvatar,
-                          )
-                        else
-                          CircleAvatar(
-                            backgroundColor: _avatarBackgroundColor.withOpacity(_avatarBackgroundOpacity),
-                            child: Icon(
-                              Icons.person,
-                              color: _avatarIconColor.withOpacity(_avatarIconOpacity),
-                            ),
-                          ),
-                        const SizedBox(width: 8.0),
-                        Text(
-                          isUser ? widget.user.username : assistantName,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(width: 4),
-                        const VerticalDivider(
-                          thickness: 1,
-                          color: Colors.black,
-                          width: 4,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          formattedTime,
-                          style: const TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8.0),
-                    // RIGA 2: Contenuto del messaggio (Markdown)
-                    _buildMixedContent(message),
-                    const SizedBox(height: 8.0),
-                    // RIGA 3: Icone (copia, feedback, TTS, info)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.copy, size: 14),
-                          tooltip: localizations.copy,
-                          onPressed: () {
-                            _copyToClipboard(message['content'] ?? '');
-                          },
-                        ),
-                        if (!isUser) ...[
-                          IconButton(
-                            icon: const Icon(Icons.thumb_up, size: 14),
-                            tooltip: localizations.positive_feedback,
-                            onPressed: () {
-                              print("Feedback positivo per il messaggio: ${message['content']}");
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.thumb_down, size: 14),
-                            tooltip: localizations.negative_feedback,
-                            onPressed: () {
-                              print("Feedback negativo per il messaggio: ${message['content']}");
-                            },
-                          ),
-                        ],
-                        IconButton(
-                          icon: const Icon(Icons.volume_up, size: 14),
-                          tooltip: localizations.volume,
-                          onPressed: () {
-                            _speak(message['content'] ?? '');
-                          },
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.info_outline, size: 14),
-                          tooltip: localizations.messageInfoTitle,
-                          onPressed: () {
-                            _showMessageInfoDialog(message);
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+      } else {
+        final DateTime previousTime =
+            DateTime.tryParse(messages[i - 1]['createdAt'] ?? '') ?? parsedTime;
+        if (!_isSameDay(parsedTime, previousTime)) {
+          widgets.add(
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Center(
+                child: Text(
+                  _getDateSeparator(parsedTime),
+                  style: const TextStyle(
+                    fontSize: 12.0,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
                 ),
               ),
             ),
-          ],
+          );
+        }
+      }
+
+      // Aggiungi il widget del messaggio (codice originale invariato)
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: containerWidth,
+                  minWidth: 200,
+                ),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16.0),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 4.0,
+                        offset: Offset(2, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // RIGA 1: Avatar, nome e orario
+                      Row(
+                        children: [
+                          if (!isUser)
+                            CircleAvatar(
+                              backgroundColor: Colors.transparent,
+                              child: assistantAvatar,
+                            )
+                          else
+                            CircleAvatar(
+                              backgroundColor: _avatarBackgroundColor
+                                  .withOpacity(_avatarBackgroundOpacity),
+                              child: Icon(
+                                Icons.person,
+                                color: _avatarIconColor
+                                    .withOpacity(_avatarIconOpacity),
+                              ),
+                            ),
+                          const SizedBox(width: 8.0),
+                          Text(
+                            isUser ? widget.user.username : assistantName,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(width: 4),
+                          const VerticalDivider(
+                            thickness: 1,
+                            color: Colors.black,
+                            width: 4,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            formattedTime,
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8.0),
+                      // RIGA 2: Contenuto del messaggio (Markdown)
+                      _buildMixedContent(message),
+                      const SizedBox(height: 8.0),
+                      // RIGA 3: Icone (copia, feedback, TTS, info)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 14),
+                            tooltip: localizations.copy,
+                            onPressed: () {
+                              _copyToClipboard(message['content'] ?? '');
+                            },
+                          ),
+                          if (!isUser) ...[
+                            IconButton(
+                              icon: const Icon(Icons.thumb_up, size: 14),
+                              tooltip: localizations.positive_feedback,
+                              onPressed: () {
+                                print(
+                                    "Feedback positivo per il messaggio: ${message['content']}");
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.thumb_down, size: 14),
+                              tooltip: localizations.negative_feedback,
+                              onPressed: () {
+                                print(
+                                    "Feedback negativo per il messaggio: ${message['content']}");
+                              },
+                            ),
+                          ],
+                          IconButton(
+                            icon: const Icon(Icons.volume_up, size: 14),
+                            tooltip: localizations.volume,
+                            onPressed: () {
+                              _speak(message['content'] ?? '');
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.info_outline, size: 14),
+                            tooltip: localizations.messageInfoTitle,
+                            onPressed: () {
+                              _showMessageInfoDialog(message);
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    }
+    return widgets;
   }
-  return widgets;
-}
+
+  Future<void> _archiveChat(int index) async {
+    final localizations = LocalizationProvider.of(context);
+    final chatToArchive = _chatHistory[index];
+    final dbName = "${widget.user.username}-database";
+    final token = widget.token.accessToken;
+
+    try {
+      // 1.‑ assicura che la collezione di archivio esista (se c’è già l’eccezione viene ignorata)
+      await _databaseService
+          .createCollection(dbName, kArchiveCollection, token)
+          .catchError((_) {});
+
+      // 2.‑ inserisci la chat in 'archived_chats'
+      await _databaseService.addDataToCollection(
+        dbName,
+        kArchiveCollection,
+        chatToArchive,
+        token,
+      );
+
+      // 3.‑ rimuovi la chat da 'chats'
+      if (chatToArchive.containsKey('_id')) {
+        await _databaseService.deleteCollectionData(
+          dbName,
+          'chats',
+          chatToArchive['_id'],
+          token,
+        );
+      }
+
+      // 4.‑ aggiorna stato locale + localStorage
+      setState(() => _chatHistory.removeAt(index));
+      html.window.localStorage['chatHistory'] =
+          jsonEncode({'chatHistory': _chatHistory});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(localizations.chat_archived)),
+      );
+    } catch (e) {
+      print("Errore archiviazione chat: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(localizations.genericError)),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final localizations = LocalizationProvider.of(context);
     return Scaffold(
       backgroundColor: Colors.white,
-   
       body: Row(
         children: [
           // Barra laterale con possibilità di ridimensionamento
@@ -1157,11 +1327,11 @@ List<Widget> _buildMessagesList(double containerWidth) {
                               fullLogo,
                               // Icona di espansione/contrazione a destra
                               IconButton(
-                                icon:SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
-            width: 24,
-            height: 24,
-            color: Colors.grey),
-
+                                icon: SvgPicture.network(
+                                    'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+                                    width: 24,
+                                    height: 24,
+                                    color: Colors.grey),
                                 onPressed: () {
                                   setState(() {
                                     isExpanded = !isExpanded;
@@ -1185,55 +1355,58 @@ List<Widget> _buildMessagesList(double containerWidth) {
 // Sezione fissa con le voci principali
 
 // Pulsante "Cerca"
-MouseRegion(
-  onEnter: (_) {
-    setState(() {
-      _buttonHoveredIndex = 99; // un indice qualsiasi per l'hover
-    });
-  },
-  onExit: (_) {
-    setState(() {
-      _buttonHoveredIndex = null;
-    });
-  },
-  child: GestureDetector(
-    onTap: () {
-      // Quando clicco, apro il dialog di ricerca
-showSearchDialog(
-  context: context,
-  chatHistory: _chatHistory,
-  onNavigateToMessage: (String chatId, String messageId) {
-    // Carica la chat corrispondente
-    _loadMessagesForChat(chatId);
-    // Se vuoi scrollare al messaggio specifico, puoi salvare
-    // un "targetMessageId" e poi gestire lo scroll/spostamento
-    // dopo che i messaggi sono stati caricati.
-  },
-);
-    },
-    child: Container(
-      margin: const EdgeInsets.all(4.0),
-      decoration: BoxDecoration(
-        color: _buttonHoveredIndex == 99
-            ? const Color.fromARGB(255, 224, 224, 224)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
-      child: Row(
-        children: [
-          const Icon(Icons.search,  size: 24.0,
-            color: Colors.black),
-          const SizedBox(width: 8.0),
-          Text(
-            localizations.searchButton,
-            style: TextStyle(color: Colors.black),
-          ),
-        ],
-      ),
-    ),
-  ),
-),
+                        MouseRegion(
+                          onEnter: (_) {
+                            setState(() {
+                              _buttonHoveredIndex =
+                                  99; // un indice qualsiasi per l'hover
+                            });
+                          },
+                          onExit: (_) {
+                            setState(() {
+                              _buttonHoveredIndex = null;
+                            });
+                          },
+                          child: GestureDetector(
+                            onTap: () {
+                              // Quando clicco, apro il dialog di ricerca
+                              showSearchDialog(
+                                context: context,
+                                chatHistory: _chatHistory,
+                                onNavigateToMessage:
+                                    (String chatId, String messageId) {
+                                  // Carica la chat corrispondente
+                                  _loadMessagesForChat(chatId);
+                                  // Se vuoi scrollare al messaggio specifico, puoi salvare
+                                  // un "targetMessageId" e poi gestire lo scroll/spostamento
+                                  // dopo che i messaggi sono stati caricati.
+                                },
+                              );
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.all(4.0),
+                              decoration: BoxDecoration(
+                                color: _buttonHoveredIndex == 99
+                                    ? const Color.fromARGB(255, 224, 224, 224)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 12.0, horizontal: 16.0),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.search,
+                                      size: 24.0, color: Colors.black),
+                                  const SizedBox(width: 8.0),
+                                  Text(
+                                    localizations.searchButton,
+                                    style: TextStyle(color: Colors.black),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
 
 // Pulsante "Conversazione"
                         MouseRegion(
@@ -1288,10 +1461,11 @@ showSearchDialog(
                                 children: [
                                   //Icon(Icons.chat_bubble_outline_outlined,
                                   //    color: Colors.black),
-SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element.svg',
-            width: 24,
-            height: 24,
-            color: Colors.black),
+                                  SvgPicture.network(
+                                      'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element.svg',
+                                      width: 24,
+                                      height: 24,
+                                      color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
                                     localizations.conversation,
@@ -1355,79 +1529,14 @@ SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets
                                   vertical: 12.0, horizontal: 16.0),
                               child: Row(
                                 children: [
-SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
-            width: 24,
-            height: 24,
-            color: Colors.black),
+                                  SvgPicture.network(
+                                      'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
+                                      width: 24,
+                                      height: 24,
+                                      color: Colors.black),
                                   const SizedBox(width: 8.0),
                                   Text(
-                                      localizations.knowledgeBoxes,
-                                    style: TextStyle(
-                                        color: Colors
-                                            .black), // Cambia colore in nero
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-
-// Pulsante "Impostazioni"
-                        MouseRegion(
-                          onEnter: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  2; // Identifica "Impostazioni" come in hover
-                            });
-                          },
-                          onExit: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  null; // Rimuove lo stato di hover
-                            });
-                          },
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _activeButtonIndex =
-                                    2; // Imposta "Impostazioni" come attivo
-                                showKnowledgeBase =
-                                    false; // Deseleziona "Basi di conoscenza"
-                                showSettings = true; // Mostra "Impostazioni"
-                                _activeChatIndex =
-                                    null; // Deseleziona qualsiasi chat
-                              });
-                              if (MediaQuery.of(context).size.width < 600) {
-                                setState(() {
-                                  sidebarWidth =
-                                      0.0; // Collassa la barra laterale
-                                });
-                              }
-                            },
-                            child: Container(
-                              margin:
-                                  const EdgeInsets.all(4.0), // Margini laterali
-                              decoration: BoxDecoration(
-                                color: _buttonHoveredIndex == 2 ||
-                                        _activeButtonIndex == 2
-                                    ? const Color.fromARGB(255, 224, 224,
-                                        224) // Colore scuro durante hover o selezione
-                                    : Colors
-                                        .transparent, // Sfondo trasparente quando non è attivo
-                                borderRadius: BorderRadius.circular(
-                                    4.0), // Arrotonda gli angoli
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 12.0, horizontal: 16.0),
-                              child: Row(
-                                children: [
-SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Icon.svg',
-            width: 24,
-            height: 24,
-            color: Colors.black),
-                                  const SizedBox(width: 8.0),
-                                  Text(
-                                    localizations.settings,
+                                    localizations.knowledgeBoxes,
                                     style: TextStyle(
                                         color: Colors
                                             .black), // Cambia colore in nero
@@ -1440,8 +1549,8 @@ SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets
                         const SizedBox(height: 24),
 
 // Lista delle chat salvate
-Expanded(
-  child: FutureBuilder(
+                        Expanded(
+                          child: FutureBuilder(
                             future:
                                 _chatHistoryFuture, // Assicurati che le chat siano caricate
                             builder: (context, snapshot) {
@@ -1605,63 +1714,94 @@ Expanded(
                                                         ),
                                                       ),
                                                       Theme(
-  data: Theme.of(context).copyWith(
-    popupMenuTheme: PopupMenuThemeData(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: Colors.white,
-    ),
-  ),
-  child: 
-PopupMenuButton<String>(
-  offset: const Offset(0, 32),
-                                                          borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
-                                                        color: Colors.white,
-                                                        icon: Icon(
-                                                          Icons.more_horiz,
-                                                          color: (isHovered ||
-                                                                  isActive)
-                                                              ? Colors
-                                                                  .black // Colore bianco per l'icona in hover o selezione
-                                                              : Colors
-                                                                  .transparent, // Nascondi icona se non attivo o in hover
-                                                        ),
-                                                        padding: EdgeInsets.only(
-                                                            right:
-                                                                4.0), // Riduci margine destro
-                                                        onSelected:
-                                                            (String value) {
-                                                          if (value ==
-                                                              'delete') {
-                                                            _deleteChat(_chatHistory
-                                                                .indexOf(
-                                                                    chat)); // Elimina la chat
-                                                          } else if (value ==
-                                                              'edit') {
-                                                            _showEditChatDialog(
-                                                                _chatHistory
-                                                                    .indexOf(
-                                                                        chat)); // Modifica la chat
-                                                          }
-                                                        },
-                                                        itemBuilder:
-                                                            (BuildContext
-                                                                context) {
-                                                          return [
-                                                            PopupMenuItem(
-                                                              value: 'edit',
-                                                              child: Text(
-                                                                  localizations.edit),
+                                                          data:
+                                                              Theme.of(context)
+                                                                  .copyWith(
+                                                            popupMenuTheme:
+                                                                PopupMenuThemeData(
+                                                              shape:
+                                                                  RoundedRectangleBorder(
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            16),
+                                                              ),
+                                                              color:
+                                                                  Colors.white,
                                                             ),
-                                                            PopupMenuItem(
-                                                              value: 'delete',
-                                                              child: Text(
-                                                                  localizations.delete),
+                                                          ),
+                                                          child:
+                                                              PopupMenuButton<
+                                                                  String>(
+                                                            offset:
+                                                                const Offset(
+                                                                    0, 32),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        16), // Imposta un raggio di 8
+                                                            color: Colors.white,
+                                                            icon: Icon(
+                                                              Icons.more_horiz,
+                                                              color: (isHovered ||
+                                                                      isActive)
+                                                                  ? Colors
+                                                                      .black // Colore bianco per l'icona in hover o selezione
+                                                                  : Colors
+                                                                      .transparent, // Nascondi icona se non attivo o in hover
                                                             ),
-                                                          ];
-                                                        },
-                                                      )),
+                                                            padding:
+                                                                EdgeInsets.only(
+                                                                    right:
+                                                                        4.0), // Riduci margine destro
+                                                            onSelected:
+                                                                (String value) {
+                                                              if (value ==
+                                                                  'delete') {
+                                                                _deleteChat(
+                                                                    _chatHistory
+                                                                        .indexOf(
+                                                                            chat)); // Elimina la chat
+                                                              } else if (value ==
+                                                                  'edit') {
+                                                                _showEditChatDialog(
+                                                                    _chatHistory
+                                                                        .indexOf(
+                                                                            chat)); // Modifica la chat
+                                                              } else if (value ==
+                                                                  'archive') {
+                                                                _archiveChat(
+                                                                    _chatHistory
+                                                                        .indexOf(
+                                                                            chat));
+                                                              }
+                                                            },
+                                                            itemBuilder:
+                                                                (BuildContext
+                                                                    context) {
+                                                              return [
+                                                                PopupMenuItem(
+                                                                  value: 'edit',
+                                                                  child: Text(
+                                                                      localizations
+                                                                          .edit),
+                                                                ),
+                                                                PopupMenuItem(
+                                                                    value:
+                                                                        'archive',
+                                                                    child: Text(
+                                                                        localizations
+                                                                            .archive)),
+                                                                PopupMenuItem(
+                                                                  value:
+                                                                      'delete',
+                                                                  child: Text(
+                                                                      localizations
+                                                                          .delete),
+                                                                ),
+                                                              ];
+                                                            },
+                                                          )),
                                                     ],
                                                   ),
                                                 ),
@@ -1678,20 +1818,20 @@ PopupMenuButton<String>(
                             },
                           ),
                         ),
-                            const SizedBox(height: 8),
+                        const SizedBox(height: 8),
 // Pulsante "Nuova Chat"
-HoverableNewChatButton(
-  label: localizations.newChat,
-  onPressed: () {
-    _startNewChat();
-    setState(() {
-      _activeButtonIndex = 3;
-      showKnowledgeBase = false;
-      showSettings = false;
-      _activeChatIndex = null;
-    });}),
-                            const SizedBox(height: 56),
-
+                        HoverableNewChatButton(
+                            label: localizations.newChat,
+                            onPressed: () {
+                              _startNewChat();
+                              setState(() {
+                                _activeButtonIndex = 3;
+                                showKnowledgeBase = false;
+                                showSettings = false;
+                                _activeChatIndex = null;
+                              });
+                            }),
+                        const SizedBox(height: 56),
                       ],
                     )
                   : SizedBox.shrink(),
@@ -1736,11 +1876,13 @@ HoverableNewChatButton(
                             children: [
                               if (sidebarWidth == 0.0) ...[
                                 IconButton(
-                                  icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
-            width: 24,
-            height: 24,
-            color: Colors.grey),//const Icon(Icons.menu,
-                                      //color: Colors.black),
+                                  icon: SvgPicture.network(
+                                      'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+                                      width: 24,
+                                      height: 24,
+                                      color:
+                                          Colors.grey), //const Icon(Icons.menu,
+                                  //color: Colors.black),
                                   onPressed: () {
                                     setState(() {
                                       isExpanded = true;
@@ -1754,239 +1896,275 @@ HoverableNewChatButton(
                                   },
                                 ),
                                 const SizedBox(width: 8),
-                              fullLogo,
+                                fullLogo,
                               ],
                             ],
                           ),
                         ),
-Theme(
-  data: Theme.of(context).copyWith(
-    popupMenuTheme: PopupMenuThemeData(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: Colors.white,
-    ),
-  ),
-  child: 
-PopupMenuButton<String>(
-  offset: const Offset(0, 50),
-  borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
-  color: Colors.white,
-  icon: Builder(
-    builder: (context) {
-      // Recupera la larghezza disponibile usando MediaQuery
-      final availableWidth = MediaQuery.of(context).size.width;
-      return Row(
-        mainAxisSize: MainAxisSize.min, // Occupa solo lo spazio necessario
-        children: [
-          CircleAvatar(
-            backgroundColor: Colors.black,
-            child: Text(
-              widget.user.email.substring(0, 2).toUpperCase(),
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-          // Mostra nome ed email solo se la larghezza è almeno 450
-          if (availableWidth >= 450)
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.user.username,
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    widget.user.email,
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          // Aggiungi icona della lingua
-          //const SizedBox(width: 8.0),
-          //Icon(Icons.language, color: Colors.blue),
-        ],
-      );
-    },
-  ),
-  onSelected: (value) {
-    if (value == 'language') {
-      // Mostra un dialogo per selezionare la lingua
-showDialog(
-  context: context,
-  builder: (context) {
-    final selectedLanguage = LocalizationProviderWrapper.of(context).currentLanguage;
+                        Theme(
+                            data: Theme.of(context).copyWith(
+                              popupMenuTheme: PopupMenuThemeData(
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                color: Colors.white,
+                              ),
+                            ),
+                            child: PopupMenuButton<String>(
+                              offset: const Offset(0, 50),
+                              borderRadius: BorderRadius.circular(
+                                  16), // Imposta un raggio di 8
+                              color: Colors.white,
+                              icon: Builder(
+                                builder: (context) {
+                                  // Recupera la larghezza disponibile usando MediaQuery
+                                  final availableWidth =
+                                      MediaQuery.of(context).size.width;
+                                  return Row(
+                                    mainAxisSize: MainAxisSize
+                                        .min, // Occupa solo lo spazio necessario
+                                    children: [
+                                      CircleAvatar(
+                                        backgroundColor: Colors.black,
+                                        child: Text(
+                                          widget.user.email
+                                              .substring(0, 2)
+                                              .toUpperCase(),
+                                          style: const TextStyle(
+                                              color: Colors.white),
+                                        ),
+                                      ),
+                                      // Mostra nome ed email solo se la larghezza è almeno 450
+                                      if (availableWidth >= 450)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 8.0),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                widget.user.username,
+                                                style: const TextStyle(
+                                                  color: Colors.black,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              Text(
+                                                widget.user.email,
+                                                style: const TextStyle(
+                                                  color: Colors.black,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      // Aggiungi icona della lingua
+                                      //const SizedBox(width: 8.0),
+                                      //Icon(Icons.language, color: Colors.blue),
+                                    ],
+                                  );
+                                },
+                              ),
+                              onSelected: (value) {
+                                if (value == 'language') {
+                                  // Mostra un dialogo per selezionare la lingua
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) {
+                                      final selectedLanguage =
+                                          LocalizationProviderWrapper.of(
+                                                  context)
+                                              .currentLanguage;
 
-    Widget languageOption({
-      required String label,
-      required Language language,
-      required String countryCode, // es: "it", "us", "es"
-    }) {
-      final isSelected = selectedLanguage == language;
-      return SimpleDialogOption(
-        onPressed: () {
-          LocalizationProviderWrapper.of(context).setLanguage(language);
-          Navigator.pop(context);
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.grey.shade200 : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: Colors.black,
-                ),
-              ),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.network(
-                  'https://flagcdn.com/w40/$countryCode.png',
-                  width: 24,
-                  height: 18,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.flag),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+                                      Widget languageOption({
+                                        required String label,
+                                        required Language language,
+                                        required String
+                                            countryCode, // es: "it", "us", "es"
+                                      }) {
+                                        final isSelected =
+                                            selectedLanguage == language;
+                                        return SimpleDialogOption(
+                                          onPressed: () {
+                                            LocalizationProviderWrapper.of(
+                                                    context)
+                                                .setLanguage(language);
+                                            Navigator.pop(context);
+                                          },
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: isSelected
+                                                  ? Colors.grey.shade200
+                                                  : Colors.transparent,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 6),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(
+                                                  label,
+                                                  style: TextStyle(
+                                                    fontWeight: isSelected
+                                                        ? FontWeight.bold
+                                                        : FontWeight.normal,
+                                                    color: Colors.black,
+                                                  ),
+                                                ),
+                                                ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                  child: Image.network(
+                                                    'https://flagcdn.com/w40/$countryCode.png',
+                                                    width: 24,
+                                                    height: 18,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (context,
+                                                            error,
+                                                            stackTrace) =>
+                                                        const Icon(Icons.flag),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      }
 
-    return SimpleDialog(
-      backgroundColor: Colors.white,
-      title: Text(localizations.select_language),
-      children: [
-        languageOption(
-          label: 'Italiano',
-          language: Language.italian,
-          countryCode: 'it',
-        ),
-        languageOption(
-          label: 'English',
-          language: Language.english,
-          countryCode: 'us',
-        ),
-        languageOption(
-          label: 'Español',
-          language: Language.spanish,
-          countryCode: 'es',
-        ),
-      ],
-    );
-  },
-);
-
-
-    } else {
-      // Altri casi di selezione
-      switch (value) {
-        case 'Profilo':
-          //Navigator.push(
-            //context,
-            //MaterialPageRoute(
-            //  builder: (context) => AccountSettingsPage(
-            //    user: widget.user,
-            //    token: widget.token,
-            //  ),
-            //),
-          //);
-          break;
-        case 'Utilizzo':
-          print('Naviga alla pagina di utilizzo');
-          break;
-        case 'Impostazioni':
-          setState(() {
+                                      return SimpleDialog(
+                                        backgroundColor: Colors.white,
+                                        title:
+                                            Text(localizations.select_language),
+                                        children: [
+                                          languageOption(
+                                            label: 'Italiano',
+                                            language: Language.italian,
+                                            countryCode: 'it',
+                                          ),
+                                          languageOption(
+                                            label: 'English',
+                                            language: Language.english,
+                                            countryCode: 'us',
+                                          ),
+                                          languageOption(
+                                            label: 'Español',
+                                            language: Language.spanish,
+                                            countryCode: 'es',
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                } else {
+                                  // Altri casi di selezione
+                                  switch (value) {
+                                    case 'Profilo':
+                                      //Navigator.push(
+                                      //context,
+                                      //MaterialPageRoute(
+                                      //  builder: (context) => AccountSettingsPage(
+                                      //    user: widget.user,
+                                      //    token: widget.token,
+                                      //  ),
+                                      //),
+                                      //);
+                                      break;
+                                    case 'Utilizzo':
+                                      showDialog(
+                                        context: context,
+                                        builder: (_) => UsageDialog(),
+                                      );
+                                      break;
+                                    case 'Impostazioni':
+                                      /*setState(() {
             showSettings = true;
             showKnowledgeBase = false;
-          });
-          break;
-        case 'Logout':
-          _logout(context);
-          break;
-      }
-    }
-  },
-  itemBuilder: (BuildContext context) {
-    return [
-
-      PopupMenuItem(
-        value: 'Profilo',
-        child: Row(
-          children: [
-            Icon(Icons.person, color: Colors.black),
-            const SizedBox(width: 8.0),
-            Text(localizations.profile),
-          ],
-        ),
-      ),
-      PopupMenuItem(
-        value: 'Utilizzo',
-        child: Row(
-          children: [
-            Icon(Icons.bar_chart, color: Colors.black),
-            const SizedBox(width: 8.0),
-            Text(localizations.usage),
-          ],
-        ),
-      ),
-      PopupMenuItem(
-        value: 'Impostazioni',
-        child: Row(
-          children: [
-            Icon(Icons.settings, color: Colors.black),
-            const SizedBox(width: 8.0),
-            Text(localizations.settings),
-          ],
-        ),
-      ),
-            // Elemento per la selezione della lingua
-      PopupMenuItem(
-        value: 'language',
-        child: Row(
-          children: [
-            Icon(Icons.language, color: Colors.black),
-            const SizedBox(width: 8.0),
-            Text(localizations.select_language),
-          ],
-        ),
-      ),
-      PopupMenuItem(
-        value: 'Logout',
-        child: Row(
-          children: [
-            Icon(Icons.logout, color: Colors.red),
-            const SizedBox(width: 8.0),
-            Text(
-              localizations.logout,
-              style: const TextStyle(color: Colors.red),
-            ),
-          ],
-        ),
-      ),
-    ];
-  },
-))
-
-
-
+          });*/
+                                      showDialog(
+                                        context: context,
+                                        builder: (_) => SettingsDialog(
+                                          accessToken: widget.token.accessToken,
+                                          onArchiveAll: _archiveAllChats,
+                                          onDeleteAll: _deleteAllChats,
+                                        ),
+                                      );
+                                      break;
+                                    case 'Logout':
+                                      _logout(context);
+                                      break;
+                                  }
+                                }
+                              },
+                              itemBuilder: (BuildContext context) {
+                                return [
+                                  PopupMenuItem(
+                                    value: 'Profilo',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.person, color: Colors.black),
+                                        const SizedBox(width: 8.0),
+                                        Text(localizations.profile),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'Utilizzo',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.bar_chart,
+                                            color: Colors.black),
+                                        const SizedBox(width: 8.0),
+                                        Text(localizations.usage),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'Impostazioni',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.settings,
+                                            color: Colors.black),
+                                        const SizedBox(width: 8.0),
+                                        Text(localizations.settings),
+                                      ],
+                                    ),
+                                  ),
+                                  // Elemento per la selezione della lingua
+                                  PopupMenuItem(
+                                    value: 'language',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.language,
+                                            color: Colors.black),
+                                        const SizedBox(width: 8.0),
+                                        Text(localizations.select_language),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'Logout',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.logout, color: Colors.red),
+                                        const SizedBox(width: 8.0),
+                                        Text(
+                                          localizations.logout,
+                                          style: const TextStyle(
+                                              color: Colors.red),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ];
+                              },
+                            ))
                       ],
                     ),
                   ),
@@ -2041,50 +2219,119 @@ showDialog(
                                   children: [
                                     // Sezione principale con i messaggi
 
+                                    messages.isEmpty
+                                        ? buildEmptyChatScreen(
+                                            context, _handleUserInput)
+                                        : Expanded(
+                                            child: LayoutBuilder(
+                                              builder: (context, constraints) {
+                                                final double
+                                                    rightContainerWidth =
+                                                    constraints.maxWidth;
+                                                final double containerWidth =
+                                                    (rightContainerWidth > 800)
+                                                        ? 800.0
+                                                        : rightContainerWidth;
 
-
-
-messages.isEmpty
-                      ? buildEmptyChatScreen(context, _handleUserInput)
-                      : Expanded(
-  child: LayoutBuilder(
-    builder: (context, constraints) {
-      final double rightContainerWidth = constraints.maxWidth;
-      final double containerWidth =
-          (rightContainerWidth > 800) ? 800.0 : rightContainerWidth;
-
-      return ShaderMask(
-        shaderCallback: (Rect bounds) {
-          return const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.white,
-              Colors.transparent,
-              Colors.transparent,
-              Colors.white,
-            ],
-            stops: [0.0, 0.03, 0.97, 1.0],
-          ).createShader(bounds);
-        },
-        blendMode: BlendMode.dstOut,
-        child: SingleChildScrollView(
-          // (1) Lo scroll avviene su tutta la larghezza
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Center(
-            // (2) Centra la colonna
-            child: ConstrainedBox(
-              // (3) Limita la larghezza della colonna a containerWidth
-              constraints: BoxConstraints(
-                maxWidth: containerWidth,
-              ),
-              child: Column(
-                children: _buildMessagesList(containerWidth),
+                                                return Stack(children: [
+                                                  ShaderMask(
+                                                      shaderCallback:
+                                                          (Rect bounds) {
+                                                        return const LinearGradient(
+                                                          begin: Alignment
+                                                              .topCenter,
+                                                          end: Alignment
+                                                              .bottomCenter,
+                                                          colors: [
+                                                            Colors.white,
+                                                            Colors.transparent,
+                                                            Colors.transparent,
+                                                            Colors.white,
+                                                          ],
+                                                          stops: [
+                                                            0.0,
+                                                            0.03,
+                                                            0.97,
+                                                            1.0
+                                                          ],
+                                                        ).createShader(bounds);
+                                                      },
+                                                      blendMode:
+                                                          BlendMode.dstOut,
+                                                      child:
+                                                          SingleChildScrollView(
+                                                              controller:
+                                                                  _messagesScrollController,
+                                                              physics:
+                                                                  const AlwaysScrollableScrollPhysics(),
+                                                              child: Center(
+                                                                  // (2) Centra la colonna
+                                                                  child:
+                                                                      ConstrainedBox(
+                                                                // (3) Limita la larghezza della colonna a containerWidth
+                                                                constraints:
+                                                                    BoxConstraints(
+                                                                  maxWidth:
+                                                                      containerWidth,
+                                                                ),
+                                                                child: Column(
+                                                                  children:
+                                                                      _buildMessagesList(
+                                                                          containerWidth),
+                                                                ),
+                                                              )))),
+// 2️⃣ The FAB, positioned at bottom-center:
+                                                  if (_showScrollToBottomButton)
+                                                    Positioned(
+                                                      bottom: 16,
+                                                      left: 0,
+                                                      right:
+                                                          0, // ← fa sì che il Positioned sia largo quanto il parent
+                                                      child: Align(
+                                                        // ← allinea il figlio al centro orizzontalmente
+                                                        alignment:
+                                                            Alignment.center,
+                                                        child:
+                                                            FloatingActionButton(
+                                                          mini: true,
+                                                          backgroundColor: Colors
+                                                              .white, // ← sfondo bianco
+                                                          elevation: 4.0,
+                                                          shape:
+                                                              RoundedRectangleBorder(
+                                                            // ← bordo arrotondato con raggio 30
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        30),
+                                                          ), // ← ombra sottile
+                                                          child: const Icon(
+                                                            Icons
+                                                                .arrow_downward,
+                                                            color: Colors
+                                                                .blue, // ← freccia blu
+                                                          ),
+                                                          onPressed: () {
+                                                            _messagesScrollController
+                                                                .animateTo(
+                                                              _messagesScrollController
+                                                                  .position
+                                                                  .maxScrollExtent,
+                                                              duration:
+                                                                  const Duration(
+                                                                      milliseconds:
+                                                                          300),
+                                                              curve: Curves
+                                                                  .easeOut,
+                                                            );
+                                                          },
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ]);
+                                              },
                                             ),
-                                          ))));
-                                        },
-                                      ),
-                                    ),
+                                          ),
 
                                     // Container di input unificato (testo + icone + mic/invia)
                                     Container(
@@ -2129,18 +2376,45 @@ messages.isEmpty
                                                     padding: const EdgeInsets
                                                         .fromLTRB(
                                                         16.0, 8.0, 16.0, 8.0),
-                                                    child: TextField(
-                                                      controller: _controller,
-                                                      // onChanged: (_) => setState(() {}),
-                                                      decoration:
-                                                           InputDecoration(
-                                                        hintText:
-                                                            localizations.write_here_your_message,
-                                                        border:
-                                                            InputBorder.none,
+                                                    child: // ⬅︎ metti in cima al widget build o come campo di stato
+
+                                                        ConstrainedBox(
+                                                      constraints:
+                                                          const BoxConstraints(
+                                                        // ⬅︎ limite d’altezza
+                                                        maxHeight:
+                                                            150, //   200 px
                                                       ),
-                                                      onSubmitted:
-                                                          _handleUserInput,
+                                                      child: Scrollbar(
+                                                        // ⬅︎ mostra la barra se necessario
+                                                        thumbVisibility: true,
+                                                        controller:
+                                                            _inputScroll,
+                                                        child: TextField(
+                                                          controller:
+                                                              _controller,
+                                                          scrollController:
+                                                              _inputScroll, // ⬅︎ collega lo scroll
+                                                          minLines:
+                                                              1, // ⬅︎ inizia con una riga
+                                                          maxLines:
+                                                              null, // ⬅︎ espandi a quante linee servono
+                                                          keyboardType:
+                                                              TextInputType
+                                                                  .multiline,
+                                                          decoration:
+                                                              InputDecoration(
+                                                            hintText: localizations
+                                                                .write_here_your_message,
+                                                            border: InputBorder
+                                                                .none,
+                                                            isCollapsed:
+                                                                true, // ⬅︎ elimina padding interno extra
+                                                          ),
+                                                          onSubmitted:
+                                                              _handleUserInput,
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
 
@@ -2161,40 +2435,47 @@ messages.isEmpty
                                                       children: [
                                                         // Icona contesti
                                                         IconButton(
-                                                          icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
-            width: 24,
-            height: 24,
-            color: Colors.grey),
-                                                          tooltip: localizations.knowledgeBoxes,
+                                                          icon: SvgPicture.network(
+                                                              'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
+                                                              width: 24,
+                                                              height: 24,
+                                                              color:
+                                                                  Colors.grey),
+                                                          tooltip: localizations
+                                                              .knowledgeBoxes,
                                                           onPressed:
                                                               _showContextDialog,
                                                         ),
                                                         // Icona doc (inattiva)
                                                         IconButton(
-                                                          icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element7.svg',
-            width: 24,
-            height: 24,
-            color: Colors.grey),
-                                                          tooltip:
-                                                              localizations.upload_document,
+                                                          icon: SvgPicture.network(
+                                                              'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element7.svg',
+                                                              width: 24,
+                                                              height: 24,
+                                                              color:
+                                                                  Colors.grey),
+                                                          tooltip: localizations
+                                                              .upload_document,
                                                           onPressed: () {
                                                             // in futuro: logica di upload
-                                                            print(
-                                                                localizations.upload_document);
+                                                            print(localizations
+                                                                .upload_document);
                                                           },
                                                         ),
                                                         // Icona media (inattiva)
                                                         IconButton(
-                                                          icon: SvgPicture.network('https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element8.svg',
-            width: 24,
-            height: 24,
-            color: Colors.grey),
-                                                          tooltip:
-                                                              localizations.upload_media,
+                                                          icon: SvgPicture.network(
+                                                              'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element8.svg',
+                                                              width: 24,
+                                                              height: 24,
+                                                              color:
+                                                                  Colors.grey),
+                                                          tooltip: localizations
+                                                              .upload_media,
                                                           onPressed: () {
                                                             // in futuro: logica di upload
-                                                            print(
-                                                                localizations.upload_media);
+                                                            print(localizations
+                                                                .upload_media);
                                                           },
                                                         ),
 
@@ -2211,7 +2492,8 @@ messages.isEmpty
                                                                           .mic,
                                                                 ),
                                                                 tooltip:
-                                                                    localizations.enable_mic,
+                                                                    localizations
+                                                                        .enable_mic,
                                                                 onPressed:
                                                                     _listen,
                                                               )
@@ -2219,7 +2501,8 @@ messages.isEmpty
                                                                 icon: const Icon(
                                                                     Icons.send),
                                                                 tooltip:
-                                                                    localizations.send_message,
+                                                                    localizations
+                                                                        .send_message,
                                                                 onPressed: () =>
                                                                     _handleUserInput(
                                                                         _controller
@@ -2321,63 +2604,66 @@ messages.isEmpty
     );
   }
 
-Future<void> _editChatName(int index, String newName) async {
-  try {
-    // Avvia l'animazione per cambiare il nome
-    await _animateChatNameChange(index, newName);
+  Future<void> _editChatName(int index, String newName) async {
+    try {
+      // Avvia l'animazione per cambiare il nome
+      await _animateChatNameChange(index, newName);
 
-    // Dopo l'animazione, aggiorna il nome nel localStorage e nel database
-    final chatToUpdate = _chatHistory[index];
+      // Dopo l'animazione, aggiorna il nome nel localStorage e nel database
+      final chatToUpdate = _chatHistory[index];
 
-    // Aggiorna il localStorage
-    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
-    html.window.localStorage['chatHistory'] = jsonString;
+      // Aggiorna il localStorage
+      final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+      html.window.localStorage['chatHistory'] = jsonString;
 
-    // Aggiorna il database, se disponibile
-    if (chatToUpdate.containsKey('_id')) {
-      await _databaseService.updateCollectionData(
-        "${widget.user.username}-database",
-        'chats',
-        chatToUpdate['_id'],
-        {'name': newName},
-        widget.token.accessToken,
-      );
-      print('Nome chat aggiornato con successo nel database.');
-    }  else {
-      // Se _id non è presente (caso di modifica tramite tool Chatbot)
-      // Chiamiamo _saveConversation per forzare la creazione/aggiornamento del record nel DB.
-      print('Nessun _id presente, forzo il salvataggio tramite _saveConversation.');
-      await _saveConversation(messages);
+      // Aggiorna il database, se disponibile
+      if (chatToUpdate.containsKey('_id')) {
+        await _databaseService.updateCollectionData(
+          "${widget.user.username}-database",
+          'chats',
+          chatToUpdate['_id'],
+          {'name': newName},
+          widget.token.accessToken,
+        );
+        print('Nome chat aggiornato con successo nel database.');
+      } else {
+        // Se _id non è presente (caso di modifica tramite tool Chatbot)
+        // Chiamiamo _saveConversation per forzare la creazione/aggiornamento del record nel DB.
+        print(
+            'Nessun _id presente, forzo il salvataggio tramite _saveConversation.');
+        await _saveConversation(messages);
+      }
+    } catch (e) {
+      print('Errore durante l\'aggiornamento del nome della chat: $e');
     }
-  } catch (e) {
-    print('Errore durante l\'aggiornamento del nome della chat: $e');
   }
-}
 
-// Funzione per caricare una nuova chat
-  void _startNewChat() {
+  Future<void> _startNewChat() async {
     setState(() {
-      _activeChatIndex = null; // Reset della chat attiva
-      messages.clear(); // Pulisci i messaggi per una nuova chat
-      showKnowledgeBase = false; // Nascondi KnowledgeBase
-      showSettings = false; // Nascondi Impostazioni
+      _activeChatIndex = null;
+      messages.clear();
+      showKnowledgeBase = false;
+      showSettings = false;
     });
+
+    // ⚠️ ora aspettiamo davvero la creazione della chain di default
+    await _ensureDefaultChainConfigured();
   }
 
   void _loadMessagesForChat(String chatId) {
-      // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
-  _widgetCache.clear();
+    // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
+    _widgetCache.clear();
     try {
-final chat = _chatHistory.firstWhere(
-  (chat) => chat['id'] == chatId,
-  orElse: () => null, // se non trova nulla, restituisce null
-);
+      final chat = _chatHistory.firstWhere(
+        (chat) => chat['id'] == chatId,
+        orElse: () => null, // se non trova nulla, restituisce null
+      );
 
-if (chat == null) {
-  // gestisci il caso in cui la chat NON esiste
-} else {
-  // gestisci la chat trovata
-}
+      if (chat == null) {
+        // gestisci il caso in cui la chat NON esiste
+      } else {
+        // gestisci la chat trovata
+      }
 
       if (chat == null) {
         print('Errore: Nessuna chat trovata con ID $chatId');
@@ -2408,18 +2694,19 @@ if (chat == null) {
         showSettings = false; // Nascondi Impostazioni
       });
 
-if (messages.isNotEmpty) {
-  // L'ultimo messaggio è in messages[messages.length - 1]
-  final lastMsg = messages[messages.length - 1];
-  final lastConfig = lastMsg['agentConfig'];
-  if (lastConfig != null) {
-    setState(() {
-      _latestChainId = lastConfig['chain_id'];
-      _latestConfigId = lastConfig['config_id'];
-    });
-    print("Ricaricata chain_id=$_latestChainId, config_id=$_latestConfigId dalla chat salvata.");
-  }
-}
+      if (messages.isNotEmpty) {
+        // L'ultimo messaggio è in messages[messages.length - 1]
+        final lastMsg = messages[messages.length - 1];
+        final lastConfig = lastMsg['agentConfig'];
+        if (lastConfig != null) {
+          setState(() {
+            _latestChainId = lastConfig['chain_id'];
+            _latestConfigId = lastConfig['config_id'];
+          });
+          print(
+              "Ricaricata chain_id=$_latestChainId, config_id=$_latestConfigId dalla chat salvata.");
+        }
+      }
 
       // Debug: Messaggi caricati
       print(
@@ -2433,25 +2720,25 @@ if (messages.isNotEmpty) {
   Future<void> _handleUserInput(String input) async {
     if (input.isEmpty) return;
 
-    
-  // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
-  String currentChatName = "New Chat";
-  if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
-    currentChatName = _chatHistory[_activeChatIndex!]['name'] as String;
-  }
-  
-  // Qui decidiamo quanti messaggi sono già stati inviati
-  // Puoi utilizzare messages.length oppure tenere un contatore separato
-  final int currentMessageCount = messages.length; 
-  
-  // Ottieni l'input modificato usando la funzione esterna
-  final modifiedInput = appendChatInstruction(
-    input,
-    currentChatName: currentChatName,
-    messageCount: currentMessageCount,
-  );
+    // Make absolutely sure we have a chain.
+    await _ensureDefaultChainConfigured();
 
+    // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
+    String currentChatName = "New Chat";
+    if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
+      currentChatName = _chatHistory[_activeChatIndex!]['name'] as String;
+    }
 
+    // Qui decidiamo quanti messaggi sono già stati inviati
+    // Puoi utilizzare messages.length oppure tenere un contatore separato
+    final int currentMessageCount = messages.length;
+
+    // Ottieni l'input modificato usando la funzione esterna
+    final modifiedInput = appendChatInstruction(
+      input,
+      currentChatName: currentChatName,
+      messageCount: currentMessageCount,
+    );
 
     final currentTime = DateTime.now().toIso8601String(); // Ora corrente
     final userMessageId =
@@ -2462,12 +2749,12 @@ if (messages.isNotEmpty) {
         _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
 
 // Usa i contesti formattati se ti servono in debug, ma la vera chain la prendi dallo state:
-final agentConfiguration = {
-  'model': _selectedModel,                      // Modello
-  'contexts': formattedContexts,                // Teniamo traccia dei contesti
-  'chain_id': _latestChainId,                   // Usa la chain ID reale dal backend
-  'config_id': _latestConfigId,                 // Salva anche il config ID
-};
+    final agentConfiguration = {
+      'model': _selectedModel, // Modello
+      'contexts': formattedContexts, // Teniamo traccia dei contesti
+      'chain_id': _latestChainId, // Usa la chain ID reale dal backend
+      'config_id': _latestConfigId, // Salva anche il config ID
+    };
 
     setState(() {
       // Aggiungi il messaggio dell'utente con le informazioni di configurazione
@@ -2534,190 +2821,202 @@ final agentConfiguration = {
 
     return groupedChats;
   }
-  
-Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
-  try {
-    final currentTime = DateTime.now().toIso8601String(); // Ora corrente in formato ISO
-    final chatId = _activeChatIndex != null
-        ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
-        : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
-    final chatName = _activeChatIndex != null
-        ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
-        : 'New Chat'; // Nome predefinito per le nuove chat
 
-    // Effettua una copia profonda di tutti i messaggi
-    final List<Map<String, dynamic>> updatedMessages = messages.map((originalMessage) {
-      // Cloniamo l'intero messaggio (struttura annidata) con jsonDecode(jsonEncode(...))
-      final newMsg = jsonDecode(jsonEncode(originalMessage)) as Map<String, dynamic>;
+  Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
+    try {
+      final currentTime =
+          DateTime.now().toIso8601String(); // Ora corrente in formato ISO
+      final chatId = _activeChatIndex != null
+          ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
+          : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
+      final chatName = _activeChatIndex != null
+          ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
+          : 'New Chat'; // Nome predefinito per le nuove chat
 
-      // Se il messaggio ha dei widget, forziamo is_first_time = false in ognuno
-      if (newMsg['widgetDataList'] != null) {
-        final List widgetList = newMsg['widgetDataList'];
-        for (int i = 0; i < widgetList.length; i++) {
-          final Map<String, dynamic> widgetMap =
-              widgetList[i] as Map<String, dynamic>;
-          final Map<String, dynamic> jsonData =
-              (widgetMap['jsonData'] ?? {}) as Map<String, dynamic>;
+      // Effettua una copia profonda di tutti i messaggi
+      final List<Map<String, dynamic>> updatedMessages =
+          messages.map((originalMessage) {
+        // Cloniamo l'intero messaggio (struttura annidata) con jsonDecode(jsonEncode(...))
+        final newMsg =
+            jsonDecode(jsonEncode(originalMessage)) as Map<String, dynamic>;
 
-          // Se non esiste la chiave, la creiamo con false,
-          // altrimenti la forziamo a false
-          jsonData['is_first_time'] = false;
-          widgetMap['jsonData'] = jsonData;
-          widgetList[i] = widgetMap;
+        // Se il messaggio ha dei widget, forziamo is_first_time = false in ognuno
+        if (newMsg['widgetDataList'] != null) {
+          final List widgetList = newMsg['widgetDataList'];
+          for (int i = 0; i < widgetList.length; i++) {
+            final Map<String, dynamic> widgetMap =
+                widgetList[i] as Map<String, dynamic>;
+            final Map<String, dynamic> jsonData =
+                (widgetMap['jsonData'] ?? {}) as Map<String, dynamic>;
+
+            // Se non esiste la chiave, la creiamo con false,
+            // altrimenti la forziamo a false
+            jsonData['is_first_time'] = false;
+            widgetMap['jsonData'] = jsonData;
+            widgetList[i] = widgetMap;
+          }
+          newMsg['widgetDataList'] = widgetList;
         }
-        newMsg['widgetDataList'] = widgetList;
+
+        // Aggiorniamo la agentConfig per riflettere contesti e modello
+        final Map<String, dynamic> oldAgentConfig =
+            (newMsg['agentConfig'] ?? {}) as Map<String, dynamic>;
+        oldAgentConfig['model'] = _selectedModel;
+        oldAgentConfig['contexts'] = _selectedContexts;
+        newMsg['agentConfig'] = oldAgentConfig;
+
+        return newMsg;
+      }).toList();
+
+      // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
+      final Map<String, dynamic> currentChat = {
+        'id': chatId, // ID della chat
+        'name': chatName, // Nome della chat
+        'createdAt': _activeChatIndex != null
+            ? _chatHistory[_activeChatIndex!]['createdAt']
+            : currentTime, // Se esisteva già, mantengo la data di creazione, altrimenti quella attuale
+        'updatedAt': currentTime, // Aggiorna il timestamp di ultima modifica
+        'messages': updatedMessages, // Lista di messaggi clonati e modificati
+      };
+
+      if (_activeChatIndex != null) {
+        // Aggiorna la chat esistente nella lista locale
+        _chatHistory[_activeChatIndex!] =
+            jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>;
+      } else {
+        // Aggiungi una nuova chat alla lista locale
+        _chatHistory.insert(
+            0, jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>);
+        _activeChatIndex = 0; // Imposta l'indice della nuova chat
       }
 
-      // Aggiorniamo la agentConfig per riflettere contesti e modello
-      final Map<String, dynamic> oldAgentConfig = (newMsg['agentConfig'] ?? {}) as Map<String, dynamic>;
-      oldAgentConfig['model'] = _selectedModel;
-      oldAgentConfig['contexts'] = _selectedContexts;
-      newMsg['agentConfig'] = oldAgentConfig;
+      // Salva la cronologia delle chat nel Local Storage
+      final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+      html.window.localStorage['chatHistory'] = jsonString;
+      print('Chat salvata correttamente nel Local Storage.');
 
-      return newMsg;
-    }).toList();
+      // Salva o aggiorna la chat nel database
+      final dbName =
+          "${widget.user.username}-database"; // Nome del DB basato sull'utente
+      final collectionName = 'chats';
 
-    // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
-    final Map<String, dynamic> currentChat = {
-      'id': chatId, // ID della chat
-      'name': chatName, // Nome della chat
-      'createdAt': _activeChatIndex != null
-          ? _chatHistory[_activeChatIndex!]['createdAt']
-          : currentTime, // Se esisteva già, mantengo la data di creazione, altrimenti quella attuale
-      'updatedAt': currentTime,      // Aggiorna il timestamp di ultima modifica
-      'messages': updatedMessages,   // Lista di messaggi clonati e modificati
-    };
-
-    if (_activeChatIndex != null) {
-      // Aggiorna la chat esistente nella lista locale
-      _chatHistory[_activeChatIndex!] = jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>;
-    } else {
-      // Aggiungi una nuova chat alla lista locale
-      _chatHistory.insert(0, jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>);
-      _activeChatIndex = 0; // Imposta l'indice della nuova chat
-    }
-
-    // Salva la cronologia delle chat nel Local Storage
-    final String jsonString = jsonEncode({'chatHistory': _chatHistory});
-    html.window.localStorage['chatHistory'] = jsonString;
-    print('Chat salvata correttamente nel Local Storage.');
-
-    // Salva o aggiorna la chat nel database
-    final dbName = "${widget.user.username}-database"; // Nome del DB basato sull'utente
-    final collectionName = 'chats';
-
-    try {
-      // Carica le chat esistenti dal database
-      final existingChats = await _databaseService.fetchCollectionData(
-        dbName,
-        collectionName,
-        widget.token.accessToken,
-      );
-
-      // Trova la chat corrente nel database
-      final existingChat = existingChats.firstWhere(
-        (chat) => chat['id'] == chatId,
-        orElse: () => <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
-      );
-
-      if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
-        // Chat esistente: aggiorniamo i campi
-        await _databaseService.updateCollectionData(
+      try {
+        // Carica le chat esistenti dal database
+        final existingChats = await _databaseService.fetchCollectionData(
           dbName,
           collectionName,
-          existingChat['_id'], // ID del documento esistente
-          {
-            'name': currentChat['name'],   // Aggiorna il nome della chat
-            'updatedAt': currentTime,      // Aggiorna la data di ultima modifica
-            'messages': updatedMessages,   // Aggiorna i messaggi
-          },
           widget.token.accessToken,
         );
-        print('Chat aggiornata nel database.');
-      } else {
-        // Chat non esistente, aggiungiamone una nuova
-        await _databaseService.addDataToCollection(
-          dbName,
-          collectionName,
-          currentChat,
-          widget.token.accessToken,
+
+        // Trova la chat corrente nel database
+        final existingChat = existingChats.firstWhere(
+          (chat) => chat['id'] == chatId,
+          orElse: () =>
+              <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
         );
-        print('Nuova chat aggiunta al database.');
+
+        if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
+          // Chat esistente: aggiorniamo i campi
+          await _databaseService.updateCollectionData(
+            dbName,
+            collectionName,
+            existingChat['_id'], // ID del documento esistente
+            {
+              'name': currentChat['name'], // Aggiorna il nome della chat
+              'updatedAt': currentTime, // Aggiorna la data di ultima modifica
+              'messages': updatedMessages, // Aggiorna i messaggi
+            },
+            widget.token.accessToken,
+          );
+          print('Chat aggiornata nel database.');
+        } else {
+          // Chat non esistente, aggiungiamone una nuova
+          await _databaseService.addDataToCollection(
+            dbName,
+            collectionName,
+            currentChat,
+            widget.token.accessToken,
+          );
+          print('Nuova chat aggiunta al database.');
+        }
+      } catch (e) {
+        if (e.toString().contains('Failed to load collection data')) {
+          // Se la collection non esiste, la creiamo e aggiungiamo la chat
+          print('Collection "chats" non esistente. Creazione in corso...');
+          await _databaseService.createCollection(
+              dbName, collectionName, widget.token.accessToken);
+
+          // Aggiungi la nuova chat
+          await _databaseService.addDataToCollection(
+            dbName,
+            collectionName,
+            currentChat,
+            widget.token.accessToken,
+          );
+
+          print('Collection "chats" creata e chat aggiunta al database.');
+        } else {
+          throw e; // Propaga eventuali altri errori
+        }
       }
     } catch (e) {
-      if (e.toString().contains('Failed to load collection data')) {
-        // Se la collection non esiste, la creiamo e aggiungiamo la chat
-        print('Collection "chats" non esistente. Creazione in corso...');
-        await _databaseService.createCollection(dbName, collectionName, widget.token.accessToken);
-
-        // Aggiungi la nuova chat
-        await _databaseService.addDataToCollection(
-          dbName,
-          collectionName,
-          currentChat,
-          widget.token.accessToken,
-        );
-
-        print('Collection "chats" creata e chat aggiunta al database.');
-      } else {
-        throw e; // Propaga eventuali altri errori
-      }
+      print('Errore durante il salvataggio della conversazione: $e');
     }
-  } catch (e) {
-    print('Errore durante il salvataggio della conversazione: $e');
   }
-}
 
+  void _showContextDialog() async {
+    // Carichiamo i contesti (se serve farlo qui) ...
+    await _loadAvailableContexts();
 
-void _showContextDialog() async {
-  // Carichiamo i contesti (se serve farlo qui) ...
-  await _loadAvailableContexts();
-
-  // Richiamiamo il dialog esterno
-  await showSelectContextDialog(
-    context: context,
-    availableContexts: _availableContexts,
-    initialSelectedContexts: _selectedContexts,
-    initialModel: _selectedModel,
-    onConfirm: (List<String> newContexts, String newModel) {
-      setState(() {
-        _selectedContexts = newContexts;
-        _selectedModel = newModel;
-      });
-      // E se vuoi, chiami la funzione set_context
-      set_context(_selectedContexts, _selectedModel);
-    },
-  );
-}
-
-
-
-void set_context(List<String> contexts, String model) async {
-  try {
-    final response = await _contextApiSdk.configureAndLoadChain(
-      widget.user.username,
-      widget.token.accessToken,
-      contexts,
-      model,
+    // Richiamiamo il dialog esterno
+    await showSelectContextDialog(
+      context: context,
+      availableContexts: _availableContexts,
+      initialSelectedContexts: _selectedContexts,
+      initialModel: _selectedModel,
+      onConfirm: (List<String> newContexts, String newModel) {
+        setState(() {
+          _selectedContexts = newContexts;
+          _selectedModel = newModel;
+        });
+        // E se vuoi, chiami la funzione set_context
+        set_context(_selectedContexts, _selectedModel);
+      },
     );
-    print('Chain configurata e caricata con successo per i contesti: $contexts');
-    print('Risultato della configurazione: $response');
-
-    // Estrai i dati dal JSON restituito
-    final chainIdFromResponse =
-        response['load_result'] != null ? response['load_result']['chain_id'] : null;
-    final configIdFromResponse =
-        response['config_result'] != null ? response['config_result']['config_id'] : null;
-
-    setState(() {
-      _selectedContexts = contexts; 
-      _latestChainId = chainIdFromResponse;
-      _latestConfigId = configIdFromResponse;
-    });
-  } catch (e) {
-    print('Errore nella configurazione e caricamento della chain: $e');
   }
-}
+
+  void set_context(List<String> contexts, String model) async {
+    try {
+      final response = await _contextApiSdk.configureAndLoadChain(
+        widget.user.username,
+        widget.token.accessToken,
+        contexts,
+        model,
+      );
+      print(
+          'Chain configurata e caricata con successo per i contesti: $contexts');
+      print('Risultato della configurazione: $response');
+
+      // Estrai i dati dal JSON restituito
+      final chainIdFromResponse = response['load_result'] != null
+          ? response['load_result']['chain_id']
+          : null;
+      final configIdFromResponse = response['config_result'] != null
+          ? response['config_result']['config_id']
+          : null;
+
+      setState(() {
+        _selectedContexts = contexts;
+        _latestChainId = chainIdFromResponse;
+        _latestConfigId = configIdFromResponse;
+      });
+      // after setState() in set_context(...)
+      html.window.localStorage['latestChainId'] = _latestChainId ?? '';
+      html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+    } catch (e) {
+      print('Errore nella configurazione e caricamento della chain: $e');
+    }
+  }
 
   // Sezione impostazioni TTS e customizzazione grafica nella barra laterale
   Widget _buildSettingsSection() {
@@ -3002,262 +3301,305 @@ void set_context(List<String> contexts, String model) async {
   }
 
   Future<void> _sendMessageToAPI(String input) async {
-  if (_nlpApiUrl == null) {
-    await _loadConfig(); // Assicurati che l'URL sia caricato
-  }
+    if (_nlpApiUrl == null) {
+      await _loadConfig(); // Assicurati che l'URL sia caricato
+    }
 
-  // URL della chain API
-  final url = "$_nlpApiUrl/chains/stream_events_chain";
+    // URL della chain API
+    final url = "$_nlpApiUrl/chains/stream_events_chain";
 
-  // Prepara i contesti
-  final formattedContexts = _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
-  final chainIdToUse = _latestChainId ?? "${formattedContexts.join('')}_agent_with_tools";
+    final chainIdToUse = _latestChainId?.isNotEmpty == true
+        ? _latestChainId!
+        : 'default_agent_with_tools';
 
-  // Configurazione dell'agente
-  final agentConfiguration = {
-    'model': _selectedModel,       // Modello selezionato
-    'contexts': _selectedContexts, // Contesti selezionati
-    'chain_id': chainIdToUse,      // Usa la chain ID dal backend (oppure fallback)
-    'config_id': _latestConfigId,  // Memorizza anche la config ID
-  };
-
+    // Configurazione dell'agente
+    final agentConfiguration = {
+      'model': _selectedModel, // Modello selezionato
+      'contexts': _selectedContexts, // Contesti selezionati
+      'chain_id': chainIdToUse, // Usa la chain ID dal backend (oppure fallback)
+      'config_id': _latestConfigId, // Memorizza anche la config ID
+    };
 
 // Trasforma la chat history sostituendo i placeholder dei widget con i JSON reali
-final transformedChatHistory = messages.map((message) {
-  String content = message['content'] as String;
-  if (message.containsKey('widgetDataList')) {
-    final List widgetList = message['widgetDataList'];
-    for (final widgetEntry in widgetList) {
-      final String placeholder = widgetEntry['placeholder'] as String;
-      // Sostituisce il placeholder nel contenuto con il JSON serializzato
-      final String widgetJsonStr = jsonEncode(widgetEntry['jsonData']);
-      final String widgetFormattedStr = "< TYPE='WIDGET' WIDGET_ID='${widgetEntry['widgetId'] as String}' | $widgetJsonStr | TYPE='WIDGET' WIDGET_ID='${widgetEntry['widgetId'] as String}' >";
-      content = content.replaceAll(placeholder, widgetFormattedStr);
-    }
-  }
-  return {
-    "id": message['id'],
-    "role": message['role'],
-    "content": content,
-    "createdAt": message['createdAt'],
-    "agentConfig": message['agentConfig'],
-  };
-}).toList();
+    final transformedChatHistory = messages.map((message) {
+      String content = message['content'] as String;
+      if (message.containsKey('widgetDataList')) {
+        final List widgetList = message['widgetDataList'];
+        for (final widgetEntry in widgetList) {
+          final String placeholder = widgetEntry['placeholder'] as String;
 
-  // Prepara il payload per l'API
-  final payload = jsonEncode({
-    "chain_id": chainIdToUse,
-    "query": {
-      "input": input,
-      "chat_history": transformedChatHistory
-    },
-    "inference_kwargs": {}
-  });
+          // 1) Copia profonda dei dati del widget
+          final Map<String, dynamic> jsonData =
+              Map<String, dynamic>.from(widgetEntry['jsonData'] as Map);
 
-  try {
-    // Esegui la fetch
-    final response = await js_util.promiseToFuture(js_util.callMethod(
-      html.window,
-      'fetch',
-      [
-        url,
-        js_util.jsify({
-          'method': 'POST',
-          'headers': {'Content-Type': 'application/json'},
-          'body': payload,
-        }),
-      ],
-    ));
+          // 2) Rimuovi il campo is_first_time se esiste
+          jsonData.remove('is_first_time');
 
-    // Verifica lo stato della risposta
-    final ok = js_util.getProperty(response, 'ok') as bool;
-    if (!ok) {
-      throw Exception('Network response was not ok');
-    }
+          // 3) Serializza il JSON “pulito”
+          final String widgetJsonStr = jsonEncode(jsonData);
 
-    // Recupera il body dello stream
-    final body = js_util.getProperty(response, 'body');
-    if (body == null) {
-      throw Exception('Response body is null');
-    }
+          // 4) Ricostruisci la stringa del widget
+          final String widgetFormattedStr =
+              "< TYPE='WIDGET' WIDGET_ID='${widgetEntry['widgetId']}'"
+              " | $widgetJsonStr"
+              " | TYPE='WIDGET' WIDGET_ID='${widgetEntry['widgetId']}' >";
 
-    // Ottieni un reader per leggere lo stream chunk-by-chunk
-    final reader = js_util.callMethod(body, 'getReader', []);
+          // 5) Sostituisci il placeholder
+          content = content.replaceAll(placeholder, widgetFormattedStr);
+        }
+      }
+      return {
+        "id": message['id'],
+        "role": message['role'],
+        "content": content,
+        "createdAt": message['createdAt'],
+        "agentConfig": message['agentConfig'],
+      };
+    }).toList();
 
-    // Qui memorizziamo l'intero testo completo (con i widget originali)
-    final StringBuffer fullOutput = StringBuffer();
+    // Prepara il payload per l'API
+    final payload = jsonEncode({
+      "chain_id": chainIdToUse,
+      "query": {"input": input, "chat_history": transformedChatHistory},
+      "inference_kwargs": {}
+    });
 
-    // Qui memorizziamo solo ciò che mostriamo in tempo reale
-    final StringBuffer displayOutput = StringBuffer();
+    try {
+      // Esegui la fetch
+      final response = await js_util.promiseToFuture(js_util.callMethod(
+        html.window,
+        'fetch',
+        [
+          url,
+          js_util.jsify({
+            'method': 'POST',
+            'headers': {'Content-Type': 'application/json'},
+            'body': payload,
+          }),
+        ],
+      ));
 
-    // Variabili per la logica di scanning
-    bool insideWidgetBlock = false;      // Siamo dentro < TYPE='WIDGET' ... > ?
-    final StringBuffer widgetBuffer = StringBuffer(); // Accumula i caratteri mentre siamo dentro il blocco widget
-
-    final String startPattern = "< TYPE='WIDGET'";
-    final int patternLength = startPattern.length;
-
-    // Un piccolo buffer circolare per rilevare retroattivamente la comparsa di startPattern
-    final List<int> ringBuffer = [];
-
-    // Funzione locale che processa un chunk di testo
-void processChunk(String chunk) {
-  // Costante per mostrare la rotella di caricamento durante la costruzione del widget
-  const String spinnerPlaceholder = "[WIDGET_SPINNER]";
-
-  for (int i = 0; i < chunk.length; i++) {
-    final c = chunk[i];
-
-    // Aggiungiamo SEMPRE il carattere al fullOutput (testo completo, inclusi widget)
-    fullOutput.write(c);
-
-    if (!insideWidgetBlock) {
-      // Non siamo ancora dentro un blocco < TYPE='WIDGET', quindi:
-      // 1) Aggiorniamo il ringBuffer
-      ringBuffer.add(c.codeUnitAt(0));
-      if (ringBuffer.length > 32) {
-        ringBuffer.removeAt(0);
+      // Verifica lo stato della risposta
+      final ok = js_util.getProperty(response, 'ok') as bool;
+      if (!ok) {
+        throw Exception('Network response was not ok');
       }
 
-      // 2) Aggiungiamo il carattere visibile al displayOutput
-      displayOutput.write(c);
+      // Recupera il body dello stream
+      final body = js_util.getProperty(response, 'body');
+      if (body == null) {
+        throw Exception('Response body is null');
+      }
 
-      // 3) Controlliamo se negli ultimi caratteri di ringBuffer compare la stringa "< TYPE='WIDGET'"
-      if (ringBuffer.length >= patternLength) {
-        final startIndex = ringBuffer.length - patternLength;
-        final recent = String.fromCharCodes(ringBuffer.sublist(startIndex));
-        if (recent == startPattern) {
-          // Abbiamo riconosciuto retroattivamente l'inizio di un blocco widget
+      // Ottieni un reader per leggere lo stream chunk-by-chunk
+      final reader = js_util.callMethod(body, 'getReader', []);
 
-          // a) Rimuoviamo dal displayOutput i caratteri del pattern
-          final newLength = displayOutput.length - patternLength;
-          if (newLength >= 0) {
-            final soFar = displayOutput.toString();
-            displayOutput.clear();
-            displayOutput.write(soFar.substring(0, newLength));
+      // Qui memorizziamo l'intero testo completo (con i widget originali)
+      final StringBuffer fullOutput = StringBuffer();
+
+      // Qui memorizziamo solo ciò che mostriamo in tempo reale
+      final StringBuffer displayOutput = StringBuffer();
+
+      // Variabili per la logica di scanning
+      //bool insideWidgetBlock = false;      // Siamo dentro<TYPE='WIDGET' ... > ?
+      final StringBuffer widgetBuffer =
+          StringBuffer(); // Accumula i caratteri mentre siamo dentro il blocco widget
+
+      final String startPattern = "< TYPE='WIDGET'";
+      final int patternLength = startPattern.length;
+
+      // Un piccolo buffer circolare per rilevare retroattivamente la comparsa di startPattern
+      final List<int> ringBuffer = [];
+
+      // Funzione locale che processa un chunk di testo
+// -----------------------------------------------------------------------------
+// ✔ Revised version of `processChunk()`
+//   ‑ fixes the bug with stray `>` inside the JSON by keeping a second sliding
+//     window that waits for the terminator string "| TYPE='WIDGET'" *before*
+//     accepting the closing `>`.
+//   ‑ drop‑in replacement: no other part of the widget‑streaming pipeline
+//     needs to change.
+// -----------------------------------------------------------------------------
+
+// ⬇︎ add these globals near the other stream‑parser state variables -------------
+
+      bool insideWidgetBlock = false; // ▶ already present in old code
+      bool seenEndMarker = false; // ▶ NEW
+// ringBuffer (startPattern) already exists; this one is for the END marker
+      final List<int> _ringEnd = <int>[]; // ▶ NEW, per‑message state
+
+// -----------------------------------------------------------------------------
+      void processChunk(String chunk) {
+        const String spinnerPlaceholder = "[WIDGET_SPINNER]";
+
+        // pattern di chiusura senza il '>' finale
+        const String endMarker = "| TYPE='WIDGET'";
+        const int endLen = endMarker.length;
+
+        for (int i = 0; i < chunk.length; i++) {
+          final String c = chunk[i];
+
+          // 0) Accumula SEMPRE nel testo completo (serve per parse finale)
+          fullOutput.write(c);
+
+          // -----------------------------------------------------------------
+          // 1) ‑‑ siamo FUORI da un blocco widget
+          // -----------------------------------------------------------------
+          if (!insideWidgetBlock) {
+            // (a) sliding‑window di startPattern (già lungo startPattern.length)
+            ringBuffer.add(c.codeUnitAt(0));
+            if (ringBuffer.length > startPattern.length) ringBuffer.removeAt(0);
+
+            // (b) esponi all'utente
+            displayOutput.write(c);
+
+            // (c) check se gli ultimi char == startPattern → entra in blocco
+            if (ringBuffer.length == startPattern.length) {
+              final recent = String.fromCharCodes(ringBuffer);
+              if (recent == startPattern) {
+                // ‑ rimuovi il pattern scritto visivamente
+                final int newLen = displayOutput.length - startPattern.length;
+                if (newLen >= 0) {
+                  final String soFar = displayOutput.toString();
+                  displayOutput
+                    ..clear()
+                    ..write(soFar.substring(0, newLen));
+                }
+
+                // ‑ inizializza stato interno
+                insideWidgetBlock = true;
+                seenEndMarker = false;
+                widgetBuffer
+                  ..clear()
+                  ..write(startPattern);
+                _ringEnd.clear();
+
+                // ‑ mostra spinner + fake widget per placeholder
+                displayOutput.write(spinnerPlaceholder);
+                final lastMsg = messages.last;
+                (lastMsg['widgetDataList'] ??= <dynamic>[])
+                  ..add({
+                    "_id":
+                        "SpinnerFake_${DateTime.now().millisecondsSinceEpoch}",
+                    "widgetId": "SpinnerPlaceholder",
+                    "jsonData": <String, dynamic>{},
+                    "placeholder": spinnerPlaceholder,
+                  });
+                setState(() =>
+                    messages.last['content'] = displayOutput.toString() + "▌");
+              }
+            }
+            continue; // fine ramo "fuori" – passa al prossimo carattere
           }
 
-          // b) Entriamo nel blocco widget e puliamo il widgetBuffer
-          insideWidgetBlock = true;
-          widgetBuffer.clear();
-          widgetBuffer.write(startPattern);
+          // -----------------------------------------------------------------
+          // 2) ‑‑ siamo DENTRO a « TYPE='WIDGET' … »
+          // -----------------------------------------------------------------
+          widgetBuffer.write(c);
 
-          // c) Mostriamo subito una rotella di caricamento
-          displayOutput.write(spinnerPlaceholder);
+          // (a) aggiorna ringEnd per individuare endMarker
+          _ringEnd.add(c.codeUnitAt(0));
+          if (_ringEnd.length > endLen) _ringEnd.removeAt(0);
+          if (!seenEndMarker && _ringEnd.length == endLen) {
+            if (String.fromCharCodes(_ringEnd) == endMarker) {
+              seenEndMarker = true; // abbiamo visto "| TYPE='WIDGET'"
+            }
+          }
 
-            // d) AGGIUNGI anche un “fake widget” in widgetDataList, associato allo stesso placeholder
-  final lastMsg = messages[messages.length - 1];
-  List<dynamic> wList = lastMsg['widgetDataList'] ?? [];
-  wList.add({
-    "_id": "SpinnerFake_" + DateTime.now().millisecondsSinceEpoch.toString(),
-    "widgetId": "SpinnerPlaceholder",
-    "jsonData": {}, // Nessun dato extra
-    "placeholder": spinnerPlaceholder
-  });
-  lastMsg['widgetDataList'] = wList;
+          // (b) chiusura: SOLO se endMarker visto *e* char corrente == '>'
+          if (c == '>' && seenEndMarker) {
+            // 1‑ togli lo spinner
+            final String currentText =
+                displayOutput.toString().replaceFirst(spinnerPlaceholder, "");
+            displayOutput
+              ..clear()
+              ..write(currentText);
 
-  // e) setState per ridisegnare subito
-  setState(() {
-    messages[messages.length - 1]['content'] = displayOutput.toString() + "▌";
-  });
+            // 2‑ finalize
+            final String placeholder =
+                _finalizeWidgetBlock(widgetBuffer.toString());
+            displayOutput.write(placeholder);
 
-        }
-      }
-    } else {
-      // Siamo dentro un blocco < TYPE='WIDGET' ... >
-      widgetBuffer.write(c);
-
-      // Se incontriamo il carattere di chiusura '>', consideriamo il blocco completato
-      if (c == '>') {
-        // 1) Rimuoviamo subito la rotella di caricamento dal displayOutput
-        String currentText = displayOutput.toString();
-        if (currentText.contains(spinnerPlaceholder)) {
-          currentText = currentText.replaceFirst(spinnerPlaceholder, "");
-          displayOutput.clear();
-          displayOutput.write(currentText);
+            // 3‑ reset stato interno
+            insideWidgetBlock = false;
+            seenEndMarker = false;
+            _ringEnd.clear();
+          }
         }
 
-        // 2) Finalizziamo subito il blocco widget chiamando la funzione di parsing
-        final widgetBlock = widgetBuffer.toString();
-        final placeholder = _finalizeWidgetBlock(widgetBlock);
-        // Inseriamo il placeholder restituito al posto dello spinner
-        displayOutput.write(placeholder);
-
-        // 3) Uscita dal blocco widget
-        insideWidgetBlock = false;
-      }
-    }
-  }
-
-  // Aggiorniamo la UI con il contenuto visibile corrente (aggiungendo un cursore "▌")
-  setState(() {
-    messages[messages.length - 1]['content'] = displayOutput.toString();
-  });
-}
-
-
-    // Legge ricorsivamente i chunk
-    void readChunk() {
-      js_util
-          .promiseToFuture(js_util.callMethod(reader, 'read', []))
-          .then((result) {
-        final done = js_util.getProperty(result, 'done') as bool;
-        if (!done) {
-          final value = js_util.getProperty(result, 'value');
-          // Converte in stringa
-          final bytes = _convertJSArrayBufferToDartUint8List(value);
-          final chunkString = utf8.decode(bytes);
-
-          // Processa il chunk (token per token)
-          processChunk(chunkString);
-
-          // Continua a leggere
-          readChunk();
-        } else {
-          // Fine streaming
-          // A questo punto, fullOutput contiene TUTTO il testo (inclusi < TYPE='WIDGET'...>)
-          // displayOutput conteneva la parte "visibile" durante lo stream
-          // Ora finalizziamo
-          setState(() {
-            // Mettiamo dentro 'content' tutto il displayOutput
-            messages[messages.length - 1]['content'] = displayOutput.toString();
-            // Associa la configurazione dell'agente al messaggio
-            messages[messages.length - 1]['agentConfig'] = agentConfiguration;
-          });
-
-          // Ora effettuiamo il parse effettivo di fullOutput
-          final parsed = _parsePotentialWidgets(fullOutput.toString());
-
-          // Sovrascriviamo il content finale con il testo pulito e la widgetDataList
-          setState(() {
-            messages[messages.length - 1]['content'] = parsed.text;
-            messages[messages.length - 1]['widgetDataList'] = parsed.widgetList;
-          });
-
-          // Salviamo la conversazione (DB/localStorage)
-          _saveConversation(messages);
-        }
-      }).catchError((error) {
-        // Errore durante la lettura del chunk
-        print('Errore durante la lettura del chunk: $error');
+        // ---------------------------------------------------------------------------
+        // 3) Aggiorna la UI dopo aver consumato l'intero chunk
+        // ---------------------------------------------------------------------------
         setState(() {
-          messages[messages.length - 1]['content'] = 'Errore: $error';
+          messages.last['content'] = displayOutput.toString();
         });
+      }
+
+      // Legge ricorsivamente i chunk
+      void readChunk() {
+        js_util
+            .promiseToFuture(js_util.callMethod(reader, 'read', []))
+            .then((result) {
+          final done = js_util.getProperty(result, 'done') as bool;
+          if (!done) {
+            final value = js_util.getProperty(result, 'value');
+            // Converte in stringa
+            final bytes = _convertJSArrayBufferToDartUint8List(value);
+            final chunkString = utf8.decode(bytes);
+
+            // Processa il chunk (token per token)
+            processChunk(chunkString);
+
+            // Continua a leggere
+            readChunk();
+          } else {
+            // Fine streaming
+            // A questo punto, fullOutput contiene TUTTO il testo (inclusi « TYPE='WIDGET'...>)
+            // displayOutput conteneva la parte "visibile" durante lo stream
+            // Ora finalizziamo
+            setState(() {
+              // Mettiamo dentro 'content' tutto il displayOutput
+              messages[messages.length - 1]['content'] =
+                  displayOutput.toString();
+              // Associa la configurazione dell'agente al messaggio
+              messages[messages.length - 1]['agentConfig'] = agentConfiguration;
+            });
+
+            // Ora effettuiamo il parse effettivo di fullOutput
+            final parsed = _parsePotentialWidgets(fullOutput.toString());
+
+            // Sovrascriviamo il content finale con il testo pulito e la widgetDataList
+            setState(() {
+              messages[messages.length - 1]['content'] = parsed.text;
+              messages[messages.length - 1]['widgetDataList'] =
+                  parsed.widgetList;
+            });
+
+            assistantTurnCompleted.value++;
+            print('$assistantTurnCompleted');
+
+            // Salviamo la conversazione (DB/localStorage)
+            _saveConversation(messages);
+          }
+        }).catchError((error) {
+          // Errore durante la lettura del chunk
+          print('Errore durante la lettura del chunk: $error');
+          setState(() {
+            messages[messages.length - 1]['content'] = 'Errore: $error';
+          });
+        });
+      }
+
+      // Avvia la lettura dei chunk
+      readChunk();
+    } catch (e) {
+      // Gestione errori fetch
+      print('Errore durante il fetch dei dati: $e');
+      setState(() {
+        messages[messages.length - 1]['content'] = 'Errore: $e';
       });
     }
-
-    // Avvia la lettura dei chunk
-    readChunk();
-
-  } catch (e) {
-    // Gestione errori fetch
-    print('Errore durante il fetch dei dati: $e');
-    setState(() {
-      messages[messages.length - 1]['content'] = 'Errore: $e';
-    });
   }
-}
-
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {
     final buffer = js_util.getProperty(jsArrayBuffer, 'buffer') as ByteBuffer;

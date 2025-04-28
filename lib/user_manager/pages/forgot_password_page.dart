@@ -111,11 +111,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     }
 
     try {
-      final request = ConfirmForgotPasswordRequest(
-        username: email,
-        confirmationCode: code,
-        newPassword: newPassword,
-      );
+final request = ConfirmForgotPasswordRequest(
+  username: generateUserName(email),   // ✅ stesso alias del passo 1
+  confirmationCode: code,
+  newPassword: newPassword,
+);
       final response = await _apiClient.confirmForgotPassword(request);
       // Esempio di output: { "ResponseMetadata": {...} }
       debugPrint('Password reimpostata con successo: $response');

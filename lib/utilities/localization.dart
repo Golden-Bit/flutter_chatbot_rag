@@ -1740,6 +1740,14 @@ String get all_chats_archived {
     default:                return 'All chats archived';
   }
 }
+
+String get edit_knowledge_box {
+  switch (language) {
+    case Language.italian:  return 'Modifica Knowledge Box';
+    case Language.spanish:  return 'Editar Knowledge Box';
+    default:                return 'Edit Knowledge Box';
+  }
+}
 }
 
 

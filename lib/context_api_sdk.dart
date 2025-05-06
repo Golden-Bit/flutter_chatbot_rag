@@ -46,6 +46,133 @@ class FileUploadResponse {
   }
 }
 
+/// ---------------------------------------------------------------------------
+/// MODELS  (aggiungi dopo quelli già presenti)
+/// ---------------------------------------------------------------------------
+
+/// risposta di /contexts/metadata (è identica a ContextMetadata, ma la isoliamo
+/// per chiarezza – puoi ri-usare ContextMetadata se preferisci)
+class ContextMetadataResponse extends ContextMetadata {
+  ContextMetadataResponse({required super.path, super.customMetadata});
+  factory ContextMetadataResponse.fromJson(Map<String, dynamic> json) =>
+      ContextMetadataResponse(
+        path: json['path'],
+        customMetadata: json['custom_metadata'],
+      );
+}
+
+/// risposta generica di /files/metadata { "updated": [...] }
+class FileMetadataUpdateResult {
+  final List<Map<String, dynamic>> updated;
+  FileMetadataUpdateResult({required this.updated});
+  factory FileMetadataUpdateResult.fromJson(Map<String, dynamic> json) =>
+      FileMetadataUpdateResult(
+        updated: List<Map<String, dynamic>>.from(json['updated']),
+      );
+}
+
+
+/// NEW: risposta per /upload_async – include la mappa dei task
+class TaskIdsPerContext {
+  final String loaderTaskId;
+  final String vectorTaskId;
+
+  TaskIdsPerContext({
+    required this.loaderTaskId,
+    required this.vectorTaskId,
+  });
+
+  factory TaskIdsPerContext.fromJson(Map<String, dynamic> json) =>
+      TaskIdsPerContext(
+        loaderTaskId: json['loader_task_id'],
+        vectorTaskId: json['vector_task_id'],
+      );
+}
+
+class AsyncFileUploadResponse extends FileUploadResponse {
+  final Map<String, TaskIdsPerContext> tasks; // key = context-name
+
+  AsyncFileUploadResponse({
+    required super.fileId,
+    required super.contexts,
+    required this.tasks,
+  });
+
+  factory AsyncFileUploadResponse.fromJson(Map<String, dynamic> json) {
+
+    final raw = Map<String, dynamic>.from(json['tasks']);
+    final parsed = raw.map(
+      (ctx, t) => MapEntry(ctx, TaskIdsPerContext.fromJson(t)),
+    );
+    return AsyncFileUploadResponse(
+      fileId: json['file_id'],
+      contexts: List<String>.from(json['contexts']),
+      tasks: parsed,
+    );
+  }
+}
+
+/// NEW: per /tasks_status
+class TaskStatusItem {
+  final String taskId;
+  final String status;
+  final String? error;
+
+  TaskStatusItem({
+    required this.taskId,
+    required this.status,
+    this.error,
+  });
+
+  factory TaskStatusItem.fromJson(String tid, Map<String, dynamic> json) =>
+      TaskStatusItem(
+        taskId: tid,
+        status: json['status'],
+        error: json['error'],
+      );
+}
+
+class TasksStatusResponse {
+  final DateTime timestamp;
+  final Map<String, TaskStatusItem> statuses;
+
+  TasksStatusResponse({required this.timestamp, required this.statuses});
+
+  factory TasksStatusResponse.fromJson(Map<String, dynamic> json) {
+    final rawStatuses = Map<String, dynamic>.from(json['statuses']);
+    final parsed = rawStatuses.map(
+      (tid, st) => MapEntry(tid, TaskStatusItem.fromJson(tid, st)),
+    );
+    return TasksStatusResponse(
+      timestamp: DateTime.parse(json['timestamp']),
+      statuses: parsed,
+    );
+  }
+}
+
+/// Stato task ⇢ notifica
+enum TaskStage { pending, running, done, error }
+
+/// ② TaskNotification ora è keyed su jobId, ma mantiene il contesto
+class TaskNotification {
+  final String jobId;
+  final String contextPath;
+ final String contextName;      // ← display name del contesto
+  final String fileName;
+        TaskStage stage;
+        bool isVisible;
+
+  TaskNotification({
+    required this.jobId,
+    required this.contextPath,
+   required this.contextName,
+    required this.fileName,
+    this.stage = TaskStage.pending,
+    this.isVisible = true,
+  });
+}
+
+
 // SDK per le API
 class ContextApiSdk {
   String? baseUrl;
@@ -64,32 +191,35 @@ class ContextApiSdk {
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }
 
-  // Creare un nuovo contesto
 Future<ContextMetadata> createContext(
-    String contextName, String description, String username, String token) async {
+  String contextNameUuid,
+  String description,
+  String displayName,        // ⬅️ nuovo
+  String username,
+  String token,
+) async {
   if (baseUrl == null) await loadConfig();
 
   final uri = Uri.parse('$baseUrl/contexts');
 
-  final response = await http.post(
-    uri,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: jsonEncode({
-      'context_name': contextName,
-      'description': description,
-      'username': username,  // Passa l'username nel body
-      'token': token,        // Passa il token nel body
-    }),
-  );
+  final body = {
+    'context_name' : contextNameUuid,   // path = UUID
+    'description'  : description,
+    'display_name' : displayName,       // ⬅️ nuovo campo
+    'username'     : username,
+    'token'        : token,
+  };
 
-  if (response.statusCode == 200) {
-    return ContextMetadata.fromJson(jsonDecode(response.body));
-  } else {
-    throw ApiException('Errore durante la creazione del contesto: ${response.body}');
+  final res = await http.post(uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body));
+
+  if (res.statusCode == 200) {
+    return ContextMetadata.fromJson(jsonDecode(res.body));
   }
+  throw ApiException('Errore creazione contesto: ${res.body}');
 }
+
 
 
   // Eliminare un contesto
@@ -185,6 +315,80 @@ Future<void> uploadFileToContexts(
     print('Errore caricamento file: $e');
   }
 }
+
+
+
+
+  Future<AsyncFileUploadResponse> uploadFileToContextsAsync(
+    Uint8List fileBytes,
+    List<String> contexts,
+    String username,
+    String token, {
+    String? description,
+    required String fileName,
+  }) async {
+    if (baseUrl == null) await loadConfig();
+
+    var request =
+        http.MultipartRequest('POST', Uri.parse('$baseUrl/upload_async'));
+
+    final formatted = contexts.map((c) => '$username-$c').toList();
+    request.fields['contexts'] = formatted.join(',');
+    if (description != null) request.fields['description'] = description;
+    request.fields['username'] = username;
+    request.fields['token'] = token;
+
+    request.files
+        .add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+
+    if (response.statusCode == 200) {
+      return AsyncFileUploadResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw ApiException(
+          'Errore durante il caricamento async: ${response.body}');
+    }
+  }
+
+
+
+
+ /// Ritorna lo stato di più task; accetta la mappa proveniente da upload_async
+  ///
+  /// ```dart
+  /// final status = await sdk.getTasksStatus(
+  ///      tasksMap.values.toList(),  // oppure costruisci tu i TaskIdsPerContext
+  /// );
+  /// ```
+  Future<TasksStatusResponse> getTasksStatus(
+      Iterable<TaskIdsPerContext> taskIds) async {
+    if (baseUrl == null) await loadConfig();
+
+    // costruiamo lista "loader:uuid,vector:uuid"
+    final List<String> queryItems = [];
+    for (final ids in taskIds) {
+      queryItems.add('loader:${ids.loaderTaskId}');
+      queryItems.add('vector:${ids.vectorTaskId}');
+    }
+
+    final uri = Uri.parse('$baseUrl/tasks_status')
+        .replace(queryParameters: {'tasks': queryItems.join(',')});
+
+    final response = await http.get(uri);
+
+    if (response.statusCode == 200) {
+      return TasksStatusResponse.fromJson(jsonDecode(response.body));
+    } else {
+      throw ApiException(
+          'Errore durante il polling status: ${response.body}');
+    }
+  }
+
+
+
+
 
 
   // Elencare file per contesti
@@ -348,4 +552,102 @@ Future<Map<String, dynamic>> configureAndLoadChain(
     }
   }
   
+
+
+
+
+  /* ---------------------------------------------------------------------- */
+/*                           METADATA UPDATE                              */
+/* ---------------------------------------------------------------------- */
+
+/// NEW – aggiorna la descrizione e/o custom-metadata di un **contesto**
+///
+/// - `contextName` è la parte **senza** prefisso `username-` (il metodo lo
+///   aggiunge da solo).
+/// - se lasci `description` o `extraMetadata` a `null` verranno ignorati
+///   (merge parziale lato server).
+Future<ContextMetadataResponse> updateContextMetadata(
+  String username,
+  String token, {
+  required String contextName,
+  String? description,
+  Map<String, dynamic>? extraMetadata,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/contexts/metadata');
+
+  final body = {
+    'username': username,
+    'context_name': contextName,
+    'token': token,
+    if (description != null) 'description': description,
+    if (extraMetadata != null) 'extra_metadata': extraMetadata,
+  };
+
+  final response = await http.put(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (response.statusCode == 200) {
+    return ContextMetadataResponse.fromJson(jsonDecode(response.body));
+  } else {
+    throw ApiException(
+        'Errore update context-metadata: ${response.body}');
+  }
+}
+
+/// NEW – aggiorna metadati di un **file** (per path o per file_id globale)
+///
+/// Devi fornire almeno `filePath` **oppure** `fileId`.
+Future<FileMetadataUpdateResult> updateFileMetadata(
+  String username,
+  String token, {
+  String? filePath,   // es. "<context>/<filename>" **senza** prefisso username-
+  String? fileId,     // UUID globale
+  String? description,
+  Map<String, dynamic>? extraMetadata,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  if (filePath == null && fileId == null) {
+    throw ApiException('Devi specificare filePath oppure fileId');
+  }
+
+  // se è stato passato un percorso, prepend del prefisso username-
+  String? fullPath;
+  if (filePath != null) {
+    final segments = filePath.split('/');
+    if (segments.length >= 2) {
+      fullPath = '$username-${segments[segments.length - 2]}/${segments.last}';
+    } else {
+      throw ApiException('filePath non valido: $filePath');
+    }
+  }
+
+  final uri = Uri.parse('$baseUrl/files/metadata');
+  final body = {
+    'token': token,
+    if (fullPath != null) 'file_path': fullPath,
+    if (fileId != null) 'file_id': fileId,
+    if (description != null) 'description': description,
+    if (extraMetadata != null) 'extra_metadata': extraMetadata,
+  };
+
+  final response = await http.put(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (response.statusCode == 200) {
+    return FileMetadataUpdateResult.fromJson(jsonDecode(response.body));
+  } else {
+    throw ApiException('Errore update file-metadata: ${response.body}');
+  }
+}
+
+
 }

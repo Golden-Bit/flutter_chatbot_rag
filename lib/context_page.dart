@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_app/ui_components/icons/cube.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'context_api_sdk.dart';
 import 'dart:typed_data';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert'; // per jsonEncode / jsonDecode
+import 'package:uuid/uuid.dart';
 
 /*void main() {
   runApp(MyApp());
@@ -22,14 +27,66 @@ class MyApp extends StatelessWidget {
   }
 }*/
 
+/// Info persistente sui job di indicizzazione ancora in corso
+/// ①  aggiungi il campo `jobId`
+class PendingUploadJob {
+  final String jobId;                // NEW
+  final String contextPath;
+  final String fileName;
+  final Map<String, TaskIdsPerContext> tasksPerCtx;
+
+  PendingUploadJob({
+    required this.jobId,
+    required this.contextPath,
+    required this.fileName,
+    required this.tasksPerCtx,
+  });
+
+  Map<String,dynamic> toJson() => {
+    'jobId' : jobId,
+    'context': contextPath,
+    'fileName': fileName,
+    'tasks' : tasksPerCtx.map((k,v) => MapEntry(k,{
+      'loader': v.loaderTaskId,
+      'vector': v.vectorTaskId,
+    })),
+  };
+
+  static PendingUploadJob fromJson(Map<String,dynamic> j) {
+    final tasks = (j['tasks'] as Map<String,dynamic>).map((ctx,ids) =>
+      MapEntry(ctx, TaskIdsPerContext(
+        loaderTaskId: ids['loader'],
+        vectorTaskId: ids['vector'],
+      )));
+
+    return PendingUploadJob(
+      jobId:      j['jobId'],
+      contextPath:j['context'],
+      fileName:   j['fileName'],
+      tasksPerCtx:tasks,
+    );
+  }
+}
+
 class DashboardScreen extends StatefulWidget {
   final String username;
   final String token;
+
+  // ▼ AGGIUNGI
+final void Function(
+  String jobId,
+  String ctx,
+  String fileName,
+  Map<String,TaskIdsPerContext> tasks
+)? onNewPendingJob;
+
+
 
   const DashboardScreen({
     Key? key,
     required this.username,
     required this.token,
+    this.onNewPendingJob,          // ◀︎ facoltativo
   }) : super(key: key);
 
   @override
@@ -40,7 +97,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final ContextApiSdk _apiSdk = ContextApiSdk();
   List<ContextMetadata> _contexts = [];
   FilePickerResult? _selectedFile;
+  final Map<String, Timer> _pollers = {}; // in cima allo State
 
+// convenience
+  String _displayName(ContextMetadata ctx) =>
+      ctx.customMetadata?['display_name'] ?? ctx.path;
 
   bool _isLoading =
       false; // Variabile di stato per indicare il caricamento generale
@@ -60,11 +121,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
 // Lista dei contesti filtrati
   List<ContextMetadata> _filteredContexts = [];
 
+// ──────────────────────────────────────────────────────────────
+// 🔄  USIAMO jobId come chiave nella mappa persistita
+// ──────────────────────────────────────────────────────────────
+static const _prefsKey = 'kb_pending_jobs';
+
+Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
+  final prefs   = await SharedPreferences.getInstance();
+  final encoded = jobs.map((_, job) => MapEntry(job.jobId, job.toJson()));
+  await prefs.setString(_prefsKey, jsonEncode(encoded));
+}
+
+Future<Map<String, PendingUploadJob>> _loadPendingJobs() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw   = prefs.getString(_prefsKey);
+  if (raw == null) return {};
+
+  final Map<String,dynamic> decoded = jsonDecode(raw);
+  return decoded.map(
+    (_, j) {
+      final job = PendingUploadJob.fromJson(j);
+      return MapEntry(job.jobId, job);    // ⇠ chiave = jobId
+    },
+  );
+}
+
+
+  late Map<String, PendingUploadJob> _pendingJobs;
+
   @override
   void initState() {
     super.initState();
-    _loadContexts();
+    _restorePendingState(); // ①
   }
+
+  @override
+  void dispose() {
+    // annulla eventuali timer di polling ancora attivi
+    for (final t in _pollers.values) {
+      t.cancel();
+    }
+    super.dispose(); // ⬅️ sempre per ultimo
+  }
+
+Future<void> _restorePendingState() async {
+  _pendingJobs = await _loadPendingJobs();
+
+  // (re)-inizia spinner e polling per i job ancora attivi
+  for (final entry in _pendingJobs.values) {
+    setState(() {
+      _isLoadingMap[entry.contextPath]     = true;
+      _loadingFileNamesMap[entry.contextPath] = entry.fileName;
+    });
+
+    _monitorUploadTasks(entry.jobId, entry.tasksPerCtx);   // 👈 jobId
+  }
+
+  await _loadContexts(); // carica la lista KB dopo aver sistemato gli spinner
+}
 
   /// Restituisce un'icona basata sull'estensione del file.
   Map<String, dynamic> _getIconForFileType(String fileName) {
@@ -113,16 +227,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// Filtra la lista dei contesti in base al testo immesso.
+  ///
+  /// ‣ Il filtro cerca sia nel “nome visualizzato” (`display_name` dentro
+  ///   `customMetadata`) sia nel campo `description`.
+  /// ‣ Se `display_name` non esiste (vecchi contesti) usa `path` come
+  ///   valore di fallback.
   void _filterContexts() {
-    final query = _nameSearchController.text.toLowerCase(); // Unica query
+    final query = _nameSearchController.text.toLowerCase().trim();
 
     setState(() {
-      _filteredContexts = _contexts.where((context) {
-        final name = context.path.toLowerCase();
+      _filteredContexts = _contexts.where((ctx) {
+        final displayName = (ctx.customMetadata?['display_name'] ?? ctx.path)
+            .toString()
+            .toLowerCase();
         final description =
-            (context.customMetadata?['description'] ?? '').toLowerCase();
-        return name.contains(query) ||
-            description.contains(query); // Controllo su entrambi
+            (ctx.customMetadata?['description'] ?? '').toString().toLowerCase();
+
+        return displayName.contains(query) || description.contains(query);
       }).toList();
     });
   }
@@ -160,6 +282,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// Restituisce la mappa <context → taskIds> così chi la chiama può avviare il polling
+  Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
+    Uint8List fileBytes,
+    List<String> contexts, {
+    String? description,
+    required String fileName,
+  }) async {
+    final resp = await _apiSdk.uploadFileToContextsAsync(
+      fileBytes,
+      contexts,
+      widget.username,
+      widget.token,
+      description: description,
+      fileName: fileName,
+    );
+    return resp.tasks; // <── RITORNA
+  }
+
+  /// Polla /tasks_status ogni 3 s finché tutti i task sono DONE/ERROR.
+/// Polla /tasks_status ogni 3 s finché TUTTI i task del job sono DONE/ERROR.
+/// Alla fine rimuove lo spinner dal Knowledge-Box collegato
+/// e cancella il job da `_pendingJobs`.
+void _monitorUploadTasks(
+  String jobId,
+  Map<String, TaskIdsPerContext> tasksPerCtx,
+) {
+  const pollInterval = Duration(seconds: 3);
+  Timer? timer;
+
+  timer = Timer.periodic(pollInterval, (_) async {
+    try {
+      // 1. – richiede lo stato di TUTTI i task del job
+      final statusResp = await _apiSdk.getTasksStatus(tasksPerCtx.values);
+
+      // 2. – log minimale di debug
+      statusResp.statuses.forEach((id, st) => debugPrint(
+          '[$id] → ${st.status}${st.error != null ? " | ${st.error}" : ""}'));
+
+      // 3. – verifica se tutti sono DONE o ERROR
+      final allDoneOrError = statusResp.statuses.values
+          .every((s) => s.status == 'DONE' || s.status == 'ERROR');
+
+      if (!allDoneOrError) return;       // → continua a pollare
+
+      // 4. – se siamo qui, il job è completato/errore  ► stop timer
+      timer?.cancel();
+
+      // 5. – dati utili
+      final job      = _pendingJobs[jobId];
+      final ctxPath  = job?.contextPath ?? '<unknown>';
+
+      debugPrint('📁  Upload completato su $ctxPath (jobId=$jobId)');
+
+      if (mounted) {
+        setState(() {
+          // rimuove lo spinner dal KB interessato
+          _isLoadingMap.remove(ctxPath);
+          _loadingFileNamesMap.remove(ctxPath);
+
+          // elimina il job da memoria + SharedPreferences
+          _pendingJobs.remove(jobId);
+          _savePendingJobs(_pendingJobs);
+        });
+      }
+    } catch (e) {
+      debugPrint('Errore polling status: $e');
+      timer?.cancel();
+
+      final job      = _pendingJobs[jobId];
+      final ctxPath  = job?.contextPath ?? '<unknown>';
+
+      // rimuove comunque lo spinner in caso di eccezione
+      if (mounted) {
+        setState(() {
+          _isLoadingMap.remove(ctxPath);
+          _loadingFileNamesMap.remove(ctxPath);
+          _pendingJobs.remove(jobId);
+          _savePendingJobs(_pendingJobs);
+        });
+      }
+    }
+  });
+
+  // salva il timer per eventuale cancellazione manuale
+  _pollers[jobId] = timer!;
+}
+
+
   // Funzione per eliminare un contesto
   Future<void> _deleteContext(String contextName) async {
     try {
@@ -179,37 +389,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Funzione per gestire l'upload del file per un contesto specifico
-  void _uploadFileForContext(String contextPath) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
+// ──────────────────────────────────────────────────────────────────────────────
+// UPLOAD “bloccante”: la pagina resta in attesa (niente polling)
+// ──────────────────────────────────────────────────────────────────────────────
+void _uploadFileForContext(String contextPath) async {
+  final result = await FilePicker.platform.pickFiles();
+  if (result == null || result.files.first.bytes == null) {
+    debugPrint('Nessun file selezionato');
+    return;
+  }
 
-    if (result != null && result.files.first.bytes != null) {
+  setState(() {
+    _isLoadingMap[contextPath] = true;
+    _loadingFileNamesMap[contextPath] = result.files.first.name;
+  });
+
+  try {
+    await _uploadFile(
+      result.files.first.bytes!,
+      [contextPath],
+      fileName: result.files.first.name,
+    );
+  } catch (e) {
+    debugPrint('Errore durante il caricamento: $e');
+  } finally {
+    if (mounted) {
       setState(() {
-        // Stato di caricamento del contesto specifico
-        _isLoadingMap[contextPath] = true;
-        _loadingFileNamesMap[contextPath] =
-            result.files.first.name; // Nome del file in caricamento
+        _isLoadingMap.remove(contextPath);
+        _loadingFileNamesMap.remove(contextPath);
       });
-
-      try {
-        await _uploadFile(
-          result.files.first.bytes!,
-          [contextPath],
-          fileName: result.files.first.name,
-        );
-      } catch (e) {
-        print('Errore durante il caricamento: $e');
-      } finally {
-        setState(() {
-          // Rimuovi lo stato di caricamento una volta completato
-          _isLoadingMap.remove(contextPath);
-          _loadingFileNamesMap.remove(contextPath);
-        });
-      }
-    } else {
-      print("Nessun file selezionato");
     }
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// UPLOAD “async”: ottiene i task-id, li traccia con un jobId univoco
+// ──────────────────────────────────────────────────────────────────────────────
+void _uploadFileForContextAsync(String contextPath) async {
+  final result = await FilePicker.platform.pickFiles();
+  if (result == null || result.files.first.bytes == null) {
+    debugPrint('Nessun file selezionato');
+    return;
+  }
+
+  // 0. Spinner sul KB
+  setState(() {
+    _isLoadingMap[contextPath] = true;
+    _loadingFileNamesMap[contextPath] = result.files.first.name;
+  });
+
+  try {
+    // 1. Genera un UUID v4 per l’intero job
+    final String jobId = const Uuid().v4();
+
+    // 2. Chiamata POST /upload_async
+    final tasksPerCtx = await _uploadFileAsync(
+      result.files.first.bytes!,
+      [contextPath],
+      fileName: result.files.first.name,
+    );
+
+    // 3. Salva in memoria + SharedPreferences (keyed su jobId)
+    _pendingJobs[jobId] = PendingUploadJob(
+      jobId: jobId,
+      contextPath: contextPath,
+      fileName: result.files.first.name,
+      tasksPerCtx: tasksPerCtx,
+    );
+    await _savePendingJobs(_pendingJobs);
+
+    // 4. Notifica il padre (Dashboard / ChatBotPage, ecc.)
+    widget.onNewPendingJob?.call(
+      jobId,
+      contextPath,
+      result.files.first.name,
+      tasksPerCtx,
+    );
+
+    // 5. Avvia il polling finché tutti i task sono DONE/ERROR
+    _monitorUploadTasks(jobId, tasksPerCtx);
+  } catch (e) {
+    debugPrint('Errore durante il caricamento async: $e');
+    if (mounted) {
+      setState(() {
+        _isLoadingMap.remove(contextPath);
+        _loadingFileNamesMap.remove(contextPath);
+      });
+    }
+  }
+}
 
   // Mostra il dialog per caricare file in contesti multipli
   /*void _showUploadFileToMultipleContextsDialog() {
@@ -333,146 +601,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
       },
     );
   }*/
-  
-Widget _buildSearchAreaWithTitle() {
-  final localizations = LocalizationProvider.of(context);
-  return LayoutBuilder(
-    builder: (context, constraints) {
-      if (constraints.maxWidth > 900) {
-        // Se la larghezza disponibile è maggiore di 900,
-        // mostra titolo e campo di ricerca in riga, con spazio tra di loro
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // Titolo allineato a sinistra
-            Text(
-              localizations.knowledgeBoxes,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            // Campo di ricerca con larghezza massima fissata (ad es. 600)
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: 600),
-              child: TextField(
-                controller: _nameSearchController,
-                onChanged: (value) {
-                  _filterContexts();
-                },
-                decoration: InputDecoration(
-                  hintText: localizations.search_by_name_or_description,
-                  prefixIcon: Icon(Icons.search),
-                  contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+
+  Widget _buildSearchAreaWithTitle() {
+    final localizations = LocalizationProvider.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth > 900) {
+          // Se la larghezza disponibile è maggiore di 900,
+          // mostra titolo e campo di ricerca in riga, con spazio tra di loro
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Titolo allineato a sinistra
+              Text(
+                localizations.knowledgeBoxes,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              // Campo di ricerca con larghezza massima fissata (ad es. 600)
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 600),
+                child: TextField(
+                  controller: _nameSearchController,
+                  onChanged: (value) {
+                    _filterContexts();
+                  },
+                  decoration: InputDecoration(
+                    hintText: localizations.search_by_name_or_description,
+                    prefixIcon: Icon(Icons.search),
+                    contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
-        );
-      } else {
-        // Se la larghezza disponibile è inferiore a 900,
-        // mostra il titolo sopra il campo di ricerca
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Titolo allineato a sinistra
-            Text(
-              localizations.knowledgeBoxes,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 8),
-            // Campo di ricerca centrato e che occupa tutta la larghezza disponibile
-            Center(
-              child: TextField(
-                controller: _nameSearchController,
-                onChanged: (value) {
-                  _filterContexts();
-                },
-                decoration: InputDecoration(
-                  hintText: localizations.search_by_name_or_description,
-                  prefixIcon: Icon(Icons.search),
-                  contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.black), // Bordi neri
+            ],
+          );
+        } else {
+          // Se la larghezza disponibile è inferiore a 900,
+          // mostra il titolo sopra il campo di ricerca
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Titolo allineato a sinistra
+              Text(
+                localizations.knowledgeBoxes,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              // Campo di ricerca centrato e che occupa tutta la larghezza disponibile
+              Center(
+                child: TextField(
+                  controller: _nameSearchController,
+                  onChanged: (value) {
+                    _filterContexts();
+                  },
+                  decoration: InputDecoration(
+                    hintText: localizations.search_by_name_or_description,
+                    prefixIcon: Icon(Icons.search),
+                    contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.black), // Bordi neri
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                          color:
+                              Colors.black), // Bordi neri per lo stato normale
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                          color: Colors.black,
+                          width:
+                              2.0), // Bordi neri più spessi per lo stato attivo
+                    ),
                   ),
-    enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
                 ),
               ),
-            ),
-          ],
-        );
-      }
-    },
-  );
-}
-
-  // Funzione per creare un nuovo contesto e caricare il file obbligatorio
-  Future<void> _createContextAndUploadFile(
-      String name, String description) async {
-    if (_selectedFile == null || _selectedFile!.files.first.bytes == null) {
-      print("Errore: nessun file selezionato.");
-      return;
-    }
-
-    try {
-      setState(() {
-        _isLoading = true;
-        _loadingContext = name;
-        _loadingFileName = _selectedFile!.files.first.name;
-      });
-
-      await _apiSdk.createContext(
-          name, description, widget.username, widget.token);
-
-      String fileName = _selectedFile!.files.first.name;
-      await _uploadFile(
-        _selectedFile!.files.first.bytes!,
-        [name],
-        description: description,
-        fileName: fileName,
-      );
-
-      setState(() {
-        _contexts.add(ContextMetadata(
-            path: name, customMetadata: {'description': description}));
-        _filteredContexts = List.from(_contexts); // Sincronizza con _contexts
-        _filterContexts(); // Applica i filtri
-      });
-    } catch (e) {
-      print('Errore creazione contesto o caricamento file: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _loadingContext = null;
-          _loadingFileName = null;
-        });
-      }
-    }
-  }
-
-  Future<void> _createContext(String name, String description) async {
-    try {
-      await _apiSdk.createContext(
-          name, description, widget.username, widget.token);
-
-      setState(() {
-        _contexts.add(ContextMetadata(
-            path: name, customMetadata: {'description': description}));
-        _filteredContexts = List.from(_contexts); // Sincronizza con _contexts
-        _filterContexts(); // Applica i filtri
-      });
-    } catch (e) {
-      print('Errore creazione contesto: $e');
-    }
+            ],
+          );
+        }
+      },
+    );
   }
 
   // Funzione per mostrare il dialog per creare un contesto con caricamento obbligatorio di un file
@@ -503,12 +715,13 @@ Widget _buildSearchAreaWithTitle() {
             children: [
               TextField(
                 controller: contextNameController,
-                decoration: InputDecoration(labelText: localizations.knowledge_box_name),
+                decoration: InputDecoration(
+                    labelText: localizations.knowledge_box_name),
               ),
               TextField(
                 controller: contextDescriptionController,
-                decoration:
-                    InputDecoration(labelText: localizations.knowledge_box_description),
+                decoration: InputDecoration(
+                    labelText: localizations.knowledge_box_description),
               ),
             ],
           ),
@@ -518,15 +731,39 @@ Widget _buildSearchAreaWithTitle() {
                 if (contextNameController.text.isNotEmpty) {
                   // Chiude il dialog prima di creare il contesto
                   Navigator.of(context).pop();
-                  _createContext(
-                    contextNameController.text,
+                  final friendly = contextNameController.text.trim();
+                  // Genera il UUID completo…
+final String fullUuid = const Uuid().v4();
+// …e ne prendi solo i primi 9 caratteri
+final String uuid = fullUuid.substring(0, 9);
+
+                  _apiSdk.createContext(
+                    uuid, // path/ID
                     contextDescriptionController.text,
+                    contextNameController.text, // display_name visibile
+                    widget.username,
+                    widget.token,
                   );
+
+// keep local state in sync
+                  setState(() {
+                    _contexts.add(
+                      ContextMetadata(
+                        path: uuid,
+                        customMetadata: {
+                          'description': contextDescriptionController.text,
+                          'display_name': friendly, // ③
+                        },
+                      ),
+                    );
+                    _filteredContexts = List.from(_contexts);
+                    _filterContexts();
+                  });
                 } else {
                   print('Errore: nome del contesto obbligatorio.');
                 }
               },
-              child: Text(localizations.create_knowledge_box ),
+              child: Text(localizations.create_knowledge_box),
             ),
           ],
         );
@@ -568,45 +805,46 @@ Widget _buildSearchAreaWithTitle() {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
-                        shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(16), // Arrotondamento degli angoli
-            //side: BorderSide(
-            //  color: Colors.blue, // Colore del bordo
-            //  width: 2, // Spessore del bordo
-            //),
-          ),
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(16), // Arrotondamento degli angoli
+                //side: BorderSide(
+                //  color: Colors.blue, // Colore del bordo
+                //  width: 2, // Spessore del bordo
+                //),
+              ),
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
                     WireframeCubeIcon(
-  size: 36.0,
-  color: Colors.blue,
-),
-    SizedBox(width: 8.0),
-                  Text(
-                    contextPath,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                      size: 36.0,
+                      color: Colors.blue,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  )]),
-                  SizedBox(height: 8.0),
-                  if (description != null)
+                    SizedBox(width: 8.0),
                     Text(
-                      description,
+                      selectedContext.customMetadata?["display_name"] ?? selectedContext.path,
                       style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.normal,
-                        color: Colors.grey[600],
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                    ),
+                    )
+                  ]),
+                  SizedBox(height: 8.0),
+if (description != null && description.trim().isNotEmpty)
+  Text(
+    description,
+    style: const TextStyle(
+      fontSize: 14,
+      color: Colors.grey,          // ← identico alla card
+      fontWeight: FontWeight.normal,
+    ),
+    maxLines: 2,
+    overflow: TextOverflow.ellipsis,
+  ),
                   SizedBox(height: 16.0),
                   // Barra di ricerca
                   TextField(
@@ -621,18 +859,24 @@ Widget _buildSearchAreaWithTitle() {
                       hintText: localizations.search_file,
                       prefixIcon: Icon(Icons.search),
                       contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.black), // Bordi neri
-                  ),
-    enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: Colors.black), // Bordi neri per lo stato normale
-    ),
-    focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: Colors.black, width: 2.0), // Bordi neri più spessi per lo stato attivo
-    ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            BorderSide(color: Colors.black), // Bordi neri
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: Colors
+                                .black), // Bordi neri per lo stato normale
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: Colors.black,
+                            width:
+                                2.0), // Bordi neri più spessi per lo stato attivo
+                      ),
                     ),
                   ),
                 ],
@@ -712,9 +956,12 @@ Widget _buildSearchAreaWithTitle() {
                                     ),
                                     SizedBox(height: 5),
                                     // Dettagli aggiuntivi del file
-                                    Text('${localizations.file_type}: $fileType'),
-                                    Text('${localizations.file_size}: $fileSize'),
-                                    Text('${localizations.upload_date}: $uploadDate'),
+                                    Text(
+                                        '${localizations.file_type}: $fileType'),
+                                    Text(
+                                        '${localizations.file_size}: $fileSize'),
+                                    Text(
+                                        '${localizations.upload_date}: $uploadDate'),
                                     // Spazio per spostare il cestino in basso
                                     Spacer(),
                                     // Cestino in basso a destra
@@ -762,9 +1009,86 @@ Widget _buildSearchAreaWithTitle() {
     );
   }
 
+void _showEditContextDialog(ContextMetadata ctx) {
+  final localizations = LocalizationProvider.of(context);
+
+  final TextEditingController nameCtrl = TextEditingController(
+    text: ctx.customMetadata?['display_name'] ?? ctx.path,
+  );
+  final TextEditingController descCtrl = TextEditingController(
+    text: ctx.customMetadata?['description'] ?? '',
+  );
+
+  showDialog(
+    context: context,
+    builder: (_) {
+      return AlertDialog(
+        title: Text(localizations.edit_knowledge_box),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration:
+                  InputDecoration(labelText: localizations.knowledge_box_name),
+            ),
+            TextField(
+              controller: descCtrl,
+              decoration: InputDecoration(
+                  labelText: localizations.knowledge_box_description),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(localizations.cancel),
+          ),
+          TextButton(
+            onPressed: () async {
+              final newName = nameCtrl.text.trim();
+              final newDesc = descCtrl.text.trim();
+
+              // ① chiamata API
+              await _apiSdk.updateContextMetadata(
+                widget.username,
+                widget.token,
+                contextName: ctx.path,
+                description: newDesc,
+                extraMetadata: {'display_name': newName},
+              );
+
+              // ② sincronizza stato locale
+              final idx = _contexts.indexWhere((c) => c.path == ctx.path);
+              if (idx != -1) {
+                setState(() {
+                  _contexts[idx] = ContextMetadata(
+                    path: ctx.path,
+                    customMetadata: {
+                      ...?ctx.customMetadata,
+                      'display_name': newName,
+                      'description': newDesc,
+                    },
+                  );
+                  _filterContexts(); // aggiorna vista filtrata
+                });
+              }
+
+              Navigator.of(context).pop();
+            },
+            child: Text(localizations.save),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+
   @override
   Widget build(BuildContext context) {
-            final localizations = LocalizationProvider.of(context);
+    final localizations = LocalizationProvider.of(context);
     return Scaffold(
       //appBar: //AppBar(
       //title: Text('Context API Dashboard'),
@@ -804,9 +1128,8 @@ const SizedBox(width: 16),
     ),
   ],
 ),*/
-_buildSearchAreaWithTitle(),
+            _buildSearchAreaWithTitle(),
             SizedBox(height: 10),
-
             SizedBox(height: 10),
             Expanded(
               flex: 1,
@@ -852,23 +1175,25 @@ _buildSearchAreaWithTitle(),
 
                   Map<String, dynamic>? metadata =
                       contextMetadata.customMetadata;
-                  List<Widget> metadataWidgets = [];
+List<Widget> metadataWidgets = [];
+final desc = metadata?['description']?.toString().trim();
 
-                  if (metadata != null) {
-                    metadata.forEach((key, value) {
-                      metadataWidgets.add(
-                        Padding(
-                          padding: const EdgeInsets.only(top: 5.0),
-                          child: Text(
-                            '$key: ${value.toString().length > 20 ? value.toString().substring(0, 20) + '...' : value.toString()}',
-                            style: TextStyle(fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      );
-                    });
-                  }
+if (desc != null && desc.isNotEmpty) {
+  metadataWidgets.add(
+    Padding(
+      padding: const EdgeInsets.only(top: 5.0),
+      child: Text(
+        desc,                           // ← solo valore, niente prefisso
+        style: const TextStyle(
+          fontSize: 12,
+          color: Colors.grey,           // stesso colore della mini-card
+        ),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    ),
+  );
+}
 
                   return GestureDetector(
                     onTap: () {
@@ -894,71 +1219,83 @@ _buildSearchAreaWithTitle(),
                                         CrossAxisAlignment.start,
                                     children: [
                                       Row(
-  crossAxisAlignment: CrossAxisAlignment.start,
-  children: [
-                                          // 1) ICONA CUBO
-WireframeCubeIcon(
-  size: 36.0,
-  color: Colors.blue,
-),
-    SizedBox(width: 8.0),
-                                      // Nome del contesto
-                                      Text(
-                                        contextMetadata.path,
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      )]),
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            // 1) ICONA CUBO
+                                            WireframeCubeIcon(
+                                              size: 36.0,
+                                              color: Colors.blue,
+                                            ),
+                                            SizedBox(width: 8.0),
+                                            // Nome del contesto
+                                            Text(
+                                              _displayName(contextMetadata),
+                                              style: TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            )
+                                          ]),
                                       // Rotella di caricamento e nome del file (se in caricamento)
                                     ],
                                   ),
                                 ),
                                 // Menu popup per azioni (Carica File ed Elimina Contesto)
                                 Theme(
-  data: Theme.of(context).copyWith(
-    popupMenuTheme: PopupMenuThemeData(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: Colors.white,
-    ),
+                                    data: Theme.of(context).copyWith(
+                                      popupMenuTheme: PopupMenuThemeData(
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(16),
+                                        ),
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    child: PopupMenuButton<String>(
+                                      offset: const Offset(0, 32),
+                                      borderRadius: BorderRadius.circular(
+                                          16), // Imposta un raggio di 8
+                                      color: Colors.white,
+                                      onSelected: (value) {
+                                        if (value == 'delete') {
+                                          _deleteContext(
+                                              contextMetadata.path);
+                                        } else if (value == 'upload') {
+                                          _uploadFileForContextAsync(
+                                              contextMetadata.path);
+                                        } else if (value == 'edit') {                  // ③
+   _showEditContextDialog(contextMetadata);     // ④
+                                      }},
+                                      itemBuilder: (BuildContext context) =>
+                                          <PopupMenuEntry<String>>[
+                                        PopupMenuItem<String>(
+                                          value: 'upload',
+                                          child:
+                                              Text(localizations.upload_file),
+                                        ),
+                                          PopupMenuItem<String>(
+    value: 'edit',                        // ① nuova voce
+    child: Text(localizations.edit),       // ② nuova label (aggiungi nelle i18n)
   ),
-  child: 
-PopupMenuButton<String>(
-  offset: const Offset(0, 32),
-                                    borderRadius: BorderRadius.circular(16), // Imposta un raggio di 8
-                                    color: Colors.white,
-                                  onSelected: (value) {
-                                    if (value == 'delete') {
-                                      _deleteContext(contextMetadata.path);
-                                    } else if (value == 'upload') {
-                                      _uploadFileForContext(
-                                          contextMetadata.path);
-                                    }
-                                  },
-                                  itemBuilder: (BuildContext context) =>
-                                      <PopupMenuEntry<String>>[
-                                    PopupMenuItem<String>(
-                                      value: 'upload',
-                                      child: Text(localizations.upload_file),
-                                    ),
-                                    PopupMenuItem<String>(
-                                      value: 'delete',
-                                      child: Text(localizations.delete),
-                                    ),
-                                  ],
-                                )),
+                                        PopupMenuItem<String>(
+                                          value: 'delete',
+                                          child: Text(localizations.delete),
+                                        ),
+                                      ],
+                                    )),
                               ],
                             ),
                             SizedBox(height: 5),
                             // Metadati del contesto
                             ...metadataWidgets,
-                            SizedBox(height: 5),
-                            if (_isLoadingMap[contextMetadata.path] == true &&
-                                _loadingFileNamesMap[contextMetadata.path] !=
+                            SizedBox(height: 16),
+                            if (_isLoadingMap[contextMetadata.path] ==
+                                    true &&
+                                _loadingFileNamesMap[
+                                        contextMetadata.path] !=
                                     null)
                               Row(
                                 children: [
@@ -1001,4 +1338,3 @@ PopupMenuButton<String>(
     );
   }
 }
-

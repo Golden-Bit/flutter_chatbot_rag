@@ -62,7 +62,11 @@ class _SelectContextDialogContentState
 
   /// Modello selezionato localmente
   late String _selectedModel;
-
+// ↓ subito dopo la dichiarazione della classe _SelectContextDialogContentState
+String _displayName(ContextMetadata ctx) =>
+    (ctx.customMetadata?['display_name'] as String?)?.trim().isNotEmpty == true
+        ? ctx.customMetadata!['display_name']
+        : ctx.path;               // fallback se il campo manca
   @override
   void initState() {
     super.initState();
@@ -78,14 +82,17 @@ class _SelectContextDialogContentState
     super.dispose();
   }
 
-  // Filtro contesti
-  void _filterContexts(String query) {
-    setState(() {
-      _filteredContexts = widget.availableContexts.where((ctx) {
-        return ctx.path.toLowerCase().contains(query.toLowerCase());
-      }).toList();
-    });
-  }
+void _filterContexts(String query) {
+  final q = query.toLowerCase();
+  setState(() {
+    _filteredContexts = widget.availableContexts.where((ctx) {
+      final name    = ctx.path.toLowerCase();
+      final disp    = _displayName(ctx).toLowerCase();
+      return name.contains(q) || disp.contains(q);
+    }).toList();
+  });
+}
+
 
   // Al click di Conferma
   void _handleConfirm() {
@@ -180,7 +187,7 @@ class _SelectContextDialogContentState
                               _selectedContexts.contains(ctx.path);
                           return CheckboxListTile(
                             title: Text(
-                              ctx.path,
+                              _displayName(ctx),
                               style: TextStyle(
                                 fontWeight: isSelected
                                     ? FontWeight.bold

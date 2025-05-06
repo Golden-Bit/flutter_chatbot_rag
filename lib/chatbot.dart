@@ -18,6 +18,7 @@ import 'package:flutter_app/user_manager/components/settings_dialog.dart';
 import 'package:flutter_app/user_manager/components/usage_analytics_dialog.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart'; // Aggiungi il pacchetto TTS
 import 'package:flutter/services.dart'; // Per il pulsante di copia
@@ -83,6 +84,12 @@ class ChatBotPage extends StatefulWidget {
 }
 
 class ChatBotPageState extends State<ChatBotPage> {
+  final ContextApiSdk _apiSdk = ContextApiSdk();
+  // DOPO
+final Map<String /*jobId*/, PendingUploadJob> _pendingJobs = {};
+
+// idem per le notifiche
+final Map<String /*jobId*/, TaskNotification> _taskNotifications = {};
   final CognitoApiClient _apiClient = CognitoApiClient();
   final _inputScroll = ScrollController();
 // Controller già esistente usato dallo ScrollView dei messaggi:
@@ -90,6 +97,38 @@ class ChatBotPageState extends State<ChatBotPage> {
   double _lastScrollPosition = 0;
 // Nuova flag per mostrare/nascondere il FloatingActionButton
   bool _showScrollToBottomButton = false;
+void _onNewPendingJob(
+  String jobId,
+  String ctxPath,
+  String fileName,
+  Map<String, TaskIdsPerContext> tasksPerCtx,
+) {
+  // Recupera il display name o ricadi sul path
+  final displayName = _availableContexts
+      .firstWhere((c) => c.path == ctxPath,
+                  orElse: () => ContextMetadata(path: ctxPath, customMetadata: {}))
+      .customMetadata?['display_name'] as String? ?? ctxPath;
+
+  // ② notifica visuale
+  _taskNotifications[jobId] = TaskNotification(
+    jobId:       jobId,
+    contextPath: ctxPath,
+    contextName: displayName,
+    fileName:    fileName,
+    stage:       TaskStage.pending,
+  );
+
+  // ③ dati per il polling
+  _pendingJobs[jobId] = PendingUploadJob(
+    jobId:       jobId,
+    contextPath: ctxPath,
+    fileName:    fileName,
+    tasksPerCtx: tasksPerCtx,
+  );
+
+  if (_notifOverlay == null) _startNotifOverlay();
+  _refreshNotifOverlay();
+}
 
   /// ++ ogni volta che l’assistente **ha finito** di rispondere
   static final ValueNotifier<int> assistantTurnCompleted =
@@ -97,6 +136,25 @@ class ChatBotPageState extends State<ChatBotPage> {
   static const String kArchiveCollection = 'archived_chats';
   String spinnerPlaceholder = "[WIDGET_IN_CARICAMENTO]";
   int _widgetCounter = 0; // Contatore globale nella classe per i placeholder
+void _refreshNotifOverlay() {
+  // ① se non c’è alcuna card visibile esci subito
+  final hasVisible = _taskNotifications.values.any((n) => n.isVisible);
+  if (!hasVisible) {
+    // …ma tieniti pronto ad inserirlo alla prossima card “visibile”
+    if (_notifOverlay != null) {
+      _notifOverlay!.remove();   // chiude solo il widget overlay
+      _notifOverlay = null;
+    }
+    return;
+  }
+
+  // ② se l’overlay non c’è più, ricrealo (non tocca il poller)
+  if (_notifOverlay == null) {
+    _startNotifOverlay();        // inserisce overlay ma **non** un nuovo timer
+  } else {
+    _notifOverlay!.markNeedsBuild();
+  }
+}
 
   String _finalizeWidgetBlock(String widgetBlock) {
     // 1) Trovi la parte JSON (tra le due barre verticali)
@@ -767,6 +825,7 @@ class ChatBotPageState extends State<ChatBotPage> {
   void initState() {
     super.initState();
     _bootstrap();
+    _initTaskNotifications(); // ⬅️ nuovo
     _speech = stt.SpeechToText();
     _flutterTts = FlutterTts();
 
@@ -1261,6 +1320,282 @@ class ChatBotPageState extends State<ChatBotPage> {
       );
     }
   }
+
+
+
+
+
+// ——————————————————————————————————————————
+//  NOTIFICHE TASK
+// ——————————————————————————————————————————
+OverlayEntry? _notifOverlay;
+Timer? _notifPoller;
+
+/// Caricato in initState()
+Future<void> _initTaskNotifications() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString('kb_pending_jobs');
+  if (raw == null) return;                         // nessun job salvato
+
+  // ────────────────────────────────────────────────────────────────
+  // Struttura attesa:
+  // {
+  //   "b7c9…": {            // ← jobId
+  //     "contextPath": "my-kb",
+  //     "fileName":    "document.pdf",
+  //     "tasksPerCtx": { … }          // (opz.) se ti serve più tardi
+  //   },
+  //   …
+  // }
+  // ────────────────────────────────────────────────────────────────
+  final Map<String, dynamic> stored = jsonDecode(raw);
+
+stored.forEach((String jobId, dynamic j) {
+  final ctx      = j['contextPath'] ?? 'unknown_ctx';
+  final fileName = j['fileName']    ?? 'file';
+
+  // ricava display name se già caricate le _availableContexts
+  final displayName = _availableContexts
+      .firstWhere((c) => c.path == ctx,
+                  orElse: () => ContextMetadata(path: ctx, customMetadata: {}))
+      .customMetadata?['display_name'] as String? ?? ctx;
+
+  _taskNotifications[jobId] = TaskNotification(
+    jobId:       jobId,
+    contextPath: ctx,
+    contextName: displayName,
+    fileName:    fileName,
+    stage:       TaskStage.pending,
+  );
+
+  if (j['tasksPerCtx'] != null) {
+    _pendingJobs[jobId] = PendingUploadJob(
+      jobId:       jobId,
+      contextPath: ctx,
+      fileName:    fileName,
+      tasksPerCtx: (j['tasksPerCtx'] as Map).map(
+        (k, v) => MapEntry(k, TaskIdsPerContext.fromJson(v)),
+      ),
+    );
+  }
+});
+}
+
+/// Avvia l’overlay e il polling di /tasks_status ogni 3 s
+void _startNotifOverlay() {
+  // 1) Crea (se necessario) e inserisce l’overlay
+  _notifOverlay ??= _buildOverlay();
+  Overlay.of(context, rootOverlay: true)!.insert(_notifOverlay!);
+
+  // 2) Avvia il poller
+  _notifPoller = Timer.periodic(const Duration(seconds: 3), (_) async {
+    if (_taskNotifications.isEmpty) return;
+
+    // ————————————————————————————————————————————————
+    // raccogli tutti i Task-ID dei job pendenti
+    // ————————————————————————————————————————————————
+    final ids = _pendingJobs.values.expand((j) => j.tasksPerCtx.values);
+    final status = await _apiSdk.getTasksStatus(ids);
+
+    // ————————————————————————————————————————————————
+    // per ogni task restituito dallo status-endpoint…
+    // ————————————————————————————————————————————————
+    status.statuses.forEach((tid, st) {
+      // 2-a  individua il Knowledge-Box (ctx) a cui appartiene
+      final ctx = _pendingJobs.entries
+          .firstWhere((e) =>
+              e.value.tasksPerCtx.values.any((t) =>
+                  t.loaderTaskId == tid || t.vectorTaskId == tid))
+          .key;
+
+      final notif = _taskNotifications[ctx];
+      if (notif == null) return; // nessuna notifica → esci
+
+      // 2-b  aggiorna **sempre** lo stage
+      switch (st.status) {
+        case 'RUNNING':
+          notif.stage = TaskStage.running;
+          break;
+        case 'DONE':
+          notif.stage = TaskStage.done;
+          break;
+        case 'ERROR':
+          notif.stage = TaskStage.error;
+          break;
+      }
+
+      // 2-c  se la carta era stata chiusa manualmente (isVisible == false)
+      //      e ora il task è terminato, la rendiamo di nuovo visibile
+// ——————— aggiornamento visibilità dopo cambio di stato ———————
+if (!notif.isVisible &&
+    (notif.stage == TaskStage.done || notif.stage == TaskStage.error)) {
+  // Ri-mostra ➜ ma solo se la notifica ESISTE ancora (non è stata rimossa)
+  notif.isVisible = true;
+}
+
+    });
+
+    // 3) Richiedi SEMPRE un rebuild dell’overlay
+    setState(() {});          // aggiorna lo stato per eventuali rebuild interni
+    _refreshNotifOverlay();   // forza il rebuild dell’overlay stesso
+
+    // 4) Avvia l’auto-dismiss (10 s) **solo** per le carte visibili e concluse
+    _taskNotifications.values
+        .where((n) =>
+            n.isVisible &&
+            (n.stage == TaskStage.done || n.stage == TaskStage.error))
+        .forEach((n) {
+      Future.delayed(const Duration(seconds: 10),
+          () => _dismissNotification(n.contextPath));
+    });
+  });
+}
+
+
+/// Chiude (o rimuove) la card di notifica.
+///
+/// • Se lo stato è **DONE/ERROR** la elimina per sempre.
+/// • Se è ancora PENDING/RUNNING la nasconde soltanto: potrà ri-apparire
+///   alla transizione di stato (vedi punto 2).
+void _dismissNotification(String jobId) {
+  final notif = _taskNotifications[jobId];
+  if (notif == null) return;
+
+  // ── A.  DONE / ERROR  →  rimozione permanente ──────────────────────────
+  final permanentlyRemove =
+      notif.stage == TaskStage.done || notif.stage == TaskStage.error;
+  if (permanentlyRemove) {
+    _taskNotifications.remove(jobId);
+  } else {
+    notif.isVisible = false;   // solo nascosta (potrà ri-apparire)
+  }
+
+  setState(() {});             // refresh locale
+  _refreshNotifOverlay();      // refresh (o chiusura) overlay
+
+  // ── B.  decidiamo se interrompere il poller ────────────────────────────
+  // se restano job PENDING/RUNNING (anche se invisibili) il poller deve
+  // restare vivo.
+  final stillActive = _taskNotifications.values.any((n) =>
+      n.stage == TaskStage.pending || n.stage == TaskStage.running);
+
+  if (!stillActive) {
+    // tutti i job ormai sono DONE/ERROR e le card sono state nascoste o rimosse
+    _notifPoller?.cancel();
+    _notifPoller = null;
+  }
+}
+
+
+bool _noCardIsVisible() =>
+    _taskNotifications.values.every((n) => !n.isVisible);
+
+
+void _removeOverlay() {
+  _notifOverlay?.remove();
+  _notifOverlay = null;
+  // (il poller viene eventualmente fermato da _dismissNotification)
+}
+
+@override
+void dispose() {
+  _notifPoller?.cancel();
+  _removeOverlay();
+  super.dispose();
+}
+
+
+/// ---------------------------------------------------------------------------
+/// OVERLAY con le card di notifica
+/// ---------------------------------------------------------------------------
+OverlayEntry _buildOverlay() {
+  return OverlayEntry(
+    builder: (_) => Positioned(
+      // subito sotto la Top-Bar (56 px) + eventuale status-bar
+      top: MediaQuery.of(context).padding.top + 56 + 12,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(                  // clic “pass-through” tranne la X
+        ignoring: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: _taskNotifications.values
+                  .where((n) => n.isVisible)
+                  .map(_buildNotifCard)
+                  .toList(),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildNotifCard(TaskNotification n) {
+  // ─────────────────────────────  icona / colore / etichetta per stage
+  late final IconData icon;
+  late final Color    color;
+  late final String   statusLabel;
+
+  switch (n.stage) {
+    case TaskStage.pending:
+      icon        = Icons.schedule;
+      color       = Colors.orange;
+      statusLabel = 'In coda…';
+      break;
+    case TaskStage.running:
+      icon        = Icons.sync;
+      color       = Colors.blue;
+      statusLabel = 'In corso…';
+      break;
+    case TaskStage.done:
+      icon        = Icons.check_circle;
+      color       = Colors.green;
+      statusLabel = 'Completato!';
+      break;
+    case TaskStage.error:
+      icon        = Icons.error;
+      color       = Colors.red;
+      statusLabel = 'Errore ❗';
+      break;
+  }
+
+  // ─────────────────────────────  card vera e propria
+  return Dismissible(
+    key: ValueKey(n.jobId),                         // ► chiave = jobId
+    direction: DismissDirection.endToStart,
+    onDismissed: (_) => _dismissNotification(n.jobId),
+    child: Card(
+      color: Colors.white,
+      elevation: 6,
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        leading: Icon(icon, color: color),
+        title: Text(
+          n.fileName,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('KB: ${n.contextName}'),
+            Text(statusLabel),
+          ],
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => _dismissNotification(n.jobId),
+        ),
+      ),
+    ),
+  );
+}
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -2194,9 +2529,12 @@ class ChatBotPageState extends State<ChatBotPage> {
                                 children: [
                                   Expanded(
                                     child: DashboardScreen(
-                                      username: widget.user.username,
-                                      token: widget.token.accessToken,
-                                    ),
+  username: widget.user.username,
+  token: widget.token.accessToken,
+
+  // ▼▼▼  NUOVO PARAMETRO  ▼▼▼
+  onNewPendingJob: _onNewPendingJob,
+),
                                   ),
                                 ],
                               ),

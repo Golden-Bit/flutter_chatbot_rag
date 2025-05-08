@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/auto_sequence_widget.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/js_runner_widget.dart';
+import 'package:flutter_app/llm_ui_tools/utilities/toolEventWidget.dart';
 import 'package:flutter_app/ui_components/chat/empty_chat_content.dart';
 import 'package:flutter_app/ui_components/chat/utilities_functions/rename_chat_instructions.dart';
 import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
@@ -303,6 +304,8 @@ void _refreshNotifOverlay() {
 
   String? _latestChainId;
   String? _latestConfigId;
+final Map<String, Map<String, dynamic>> _toolEvents = {}; 
+
 
   /// Risultato del parsing del testo chatbot:
   /// text: testo "pulito" dopo la rimozione dei blocchi widget,
@@ -518,6 +521,8 @@ void _refreshNotifOverlay() {
               Map<String, dynamic> data, void Function(String) onReply)>
       get widgetMap {
     return {
+      "ToolEventWidget": (data, onReply) =>
+    ToolEventCard(data: data),      // non serve onReply qui
       "JSRunnerWidget": (data, onReply) => JSRunnerWidgetTool(jsonData: data),
       "AutoSequenceWidget": (data, onReply) =>
           AutoSequenceWidgetTool(jsonData: data, onReply: onReply),
@@ -3765,7 +3770,62 @@ Widget _buildNotifCard(TaskNotification n) {
       bool seenEndMarker = false; // ▶ NEW
 // ringBuffer (startPattern) already exists; this one is for the END marker
       final List<int> _ringEnd = <int>[]; // ▶ NEW, per‑message state
+   bool _maybeHandleToolEvent(String chunk) {
 
+  // prova veloce di parse; se fallisce restituisce null
+  Map<String,dynamic>? _tryParse(String s) {
+    try { return jsonDecode(s) as Map<String,dynamic>; } catch (_) { return null; }
+  }
+
+  final evt = _tryParse(chunk.trim());
+
+  if (evt == null || !evt.containsKey('event')) return false;   // non è un tool-event
+
+  final runId = evt['run_id'] as String;
+  final name  = evt['name']    as String;
+
+  switch (evt['event']) {
+    case 'on_tool_start':
+      final placeholder = "[TOOL_PLACEHOLDER_$runId]";
+      _toolEvents[runId] = {
+        'name': name,
+        'input': evt['data']['input'],
+        'isRunning': true,
+        'placeholder': placeholder,
+      };
+
+      // ① inserisci placeholder nel displayOutput:
+      displayOutput.write(placeholder);
+
+      // ② attacca subito una scheda con spinner
+      (messages.last['widgetDataList'] ??= <dynamic>[]).add({
+        "_id":   runId,
+        "widgetId": "ToolEventWidget",
+        "jsonData": _toolEvents[runId],
+        "placeholder": placeholder,
+      });
+
+          setState(() {
+    messages.last['content'] = displayOutput.toString();
+  });
+  
+      break;
+
+    case 'on_tool_end':
+       final existing = _toolEvents[runId];
+       if (existing == null) return true;
+       existing['output']    = evt['data']['output'];
+       existing['isRunning'] = false;
+
+  // 🔽 NOVITÀ: forza una nuova istanza del widget
+  _widgetCache.remove(runId);      // <—— aggiungi questa riga
+
+  setState(() {});          
+  break;      // resta
+  }
+
+  return true;
+}
 // -----------------------------------------------------------------------------
       void processChunk(String chunk) {
         const String spinnerPlaceholder = "[WIDGET_SPINNER]";
@@ -3886,34 +3946,44 @@ Widget _buildNotifCard(TaskNotification n) {
             final chunkString = utf8.decode(bytes);
 
             // Processa il chunk (token per token)
-            processChunk(chunkString);
+            final handled = _maybeHandleToolEvent(chunkString);
+
+            if (!handled) {
+              processChunk(chunkString);
+            }
 
             // Continua a leggere
             readChunk();
           } else {
-            // Fine streaming
-            // A questo punto, fullOutput contiene TUTTO il testo (inclusi « TYPE='WIDGET'...>)
-            // displayOutput conteneva la parte "visibile" durante lo stream
-            // Ora finalizziamo
+                       // ──────────────────────────────────────────────────────────────
+            //  FINE STREAMING  – patch di fusione widget
+            // ──────────────────────────────────────────────────────────────
             setState(() {
-              // Mettiamo dentro 'content' tutto il displayOutput
-              messages[messages.length - 1]['content'] =
-                  displayOutput.toString();
-              // Associa la configurazione dell'agente al messaggio
-              messages[messages.length - 1]['agentConfig'] = agentConfiguration;
-            });
+              final msg = messages.last;           // l’ultimo (assistant)
 
-            // Ora effettuiamo il parse effettivo di fullOutput
-            final parsed = _parsePotentialWidgets(fullOutput.toString());
+              // 1) TESTO: tieni quello già visto in tempo reale
+              const String spinnerPh = "[WIDGET_SPINNER]";
+              final String visibleText =
+                  displayOutput.toString().replaceFirst(spinnerPh, "");
+              msg['content'] = visibleText;
 
-            // Sovrascriviamo il content finale con il testo pulito e la widgetDataList
-            setState(() {
-              messages[messages.length - 1]['content'] = parsed.text;
-              messages[messages.length - 1]['widgetDataList'] =
-                  parsed.widgetList;
+              // 2) PARSE dei blocchi < TYPE='WIDGET' … >
+              final parsed = _parsePotentialWidgets(fullOutput.toString());
+
+              // 3) MERGE  (vecchi widget + nuovi “classici”)
+              final List<dynamic> existing =
+                  (msg['widgetDataList'] ?? <dynamic>[]) as List<dynamic>;
+              msg['widgetDataList'] = [...existing, ...parsed.widgetList];
+              // 4) (opz.) rimuovi lo spinner provvisorio
+              msg['widgetDataList']
+                  .removeWhere((w) => w['widgetId'] == 'SpinnerPlaceholder');
+
+              // 5) aggiungi la agentConfig se serve
+              msg['agentConfig'] = agentConfiguration;
             });
 
             assistantTurnCompleted.value++;
+
             print('$assistantTurnCompleted');
 
             // Salviamo la conversazione (DB/localStorage)
@@ -3937,6 +4007,8 @@ Widget _buildNotifCard(TaskNotification n) {
         messages[messages.length - 1]['content'] = 'Errore: $e';
       });
     }
+
+    
   }
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {

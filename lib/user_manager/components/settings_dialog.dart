@@ -64,7 +64,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
       case 1:
         return UserProfileSettingsContent(accessToken: widget.accessToken);
       case 4:
-        return SecuritySettingsContent();
+   return SecuritySettingsContent(
+     accessToken: widget.accessToken,   //  ← nuovo argomento
+   );
       case 5:
         return SubscriptionSettingsContent();
       default:

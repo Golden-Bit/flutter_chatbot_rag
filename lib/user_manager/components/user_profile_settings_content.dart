@@ -38,10 +38,8 @@ class _UserProfileSettingsContentState
     extends State<UserProfileSettingsContent> {
   final CognitoApiClient _apiClient = CognitoApiClient();
 
-  /// Attributi correnti (dopo filtro hiddenFields)
-  late List<UserAttribute> _attributes;
-  /// Controller testuali per ciascun attributo
-  late Map<String, TextEditingController> _controllers;
+  List<UserAttribute> _attributes = [];
+  Map<String, TextEditingController> _controllers = {};
 
   bool _isLoading = false;
   String _errorMessage = '';
@@ -137,13 +135,19 @@ class _UserProfileSettingsContentState
 
   @override
   Widget build(BuildContext context) {
+    // ① SCHERMATA DI CARICAMENTO
+    if (_isLoading && _attributes.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(), // rotella centrata
+      );
+    }
     return Stack(
       children: [
         SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           child: Form(
             key: _formKey,
-            child:   Column(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Input fields
@@ -153,19 +157,18 @@ class _UserProfileSettingsContentState
                 Align(
                   alignment: Alignment.centerRight,
                   child: OutlinedButton(
-                    
                     onPressed: _isLoading ? null : _saveChanges,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.black,
-            side: const BorderSide(color: Colors.black),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 12,
-            ),
-          ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.black,
+                      side: const BorderSide(color: Colors.black),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                    ),
                     child: const Text('Salva modifiche'),
                   ),
                 ),
@@ -184,6 +187,18 @@ class _UserProfileSettingsContentState
             color: Colors.black12,
             alignment: Alignment.center,
             child: const CircularProgressIndicator(),
+          ),
+
+        // ③ OVERLAY MENTRE SALVO (opzionale)
+        if (_isLoading)
+          const Positioned(
+            right: 24, // «a lato destro»
+            top: 24,
+            child: const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
           ),
       ],
     );

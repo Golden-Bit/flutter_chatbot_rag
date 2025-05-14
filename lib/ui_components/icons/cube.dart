@@ -73,6 +73,7 @@ class _WireframeCubePainter extends CustomPainter {
     canvas.drawLine(nearTopRight,    farTopRight,      paint);
     canvas.drawLine(nearBottomRight, farBottomRight,   paint);
     canvas.drawLine(nearBottomLeft,  farBottomLeft,    paint);
+    
   }
 
   @override

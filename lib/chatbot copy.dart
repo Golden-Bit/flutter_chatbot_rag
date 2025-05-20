@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/auto_sequence_widget.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/js_runner_widget.dart';
@@ -39,6 +40,8 @@ import 'package:url_launcher/url_launcher.dart'; // Per gestire il tap sui link
 import 'package:intl/intl.dart';
 import 'dart:async'; // Assicurati di importare il package Timer
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';   // se non c’era già
 
 /*void main() {
   runApp(MyApp());
@@ -60,6 +63,183 @@ class MyApp extends StatelessWidget {
 /// Risultato del parsing del testo chatbot:
 /// text:   il testo "pulito" (senza la parte di <...>)
 /// widgetData: se esiste un widget, i dati necessari (altrimenti null)
+
+
+ class FileUploadInfo {
+  String jobId;
+  String ctxPath;     // path KB
+  String fileName;
+  TaskStage stage;    // pending | running | done | error
+
+  FileUploadInfo({
+    required this.jobId,
+    required this.ctxPath,
+    required this.fileName,
+    this.stage = TaskStage.pending,
+  });
+
+  Map<String,dynamic> toJson() => {
+    'jobId'   : jobId,
+    'ctxPath' : ctxPath,
+    'fileName': fileName,
+    'stage'   : stage.name,
+  };
+
+  factory FileUploadInfo.fromJson(Map<String,dynamic> j) => FileUploadInfo(
+    jobId   : j['jobId'],
+    ctxPath : j['ctxPath'],
+    fileName: j['fileName'],
+    stage   : TaskStage.values.firstWhere(
+                 (e) => e.name == (j['stage'] ?? 'pending')),
+  );
+}
+
+/// Restituisce la coppia **icona + colore** in base all’estensione del file.
+Map<String, dynamic> fileIconFor(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+  switch (ext) {
+    case 'pdf':
+      return {'icon': Icons.picture_as_pdf, 'color': Colors.red};
+    case 'doc':
+    case 'docx':
+      return {'icon': Icons.description, 'color': Colors.blue};
+    case 'xls':
+    case 'xlsx':
+      return {'icon': Icons.table_chart, 'color': Colors.green};
+    case 'ppt':
+    case 'pptx':
+      return {'icon': Icons.slideshow, 'color': Colors.orange};
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+      return {'icon': Icons.image, 'color': Colors.purple};
+    case 'zip':
+    case 'rar':
+      return {'icon': Icons.folder_zip, 'color': Colors.brown};
+    default:
+      return {'icon': Icons.insert_drive_file, 'color': Colors.grey};
+  }
+}
+
+/// ─────────────────────────────────────────────────────────────────────────
+///  MINI-CARD DI UPLOAD NELLA CHAT
+///  • icona coerente con il tipo di file (in alto-sinistra)
+///  • badge di stato (pending/running/done/error) sovrapposto
+///  • pulsanti:   [👁 vedi docs]   [⬇ scarica]
+/// ─────────────────────────────────────────────────────────────────────────
+class FileUploadWidget extends StatelessWidget {
+  final FileUploadInfo info;
+  final VoidCallback? onDownload;
+  final VoidCallback? onViewDocs;
+
+  const FileUploadWidget({
+    super.key,
+    required this.info,
+    this.onDownload,
+    this.onViewDocs,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // ── 1. icona principale in base al tipo di file
+    final ic = fileIconFor(info.fileName);
+
+    // ── 2. badge di stato
+    late final IconData statusIcon;
+    late final Color    statusColor;
+    late final Widget   trailingSpinner;   // usato per PENDING/RUNNING
+
+    switch (info.stage) {
+      case TaskStage.pending:
+        statusIcon     = Icons.schedule;
+        statusColor    = Colors.orange;
+        trailingSpinner = const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        );
+        break;
+      case TaskStage.running:
+        statusIcon     = Icons.sync;
+        statusColor    = Colors.blue;
+        trailingSpinner = const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        );
+        break;
+      case TaskStage.done:
+        statusIcon  = Icons.check;
+        statusColor = Colors.green;
+        trailingSpinner = const SizedBox.shrink();
+        break;
+      case TaskStage.error:
+        statusIcon  = Icons.error;
+        statusColor = Colors.red;
+        trailingSpinner = const SizedBox.shrink();
+        break;
+    }
+
+    // ── 3. azioni a destra
+    final List<Widget> actions = [];
+    if (onViewDocs != null) {
+      actions.add(
+        IconButton(
+          tooltip: 'Mostra documenti indicizzati',
+          icon: const Icon(Icons.visibility),
+          onPressed: onViewDocs,
+        ),
+      );
+    }
+    if (info.stage == TaskStage.done && onDownload != null) {
+      actions.add(
+        IconButton(
+          tooltip: 'Scarica file originale',
+          icon: const Icon(Icons.download),
+          onPressed: onDownload,
+        ),
+      );
+    }
+    if (actions.isEmpty &&                                           // per pending/running
+        (info.stage == TaskStage.pending || info.stage == TaskStage.running)) {
+      actions.add(trailingSpinner);
+    }
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        leading: Stack(
+          alignment: Alignment.topRight,
+          children: [
+            Icon(ic['icon'] as IconData, size: 36, color: ic['color'] as Color),
+            // badge circolare
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(statusIcon, size: 14, color: statusColor),
+            ),
+          ],
+        ),
+        title: Text(
+          info.fileName,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text('Knowledge-Box: ${info.ctxPath}'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: actions,
+        ),
+      ),
+    );
+  }
+}
+
+
+
 class ParsedWidgetResult {
   final String text;
   final List<Map<String, dynamic>> widgetList;
@@ -88,7 +268,8 @@ class ChatBotPageState extends State<ChatBotPage> {
   final ContextApiSdk _apiSdk = ContextApiSdk();
   // DOPO
 final Map<String /*jobId*/, PendingUploadJob> _pendingJobs = {};
-
+String? _chatKbPath;                                  // NEW – path KB legata alla chat
+final Set<String> _syncedMsgIds = {};                 // NEW – id dei msg già caricati
 // idem per le notifiche
 final Map<String /*jobId*/, TaskNotification> _taskNotifications = {};
   final CognitoApiClient _apiClient = CognitoApiClient();
@@ -98,38 +279,274 @@ final Map<String /*jobId*/, TaskNotification> _taskNotifications = {};
   double _lastScrollPosition = 0;
 // Nuova flag per mostrare/nascondere il FloatingActionButton
   bool _showScrollToBottomButton = false;
+
+/// ---------------------------------------------------------------------------
+///  Restituisce la stessa struttura che metti nei messaggi “normali”
+///  (aggiungi qui dentro ogni metadato aggiuntivo che ti serve)             ↓↓
+Map<String, dynamic> _buildCurrentAgentConfig() {
+  return {
+    'model'     : _selectedModel,
+    'contexts'  : _formattedContextsForAgent(),
+    'chain_id'  : _latestChainId,
+    'config_id' : _latestConfigId,
+  };
+}
+
+
+// ──────────────────────────────────────────────────────────────────
+// crea una KB per la chat (se non esiste) e ne restituisce il path
+Future<String> _ensureChatKb(String chatId, String chatName) async {
+  if (_chatKbPath != null) return _chatKbPath!;                // già fatta
+
+  final uuid = const Uuid().v4().substring(0, 9);               // path breve
+  final displayName = 'Chat-$chatName';
+  await _contextApiSdk.createContext(
+    uuid,
+    'Archivio messaggi chat $chatName',
+    displayName,
+    widget.user.username,
+    widget.token.accessToken,
+    extraMetadata: { 'chat_id': chatId },                       // ★ associazione
+  );
+  _chatKbPath = uuid;
+  return uuid;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CONFIG DI DEFAULT (usata quando apri una chat “vergine”)
+// ────────────────────────────────────────────────────────────────
+static const String _defaultModel = 'gpt-4o';   // cambia se ti serve
+
+/// Rimuove il prefisso "<username>-" dai context formattati
+String _stripUserPrefix(String ctx) {
+  final prefix = "${widget.user.username}-";
+  return ctx.startsWith(prefix) ? ctx.substring(prefix.length) : ctx;
+}
+
+
+static const _prefsKeyPending = 'kb_pending_jobs';
+// ──────────────────────────────────────────────────────────────────
+//  Prepara (se serve) la chain per la chat *corrente*
+//
+//  • se esiste già una chain-id valida ⇒ non fa nulla
+//  • altrimenti:
+//      1. assicura la KB della chat               (_chatKbPath)
+//      2. crea una chain nuova con SOLO quella KB
+// ──────────────────────────────────────────────────────────────────
+Future<void> _prepareChainForCurrentChat() async {
+  if (_latestChainId != null && _latestChainId!.isNotEmpty) return;
+
+  // 1‧ assicura KB
+  final chatId   = _getCurrentChatId().isEmpty ? uuid.v4() : _getCurrentChatId();
+  final chatName = (_activeChatIndex != null)
+      ? _chatHistory[_activeChatIndex!]['name']
+      : 'New Chat';
+
+  if (_chatKbPath == null) {
+    _chatKbPath = await _ensureChatKb(chatId, chatName);
+  }
+
+  // 2‧ chain con SOLO la KB-chat
+  await set_context(_rawContextsForChain(), _selectedModel);
+}
+
+Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
+  final prefs = await SharedPreferences.getInstance();
+  final encoded = jobs.map((k, v) => MapEntry(k, v.toJson()));
+  await prefs.setString(_prefsKeyPending, jsonEncode(encoded));
+}
+TaskStage _mapStatus(String? s) {
+  switch (s?.toUpperCase()) {
+    case 'PENDING':
+    case 'QUEUED':
+    case 'CREATED':
+    case 'SCHEDULED':
+      return TaskStage.pending;
+
+    case 'RUNNING':
+    case 'STARTED':
+      return TaskStage.running;
+
+    case 'DONE':
+    case 'SUCCESS':
+    case 'COMPLETED':
+      return TaskStage.done;
+
+    case 'FAILED':
+    case 'ERROR':
+    case 'CANCELLED':
+    default:
+      return TaskStage.error;
+  }
+}
+// ⇠ dentro ChatBotPage (stesso livello di _uploadFileForContextAsync nel Dashboard)
+Future<void> _uploadFileForChatAsync({required bool isMedia}) async {
+  // 1. scelta file -----------------------------------------------------------
+  final result = await FilePicker.platform.pickFiles(
+    type: isMedia ? FileType.media : FileType.any,
+    allowMultiple: false,
+    withData: true,
+  );
+  if (result == null || result.files.first.bytes == null) return;
+
+  final Uint8List bytes   = result.files.first.bytes!;
+  final String    fName   = result.files.first.name;
+
+  // 2. assicura che la KB della chat esista -------------------------------
+  final String chatId   = _getCurrentChatId().isEmpty ? uuid.v4() : _getCurrentChatId();
+  final String chatName = (_activeChatIndex != null)
+        ? _chatHistory[_activeChatIndex!]['name']
+        : 'New Chat';
+
+  if (_chatKbPath == null) {
+    _chatKbPath = await _ensureChatKb(chatId, chatName);
+  }
+
+  // 3. chiamata POST /upload_async ----------------------------------------
+  final resp = await _contextApiSdk.uploadFileToContextsAsync(
+    bytes,
+    [_chatKbPath!],                       // una sola KB: quella della chat
+    widget.user.username,
+    widget.token.accessToken,
+    fileName: fName,
+  );
+
+  final Map<String, TaskIdsPerContext> tasksPerCtx = resp.tasks;  
+
+  // 4. registra job + notifica overlay ------------------------------------
+  final String jobId = const Uuid().v4();
+  _onNewPendingJob(jobId, chatId, _chatKbPath!, fName, tasksPerCtx);
+
+  _pendingJobs[jobId] = PendingUploadJob(
+    jobId:       jobId,
+    chatId: chatId,
+    contextPath: _chatKbPath!,
+    fileName:    fName,
+    tasksPerCtx: tasksPerCtx,
+  );
+  await _savePendingJobs(_pendingJobs);   // persistenza
+final List<Map<String, dynamic>> buffer = _bufferFor(chatId);
+  setState(() {
+  buffer.add({
+    'id'        : uuid.v4(),
+    'role'      : 'user',
+    'content'   : 'File "$fName" caricato',   // testo visibile
+    'createdAt' : DateTime.now().toIso8601String(),
+    'fileUpload': FileUploadInfo(
+                    jobId   : jobId,
+                    ctxPath : _chatKbPath!,
+                    fileName: fName,
+                    stage   : TaskStage.pending,
+                  ).toJson(),
+    'agentConfig': _buildCurrentAgentConfig(),        //  <— aggiungi questo
+  });
+
+  _saveConversationFor(chatId, buffer);
+});
+
+}
+
+/// Ritorna `true` se esiste almeno un messaggio “fileUpload”
+/// la cui `stage` è **DONE** (quindi il documento è stato indicizzato
+/// e il vector-store esiste).  
+bool _chatKbHasIndexedDocs() {
+  if (_chatKbPath == null || _chatKbPath!.isEmpty) return false;
+
+  return messages.any((m) {
+    final fu = m['fileUpload'] as Map<String, dynamic>?;
+    return fu != null &&
+           fu['ctxPath'] == _chatKbPath! &&
+           fu['stage']  == TaskStage.done.name;
+  });
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Raccoglie i CONTEXT PATH “grezzi” da passare al backend
+//  • contesti scelti manualmente dall’utente
+//  • KB associata alla chat **solo se** ha almeno un doc indicizzato
+// ─────────────────────────────────────────────────────────────────────────
+List<String> _rawContextsForChain() {
+  final set = <String>{..._selectedContexts};
+
+  // include la KB-chat SOLO se ha documenti indicizzati
+  if (_chatKbHasIndexedDocs()) {
+    set.add(_chatKbPath!);
+  }
+  return set.toList();
+}
+
+
+// Versione “formattata” (username-prefix) usata nei metadati visibili
+List<String> _formattedContextsForAgent() =>
+    _rawContextsForChain().map((c) => "${widget.user.username}-$c").toList();
+
+
 void _onNewPendingJob(
   String jobId,
+  String chatId,                               // NEW
   String ctxPath,
   String fileName,
   Map<String, TaskIdsPerContext> tasksPerCtx,
 ) {
-  // Recupera il display name o ricadi sul path
+  // display-name visibile nella card
   final displayName = _availableContexts
-      .firstWhere((c) => c.path == ctxPath,
-                  orElse: () => ContextMetadata(path: ctxPath, customMetadata: {}))
-      .customMetadata?['display_name'] as String? ?? ctxPath;
+          .firstWhere(
+              (c) => c.path == ctxPath,
+              orElse: () =>
+                  ContextMetadata(path: ctxPath, customMetadata: {}))
+          .customMetadata?['display_name'] as String? ??
+      ctxPath;
 
-  // ② notifica visuale
+  // ① notifica visuale
   _taskNotifications[jobId] = TaskNotification(
-    jobId:       jobId,
-    contextPath: ctxPath,
-    contextName: displayName,
-    fileName:    fileName,
-    stage:       TaskStage.pending,
+    jobId       : jobId,
+    contextPath : ctxPath,
+    contextName : displayName,
+    fileName    : fileName,
+    stage       : TaskStage.pending,
   );
 
-  // ③ dati per il polling
+  // ② dati per il polling
   _pendingJobs[jobId] = PendingUploadJob(
-    jobId:       jobId,
-    contextPath: ctxPath,
-    fileName:    fileName,
-    tasksPerCtx: tasksPerCtx,
+    jobId       : jobId,
+    chatId      : chatId,                      // NEW
+    contextPath : ctxPath,
+    fileName    : fileName,
+    tasksPerCtx : tasksPerCtx,
   );
 
   if (_notifOverlay == null) _startNotifOverlay();
   _refreshNotifOverlay();
 }
+/// Se la KB-chat ora contiene almeno un documento, aggiorna subito la chain.
+/// L’aggiornamento viene fatto SOLO se la chat è quella attualmente aperta,
+/// altrimenti la chat verrà riallineata in automatico quando l’utente la riapre.
+Future<void> _reconfigureChainIfNeeded(String chatId) async {
+  // La chat aperta è diversa?  allora esci subito
+  if (_activeChatIndex == null ||
+      _chatHistory[_activeChatIndex!]['id'] != chatId) return;
+
+  // Se la KB-chat ora ha documenti indicizzati rifai la set_context
+  if (_chatKbHasIndexedDocs()) {
+    await set_context(_rawContextsForChain(), _selectedModel);
+  }
+}
+/// ① Contiene i messaggi di ogni chat.
+///    Chiave = chatId,  valore = lista di messaggi di quella chat
+final Map<String, List<Map<String, dynamic>>> _chatBuffers = {};
+
+/// ② Listener che verranno chiamati quando si cambia chat
+final List<VoidCallback> _chatSwitchListeners = [];
+
+/// helper – restituisce l’id della chat attualmente a schermo
+String get _currentChatId => _activeChatIndex != null
+    ? _chatHistory[_activeChatIndex!]['id'] as String
+    : '';
+
+/// da usare al posto di `messages`
+List<Map<String,dynamic>> _bufferFor(String chatId) =>
+    _chatBuffers.putIfAbsent(chatId, () => []);
 
   /// ++ ogni volta che l’assistente **ha finito** di rispondere
   static final ValueNotifier<int> assistantTurnCompleted =
@@ -237,7 +654,7 @@ void _refreshNotifOverlay() {
     }
   }
 
-  List<Map<String, dynamic>> messages = [];
+  List<Map<String, dynamic>> get messages => _bufferFor(_currentChatId);
 
   final Map<String, Widget> _widgetCache = {}; // Cache dei widget
   final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
@@ -521,6 +938,15 @@ final Map<String, Map<String, dynamic>> _toolEvents = {};
               Map<String, dynamic> data, void Function(String) onReply)>
       get widgetMap {
     return {
+      "FileUploadWidget": (data, onReply) =>
+    FileUploadWidget(
+      info: FileUploadInfo.fromJson(data),
+      onDownload: () {
+        final fPath =
+          "${data['ctxPath']}/${data['fileName']}";
+        _apiSdk.downloadFile(fPath, token: widget.token.accessToken);
+      },
+    ),
       "ToolEventWidget": (data, onReply) =>
     ToolEventCard(data: data),      // non serve onReply qui
       "JSRunnerWidget": (data, onReply) => JSRunnerWidgetTool(jsonData: data),
@@ -568,8 +994,168 @@ final Map<String, Map<String, dynamic>> _toolEvents = {};
     };
   }
 
+    Future<void> _downloadDocumentsJson(
+      String collection, String baseFileName) async {
+    // 1) scarica i documenti
+    final docs = await _apiSdk.listDocuments(collection, token: widget.token.accessToken);
+
+    // 2) serializza con indentazione
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(
+      docs
+          .map((d) => {
+                'page_content': d.pageContent,
+                'metadata': d.metadata,
+                'type': d.type,
+              })
+          .toList(),
+    );
+
+    // 3) disponibile solo per Web
+    if (!kIsWeb) {
+      throw UnsupportedError('Download JSON supportato solo su Web');
+    }
+
+    final blob = html.Blob([jsonStr], 'application/json');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', '${baseFileName}_docs.json');
+    html.document.body?.append(anchor);
+    anchor.click();
+    anchor.remove();
+
+    html.Url.revokeObjectUrl(url);
+  }
+  
+    String _collectionNameFrom(Map<String, dynamic> file) {
+    final raw = file['name'] ?? '';
+    // es.: "ctx/filename.pdf"  →  "ctxfilename.pdf_collection"
+    return raw.replaceAll('/', '') + '_collection';
+  }
+
+  void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
+    final collection = _collectionNameFrom(file);
+
+    showDialog(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+
+          // ──────────────────────────────────────────────────────
+          // ⬆️  TITOLO + PULSANTE DOWNLOAD JSON A DESTRA
+          // ──────────────────────────────────────────────────────
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  fileName,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Scarica JSON documenti',
+                icon: const Icon(Icons.download),
+                onPressed: () => _downloadDocumentsJson(collection, fileName),
+              ),
+            ],
+          ),
+
+          // ──────────────────────────────────────────────────────
+          //  Contenuto: lista documenti (scrollabile)
+          // ──────────────────────────────────────────────────────
+          content: FutureBuilder<List<DocumentModel>>(
+            future: _apiSdk.listDocuments(collection, token: widget.token.accessToken),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  width: 300,
+                  height: 200,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snap.hasError) {
+                return Text('Errore caricamento documenti: ${snap.error}');
+              }
+
+              final jsonStr = const JsonEncoder.withIndent('  ').convert(
+                snap.data!
+                    .map((d) => {
+                          'page_content': d.pageContent,
+                          'metadata': d.metadata,
+                          'type': d.type,
+                        })
+                    .toList(),
+              );
+
+              return Container(
+                width: 400,
+                height: 400,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Scrollbar(
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      jsonStr,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Chiudi'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        );
+      },
+    );
+  }
   Widget _buildMixedContent(Map<String, dynamic> message) {
     // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
+
+    // messaggio "speciale" di upload file
+if (message.containsKey('fileUpload')) {
+  final info = FileUploadInfo.fromJson(
+      (message['fileUpload'] as Map).cast<String,dynamic>());
+  return FileUploadWidget(
+    info: info,
+    onDownload: () {
+      final fPath =
+        "${widget.user.username}-${info.ctxPath}/${info.fileName}";
+      _apiSdk.downloadFile(fPath,
+                           token: widget.token.accessToken);
+    },
+      onViewDocs: () {
+    // ri-usa lo stesso dialog che hai nella ContextPage
+    _showFilePreviewDialog(
+      {
+        'name' : "${widget.user.username}-${info.ctxPath}/${info.fileName}",
+        'path' : "${widget.user.username}-${info.ctxPath}/${info.fileName}",
+        'custom_metadata': {'file_uuid': info.jobId}
+      },
+      info.fileName,
+    );
+  },
+  );
+}
+
     final widgetDataList = message['widgetDataList'] as List<dynamic>?;
     if (widgetDataList == null || widgetDataList.isEmpty) {
       final isUser = (message['role'] == 'user');
@@ -826,46 +1412,53 @@ final Map<String, Map<String, dynamic>> _toolEvents = {};
 
   late Future<void> _chatHistoryFuture;
 
-  @override
-  void initState() {
-    super.initState();
-    _bootstrap();
-    _initTaskNotifications(); // ⬅️ nuovo
-    _speech = stt.SpeechToText();
-    _flutterTts = FlutterTts();
+// ─────────────────────────────────────────────────────────────────────────────
+// 1.  initState ➜ delega tutto a un helper _initStateAsync() **await-safe**
+// ─────────────────────────────────────────────────────────────────────────────
+@override
+void initState() {
+  super.initState();
+  _initStateAsync();                           // ← parte subito ma resta fuori
+}                                              //   dal ciclo di build
 
-    _chatHistoryFuture = _loadChatHistory();
-    //_loadAvailableContexts();
-    //_loadConfig();                   // se non la chiamavi già qui
-    _controller.addListener(() => setState(() {}));
+// helper “completo” (può usare await senza problemi)
+Future<void> _initStateAsync() async {
+  await _bootstrap();                          // ① config + contexts
+  await _prepareChainForCurrentChat();         // ② chain per la chat “vuota”
 
-    _messagesScrollController.addListener(() {
-      final maxScroll = _messagesScrollController.position.maxScrollExtent;
-      final currentScroll = _messagesScrollController.position.pixels;
-      // se siamo lontani dal fondo di più di 20px → mostra
-      // ma anche se scrolliamo verso il basso di almeno 50px, nascondi
-      final shouldShow = currentScroll < maxScroll - 20;
-      final scrolledDown = currentScroll > _lastScrollPosition + 50;
-      _lastScrollPosition = currentScroll;
-      final newValue = shouldShow && !scrolledDown;
-      if (newValue != _showScrollToBottomButton) {
-        setState(() {
-          _showScrollToBottomButton = newValue;
-        });
-      }
-    });
+  _initTaskNotifications();                    // ③ resto invariato
+  _speech       = stt.SpeechToText();
+  _flutterTts   = FlutterTts();
+  _chatHistoryFuture = _loadChatHistory();
 
-    _databaseService.createDatabase('database', widget.token.accessToken);
-    _latestChainId = html.window.localStorage['latestChainId'];
-    _latestConfigId = html.window.localStorage['latestConfigId'];
-  }
+  _controller.addListener(() => setState(() {}));
 
-  Future<void> _bootstrap() async {
-    await _loadConfig();
-    //await _loadChatHistory();
-    await _loadAvailableContexts();
-    await _ensureDefaultChainConfigured(); // <-- attendiamo
-  }
+  _messagesScrollController.addListener(() {
+    final maxScroll     = _messagesScrollController.position.maxScrollExtent;
+    final currentScroll = _messagesScrollController.position.pixels;
+    final shouldShow    = currentScroll < maxScroll - 20;
+    final scrolledDown  = currentScroll > _lastScrollPosition + 50;
+    _lastScrollPosition = currentScroll;
+    final newValue      = shouldShow && !scrolledDown;
+    if (newValue != _showScrollToBottomButton) {
+      setState(() => _showScrollToBottomButton = newValue);
+    }
+  });
+
+  _databaseService.createDatabase('database', widget.token.accessToken);
+  _latestChainId  = html.window.localStorage['latestChainId'];
+  _latestConfigId = html.window.localStorage['latestConfigId'];
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.  _bootstrap  ➜  solo pre-caricamenti “leggeri”
+// ─────────────────────────────────────────────────────────────────────────────
+Future<void> _bootstrap() async {
+  await _loadConfig();
+  await _loadAvailableContexts();
+}
+
 
   /*@override
   void initState() {
@@ -1336,125 +1929,195 @@ final Map<String, Map<String, dynamic>> _toolEvents = {};
 OverlayEntry? _notifOverlay;
 Timer? _notifPoller;
 
-/// Caricato in initState()
 Future<void> _initTaskNotifications() async {
   final prefs = await SharedPreferences.getInstance();
-  final raw = prefs.getString('kb_pending_jobs');
-  if (raw == null) return;                         // nessun job salvato
+  final raw   = prefs.getString('kb_pending_jobs');
+  if (raw == null) return;
 
-  // ────────────────────────────────────────────────────────────────
-  // Struttura attesa:
-  // {
-  //   "b7c9…": {            // ← jobId
-  //     "contextPath": "my-kb",
-  //     "fileName":    "document.pdf",
-  //     "tasksPerCtx": { … }          // (opz.) se ti serve più tardi
-  //   },
-  //   …
-  // }
-  // ────────────────────────────────────────────────────────────────
   final Map<String, dynamic> stored = jsonDecode(raw);
 
-stored.forEach((String jobId, dynamic j) {
-  final ctx      = j['contextPath'] ?? 'unknown_ctx';
-  final fileName = j['fileName']    ?? 'file';
+  stored.forEach((String jobId, dynamic j) {
+    final ctx      = j['contextPath'] ?? 'unknown_ctx';
+    final fileName = j['fileName']    ?? 'file';
 
-  // ricava display name se già caricate le _availableContexts
-  final displayName = _availableContexts
-      .firstWhere((c) => c.path == ctx,
-                  orElse: () => ContextMetadata(path: ctx, customMetadata: {}))
-      .customMetadata?['display_name'] as String? ?? ctx;
+    // — migration: se chatId non esiste, lo ricaviamo dal chatHistory
+    final String chatId = j['chatId'] ?? _findChatIdForJob(jobId);
 
-  _taskNotifications[jobId] = TaskNotification(
-    jobId:       jobId,
-    contextPath: ctx,
-    contextName: displayName,
-    fileName:    fileName,
-    stage:       TaskStage.pending,
-  );
+    // display-name (se _availableContexts è già popolato)
+    final displayName = _availableContexts
+        .firstWhere(
+          (c) => c.path == ctx,
+          orElse: () => ContextMetadata(path: ctx, customMetadata: const {}),
+        )
+        .customMetadata?['display_name'] as String? ??
+        ctx;
 
-  if (j['tasksPerCtx'] != null) {
-    _pendingJobs[jobId] = PendingUploadJob(
-      jobId:       jobId,
+    // notifica overlay
+    _taskNotifications[jobId] = TaskNotification(
+      jobId      : jobId,
       contextPath: ctx,
-      fileName:    fileName,
-      tasksPerCtx: (j['tasksPerCtx'] as Map).map(
-        (k, v) => MapEntry(k, TaskIdsPerContext.fromJson(v)),
-      ),
+      contextName: displayName,
+      fileName   : fileName,
+      stage      : TaskStage.pending,
     );
-  }
-});
+
+    // pending-job per il poller
+    if (j['tasksPerCtx'] != null) {
+      _pendingJobs[jobId] = PendingUploadJob(
+        jobId      : jobId,
+        chatId     : chatId,
+        contextPath: ctx,
+        fileName   : fileName,
+        tasksPerCtx: (j['tasksPerCtx'] as Map).map(
+          (k, v) => MapEntry(k, TaskIdsPerContext.fromJson(v)),
+        ),
+      );
+    }
+  });
 }
 
-/// Avvia l’overlay e il polling di /tasks_status ogni 3 s
+/// Se non troviamo la chat, restituiamo stringa vuota
+String _findChatIdForJob(String jobId) {
+  for (final chat in _chatHistory) {
+    for (final m in (chat['messages'] as List)) {
+      final fu = m['fileUpload'] as Map<String, dynamic>?;
+      if (fu != null && fu['jobId'] == jobId) return chat['id'];
+    }
+  }
+  return '';
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  OVERLAY + POLLER (ogni 3 s)
+// ────────────────────────────────────────────────────────────────────────────
 void _startNotifOverlay() {
-  // 1) Crea (se necessario) e inserisce l’overlay
   _notifOverlay ??= _buildOverlay();
   Overlay.of(context, rootOverlay: true)!.insert(_notifOverlay!);
 
-  // 2) Avvia il poller
   _notifPoller = Timer.periodic(const Duration(seconds: 3), (_) async {
     if (_taskNotifications.isEmpty) return;
 
-    // ————————————————————————————————————————————————
-    // raccogli tutti i Task-ID dei job pendenti
-    // ————————————————————————————————————————————————
-    final ids = _pendingJobs.values.expand((j) => j.tasksPerCtx.values);
-    final status = await _apiSdk.getTasksStatus(ids);
+    /* 1 ── chiedi lo stato di tutti i task ancora attivi */
+    final allTaskIds =
+        _pendingJobs.values.expand((j) => j.tasksPerCtx.values);
+    final statusResp = await _apiSdk.getTasksStatus(allTaskIds);
 
-    // ————————————————————————————————————————————————
-    // per ogni task restituito dallo status-endpoint…
-    // ————————————————————————————————————————————————
-    status.statuses.forEach((tid, st) {
-      // 2-a  individua il Knowledge-Box (ctx) a cui appartiene
-      final ctx = _pendingJobs.entries
-          .firstWhere((e) =>
-              e.value.tasksPerCtx.values.any((t) =>
-                  t.loaderTaskId == tid || t.vectorTaskId == tid))
-          .key;
+    /* 2 ── chat da salvare perché almeno un msg ha cambiato stato */
+    final Set<String> finishedChatIds = {};
 
-      final notif = _taskNotifications[ctx];
-      if (notif == null) return; // nessuna notifica → esci
+    /* 3 ── loop su ogni task-id restituito */
+    statusResp.statuses.forEach((tid, st) {
+      final jobEntry = _pendingJobs.entries.firstWhere(
+        (e) => e.value.tasksPerCtx.values
+            .any((t) => t.loaderTaskId == tid || t.vectorTaskId == tid),
+      );
 
-      // 2-b  aggiorna **sempre** lo stage
-      switch (st.status) {
-        case 'RUNNING':
-          notif.stage = TaskStage.running;
-          break;
-        case 'DONE':
-          notif.stage = TaskStage.done;
-          break;
-        case 'ERROR':
-          notif.stage = TaskStage.error;
-          break;
+      final String jobId  = jobEntry.key;
+      final job           = jobEntry.value;
+      final String chatId = job.chatId;                 // può essere vuoto
+      final bool   hasChat = chatId.isNotEmpty;         // <── NOVITÀ
+
+      final newStage = _mapStatus(st.status);
+
+      // 3-a  ► card overlay (sempre presente)
+      final notif = _taskNotifications[jobId];
+      if (notif != null) {
+        notif.stage = newStage;
+        if (!notif.isVisible &&
+            (newStage == TaskStage.done || newStage == TaskStage.error)) {
+          notif.isVisible = true;
+        }
       }
 
-      // 2-c  se la carta era stata chiusa manualmente (isVisible == false)
-      //      e ora il task è terminato, la rendiamo di nuovo visibile
-// ——————— aggiornamento visibilità dopo cambio di stato ———————
-if (!notif.isVisible &&
-    (notif.stage == TaskStage.done || notif.stage == TaskStage.error)) {
-  // Ri-mostra ➜ ma solo se la notifica ESISTE ancora (non è stata rimossa)
-  notif.isVisible = true;
-}
+      // 3-b  ► chat correntemente aperta (solo se esiste)
+      if (hasChat &&
+          _activeChatIndex != null &&
+          _chatHistory[_activeChatIndex!]['id'] == chatId) {
+        for (final m in messages) {
+          final fu = m['fileUpload'] as Map<String, dynamic>?;
+          if (fu != null &&
+              fu['jobId'] == jobId &&
+              fu['stage'] != newStage.name) {
+            fu['stage'] = newStage.name;
+          }
+        }
+      }
 
+      // 3-c  ► chat proprietaria dentro _chatHistory (solo se esiste)
+      if (hasChat) {
+        final chat = _chatHistory.firstWhere(
+          (c) => c['id'] == chatId,
+          orElse: () => null,
+        );
+        if (chat != null) {
+          bool changed = false;
+          for (final m in (chat['messages'] as List)) {
+            final fu = m['fileUpload'] as Map<String, dynamic>?;
+            if (fu != null &&
+                fu['jobId'] == jobId &&
+                fu['stage'] != newStage.name) {
+              fu['stage'] = newStage.name;
+              changed = true;
+            }
+          }
+          if (changed &&
+              (newStage == TaskStage.done || newStage == TaskStage.error)) {
+            chat['updatedAt'] = DateTime.now().toIso8601String();
+            finishedChatIds.add(chatId);
+          }
+          if (changed && newStage == TaskStage.done) {
+  // la loader-task è conclusa con successo →
+  _reconfigureChainIfNeeded(chatId);       // <── nuovo helper
+}
+        }
+      }
     });
 
-    // 3) Richiedi SEMPRE un rebuild dell’overlay
-    setState(() {});          // aggiorna lo stato per eventuali rebuild interni
-    _refreshNotifOverlay();   // forza il rebuild dell’overlay stesso
+    /* 4 ── refresh UI */
+    setState(() {});
+    _refreshNotifOverlay();
 
-    // 4) Avvia l’auto-dismiss (10 s) **solo** per le carte visibili e concluse
+    /* 5 ── persistenza SOLO delle chat realmente toccate */
+    if (finishedChatIds.isNotEmpty) {
+      // localStorage
+      html.window.localStorage['chatHistory'] =
+          jsonEncode({'chatHistory': _chatHistory});
+
+      // database
+      for (final chat in _chatHistory) {
+        if (finishedChatIds.contains(chat['id']) && chat.containsKey('_id')) {
+          await _databaseService.updateCollectionData(
+            "${widget.user.username}-database",
+            'chats',
+            chat['_id'],
+            {
+              'updatedAt': chat['updatedAt'],
+              'messages' : chat['messages'],
+            },
+            widget.token.accessToken,
+          ).catchError((_) {}); // race-condition: ignora
+        }
+      }
+    }
+
+    /* 6 ── salva lo stato dei job ancora pendenti */
+    _savePendingJobs(_pendingJobs);
+
+    /* 7 ── auto-dismiss card concluse */
     _taskNotifications.values
         .where((n) =>
             n.isVisible &&
             (n.stage == TaskStage.done || n.stage == TaskStage.error))
         .forEach((n) {
-      Future.delayed(const Duration(seconds: 10),
-          () => _dismissNotification(n.contextPath));
+      Future.delayed(
+        const Duration(seconds: 10),
+        () => _dismissNotification(n.jobId),
+      );
     });
   });
 }
+
+
 
 
 /// Chiude (o rimuove) la card di notifica.
@@ -2169,6 +2832,8 @@ Widget _buildNotifCard(TaskNotification n) {
                                 showKnowledgeBase = false;
                                 showSettings = false;
                                 _activeChatIndex = null;
+
+                                
                               });
                             }),
                         const SizedBox(height: 56),
@@ -2799,11 +3464,9 @@ Widget _buildNotifCard(TaskNotification n) {
                                                                   Colors.grey),
                                                           tooltip: localizations
                                                               .upload_document,
-                                                          onPressed: () {
-                                                            // in futuro: logica di upload
-                                                            print(localizations
-                                                                .upload_document);
-                                                          },
+                                                          
+                                                            onPressed: () => _uploadFileForChatAsync(isMedia: false),
+                                                          
                                                         ),
                                                         // Icona media (inattiva)
                                                         IconButton(
@@ -2815,11 +3478,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                                                   Colors.grey),
                                                           tooltip: localizations
                                                               .upload_media,
-                                                          onPressed: () {
-                                                            // in futuro: logica di upload
-                                                            print(localizations
-                                                                .upload_media);
-                                                          },
+                                                          onPressed: () => _uploadFileForChatAsync(isMedia: true),
                                                         ),
 
                                                         const Spacer(),
@@ -2981,100 +3640,112 @@ Widget _buildNotifCard(TaskNotification n) {
     }
   }
 
-  Future<void> _startNewChat() async {
+Future<void> _startNewChat() async {
+  setState(() {
+    _activeChatIndex   = null;
+    messages.clear();
+    _chatKbPath        = null;
+    _latestChainId     = null;      // reset id chain / config
+    _latestConfigId    = null;
+
+    _selectedContexts  = [];        // ★★★  NUOVO  – niente K-Box ereditati
+    _selectedModel     = _defaultModel;
+
+    showKnowledgeBase  = false;
+    showSettings       = false;
+  });
+
+  await _prepareChainForCurrentChat();   // creerà una chain VUOTA
+}
+
+ /// Carica i messaggi di `chatId` nella UI, usando il buffer dedicato.
+/// Non tocca gli stream in corso (che continuano a operare sul loro buffer).
+void _loadMessagesForChat(String chatId) {
+  // 1. reset cache widget: forza la ricostruzione dei widget embedded
+  _widgetCache.clear();
+
+  try {
+    // 2. recupera la chat dal _chatHistory
+    final Map<String, dynamic>? chat = _chatHistory.firstWhere(
+      (c) => c['id'] == chatId,
+      orElse: () => null,
+    );
+
+    if (chat == null) {
+      debugPrint('❌ Nessuna chat trovata con ID $chatId');
+      return;
+    }
+
+    // 3. aggiorna variabili di supporto
+    _chatKbPath     = chat['kb_path'] as String?;
+    _syncedMsgIds.clear();
+
+    // 4. prepara (e ordina) i messaggi
+    final List<dynamic> chatMessages = (chat['messages'] ?? []) as List<dynamic>;
+    chatMessages.sort((a, b) =>
+        DateTime.parse(a['createdAt']).compareTo(DateTime.parse(b['createdAt'])));
+
+    // 5. ottieni (o crea) il buffer per questa chat
+    final List<Map<String, dynamic>> buffer = _bufferFor(chatId);
+
+    // 6. aggiorna lo stato in un unico setState
     setState(() {
-      _activeChatIndex = null;
-      messages.clear();
+      _activeChatIndex = _chatHistory.indexWhere((c) => c['id'] == chatId);
+
+      // rimpiazza interamente il buffer
+      buffer
+        ..clear()
+        ..addAll(chatMessages.map((m) => Map<String, dynamic>.from(m)));
+
+      // chiudi eventuali pannelli
       showKnowledgeBase = false;
-      showSettings = false;
+      showSettings      = false;
     });
 
-    // ⚠️ ora aspettiamo davvero la creazione della chain di default
-    await _ensureDefaultChainConfigured();
-  }
-
-  void _loadMessagesForChat(String chatId) {
-    // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
-    _widgetCache.clear();
-    try {
-      final chat = _chatHistory.firstWhere(
-        (chat) => chat['id'] == chatId,
-        orElse: () => null, // se non trova nulla, restituisce null
-      );
-
-      if (chat == null) {
-        // gestisci il caso in cui la chat NON esiste
+    // 7. ricava gli ultimi parametri di chain/model
+    if (buffer.isNotEmpty) {
+      final Map<String, dynamic>? lastCfg = buffer.last['agentConfig'];
+      if (lastCfg != null && (lastCfg['chain_id'] as String?)?.isNotEmpty == true) {
+        _latestChainId  = lastCfg['chain_id'];
+        _latestConfigId = lastCfg['config_id'];
       } else {
-        // gestisci la chat trovata
+        _latestChainId  = null;
+        _latestConfigId = null;
       }
-
-      if (chat == null) {
-        print('Errore: Nessuna chat trovata con ID $chatId');
-        return;
-      }
-
-      // Estrai e ordina i messaggi della chat
-      List<dynamic> chatMessages = chat['messages'] ?? [];
-      chatMessages.sort((a, b) {
-        final aCreatedAt = DateTime.parse(a['createdAt']);
-        final bCreatedAt = DateTime.parse(b['createdAt']);
-        return aCreatedAt
-            .compareTo(bCreatedAt); // Ordina dal più vecchio al più recente
-      });
-
-      // Aggiorna lo stato
-      setState(() {
-        _activeChatIndex = _chatHistory.indexWhere(
-            (c) => c['id'] == chatId); // Imposta l'indice della chat attiva
-        messages.clear();
-        messages.addAll(chatMessages.map((message) {
-          // Assicura che ogni messaggio sia un Map<String, dynamic>
-          return Map<String, dynamic>.from(message);
-        }).toList());
-
-        // Forza il passaggio alla schermata delle conversazioni
-        showKnowledgeBase = false; // Nascondi KnowledgeBase
-        showSettings = false; // Nascondi Impostazioni
-      });
-
-      if (messages.isNotEmpty) {
-        // L'ultimo messaggio è in messages[messages.length - 1]
-        final lastMsg = messages[messages.length - 1];
-        final lastConfig = lastMsg['agentConfig'];
-        if (lastConfig != null) {
-          setState(() {
-            _latestChainId = lastConfig['chain_id'];
-            _latestConfigId = lastConfig['config_id'];
-          });
-          print(
-              "Ricaricata chain_id=$_latestChainId, config_id=$_latestConfigId dalla chat salvata.");
-        }
-      }
-
-      // Debug: Messaggi caricati
-      print(
-          'Messaggi caricati per chat ID $chatId (${chat['name']}): $chatMessages');
-    } catch (e) {
-      print(
-          'Errore durante il caricamento dei messaggi per chat ID $chatId: $e');
+    } else {
+      _latestChainId  = null;
+      _latestConfigId = null;
     }
+
+    // 8. debug
+    debugPrint('✔ Buffer caricato per chat $chatId → ${buffer.length} messaggi');
+  } catch (e, st) {
+    debugPrint('❌ Errore caricamento chat $chatId: $e\n$st');
   }
+}
+
 
   Future<void> _handleUserInput(String input) async {
+
+    final String chatId  = _currentChatId;              // id stabile
+   final List<Map<String,dynamic>> buffer = _bufferFor(chatId);
     if (input.isEmpty) return;
 
     // Make absolutely sure we have a chain.
-    await _ensureDefaultChainConfigured();
-
+    //await _ensureDefaultChainConfigured();
+    print("************************");
+    print(_latestChainId);
+    print(_latestConfigId);
+    print("************************");
     // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
     String currentChatName = "New Chat";
-    if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
-      currentChatName = _chatHistory[_activeChatIndex!]['name'] as String;
-    }
+ final chatIdx = _chatHistory.indexWhere((c) => c['id'] == chatId);
+ if (chatIdx != -1) currentChatName = _chatHistory[chatIdx]['name'];
+
 
     // Qui decidiamo quanti messaggi sono già stati inviati
     // Puoi utilizzare messages.length oppure tenere un contatore separato
-    final int currentMessageCount = messages.length;
+ final int currentMessageCount = buffer.length;
 
     // Ottieni l'input modificato usando la funzione esterna
     final modifiedInput = appendChatInstruction(
@@ -3083,11 +3754,12 @@ Widget _buildNotifCard(TaskNotification n) {
       messageCount: currentMessageCount,
     );
 
-    final currentTime = DateTime.now().toIso8601String(); // Ora corrente
-    final userMessageId =
-        uuid.v4(); // Genera un ID univoco per il messaggio utente
-    final assistantMessageId =
-        uuid.v4(); // Genera un ID univoco per il messaggio dell'assistente
+final currentTime = DateTime.now().toIso8601String();   // Ora corrente
+
+// ▼▼ DEFINISCI qui i due id -------------------------------
+final String userMsgId      = uuid.v4();   // id univoco utente
+final String assistMsgId = uuid.v4();   // id univoco assistant
+// ▲▲-------------------------------------------------------
     final formattedContexts =
         _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
 
@@ -3101,24 +3773,20 @@ Widget _buildNotifCard(TaskNotification n) {
 
     setState(() {
       // Aggiungi il messaggio dell'utente con le informazioni di configurazione
-      messages.add({
-        'id': userMessageId, // ID univoco del messaggio utente
-        'role': 'user', // Ruolo dell'utente
-        'content': input, // Contenuto del messaggio
-        'createdAt': currentTime, // Timestamp
-        'agentConfig': agentConfiguration, // Configurazione dell'agente
-      });
-
-      fullResponse = ""; // Reset della risposta completa
-
-      // Aggiungi un placeholder per la risposta dell'assistente
-      messages.add({
-        'id': assistantMessageId, // ID univoco del messaggio dell'assistente
-        'role': 'assistant', // Ruolo dell'assistente
-        'content': '', // Placeholder per il contenuto
-        'createdAt': DateTime.now().toIso8601String(), // Timestamp
-        'agentConfig': agentConfiguration, // Configurazione dell'agente
-      });
+ buffer.add({
+     'id'        : userMsgId,
+     'role'      : 'user',
+     'content'   : input,
+     'createdAt' : currentTime,
+     'agentConfig': agentConfiguration,
+   });
+   buffer.add({
+     'id'        : assistMsgId,
+     'role'      : 'assistant',
+     'content'   : '',
+     'createdAt' : DateTime.now().toIso8601String(),
+     'agentConfig': agentConfiguration,
+   });
     });
 
     // Pulisce il campo di input
@@ -3128,7 +3796,7 @@ Widget _buildNotifCard(TaskNotification n) {
     await _sendMessageToAPI(modifiedInput);
 
     // Salva la conversazione con ID univoco per ogni messaggio
-    _saveConversation(messages);
+    await _saveConversationFor(chatId, buffer);
   }
 
   Map<String, List<Map<String, dynamic>>> _groupChatsByDate(
@@ -3165,147 +3833,148 @@ Widget _buildNotifCard(TaskNotification n) {
     return groupedChats;
   }
 
-  Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
-    try {
-      final currentTime =
-          DateTime.now().toIso8601String(); // Ora corrente in formato ISO
-      final chatId = _activeChatIndex != null
-          ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
-          : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
-      final chatName = _activeChatIndex != null
-          ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
-          : 'New Chat'; // Nome predefinito per le nuove chat
+// ─────────────────────────────────────────────────────────────────────────────
+// WRAPPER COMPATIBILITÀ  ── mantiene la vecchia firma usata in vari punti
+// ─────────────────────────────────────────────────────────────────────────────
+/// Chiama la nuova logica passando il chat-id “congelato” e una copia dei dati.
+Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
+  final String chatId = _currentChatId;                       // id stabile
+  final List<Map<String, dynamic>> snapshot =
+      jsonDecode(jsonEncode(messages)).cast<Map<String, dynamic>>();
+  await _saveConversationFor(chatId, snapshot);
+}
 
-      // Effettua una copia profonda di tutti i messaggi
-      final List<Map<String, dynamic>> updatedMessages =
-          messages.map((originalMessage) {
-        // Cloniamo l'intero messaggio (struttura annidata) con jsonDecode(jsonEncode(...))
-        final newMsg =
-            jsonDecode(jsonEncode(originalMessage)) as Map<String, dynamic>;
+// ─────────────────────────────────────────────────────────────────────────────
+// NUOVA IMPLEMENTAZIONE  (chat-safe)
+// ─────────────────────────────────────────────────────────────────────────────
+/// Salva **buffer** (profondamente copiato) nella chat indicata da `chatId`.
+/// Non legge mai `_activeChatIndex` né variabili che possono cambiare
+/// mentre gli `await` sono in corso.
+Future<void> _saveConversationFor(
+  String chatId,
+  List<Map<String, dynamic>> buffer,
+) async {
+  try {
+    // 1. dati base
+    final String currentTime = DateTime.now().toIso8601String();
 
-        // Se il messaggio ha dei widget, forziamo is_first_time = false in ognuno
-        if (newMsg['widgetDataList'] != null) {
-          final List widgetList = newMsg['widgetDataList'];
-          for (int i = 0; i < widgetList.length; i++) {
-            final Map<String, dynamic> widgetMap =
-                widgetList[i] as Map<String, dynamic>;
-            final Map<String, dynamic> jsonData =
-                (widgetMap['jsonData'] ?? {}) as Map<String, dynamic>;
+    final int chatIdx = _chatHistory.indexWhere((c) => c['id'] == chatId);
+    final String chatName =
+        chatIdx != -1 ? _chatHistory[chatIdx]['name'] as String : 'New Chat';
 
-            // Se non esiste la chiave, la creiamo con false,
-            // altrimenti la forziamo a false
-            jsonData['is_first_time'] = false;
-            widgetMap['jsonData'] = jsonData;
-            widgetList[i] = widgetMap;
-          }
-          newMsg['widgetDataList'] = widgetList;
-        }
-
-        // Aggiorniamo la agentConfig per riflettere contesti e modello
-        final Map<String, dynamic> oldAgentConfig =
-            (newMsg['agentConfig'] ?? {}) as Map<String, dynamic>;
-        oldAgentConfig['model'] = _selectedModel;
-        oldAgentConfig['contexts'] = _selectedContexts;
-        newMsg['agentConfig'] = oldAgentConfig;
-
-        return newMsg;
-      }).toList();
-
-      // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
-      final Map<String, dynamic> currentChat = {
-        'id': chatId, // ID della chat
-        'name': chatName, // Nome della chat
-        'createdAt': _activeChatIndex != null
-            ? _chatHistory[_activeChatIndex!]['createdAt']
-            : currentTime, // Se esisteva già, mantengo la data di creazione, altrimenti quella attuale
-        'updatedAt': currentTime, // Aggiorna il timestamp di ultima modifica
-        'messages': updatedMessages, // Lista di messaggi clonati e modificati
-      };
-
-      if (_activeChatIndex != null) {
-        // Aggiorna la chat esistente nella lista locale
-        _chatHistory[_activeChatIndex!] =
-            jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>;
-      } else {
-        // Aggiungi una nuova chat alla lista locale
-        _chatHistory.insert(
-            0, jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>);
-        _activeChatIndex = 0; // Imposta l'indice della nuova chat
-      }
-
-      // Salva la cronologia delle chat nel Local Storage
-      final String jsonString = jsonEncode({'chatHistory': _chatHistory});
-      html.window.localStorage['chatHistory'] = jsonString;
-      print('Chat salvata correttamente nel Local Storage.');
-
-      // Salva o aggiorna la chat nel database
-      final dbName =
-          "${widget.user.username}-database"; // Nome del DB basato sull'utente
-      final collectionName = 'chats';
-
-      try {
-        // Carica le chat esistenti dal database
-        final existingChats = await _databaseService.fetchCollectionData(
-          dbName,
-          collectionName,
-          widget.token.accessToken,
-        );
-
-        // Trova la chat corrente nel database
-        final existingChat = existingChats.firstWhere(
-          (chat) => chat['id'] == chatId,
-          orElse: () =>
-              <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
-        );
-
-        if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
-          // Chat esistente: aggiorniamo i campi
-          await _databaseService.updateCollectionData(
-            dbName,
-            collectionName,
-            existingChat['_id'], // ID del documento esistente
-            {
-              'name': currentChat['name'], // Aggiorna il nome della chat
-              'updatedAt': currentTime, // Aggiorna la data di ultima modifica
-              'messages': updatedMessages, // Aggiorna i messaggi
-            },
-            widget.token.accessToken,
-          );
-          print('Chat aggiornata nel database.');
-        } else {
-          // Chat non esistente, aggiungiamone una nuova
-          await _databaseService.addDataToCollection(
-            dbName,
-            collectionName,
-            currentChat,
-            widget.token.accessToken,
-          );
-          print('Nuova chat aggiunta al database.');
-        }
-      } catch (e) {
-        if (e.toString().contains('Failed to load collection data')) {
-          // Se la collection non esiste, la creiamo e aggiungiamo la chat
-          print('Collection "chats" non esistente. Creazione in corso...');
-          await _databaseService.createCollection(
-              dbName, collectionName, widget.token.accessToken);
-
-          // Aggiungi la nuova chat
-          await _databaseService.addDataToCollection(
-            dbName,
-            collectionName,
-            currentChat,
-            widget.token.accessToken,
-          );
-
-          print('Collection "chats" creata e chat aggiunta al database.');
-        } else {
-          throw e; // Propaga eventuali altri errori
-        }
-      }
-    } catch (e) {
-      print('Errore durante il salvataggio della conversazione: $e');
+    // 2. assicura la KB per la chat
+    if (_chatKbPath == null) {
+      _chatKbPath = await _ensureChatKb(chatId, chatName);
     }
+
+    // 3. (opzionale) sincronizza nuovi messaggi nella KB
+    // await _syncMessagesToKb(_chatKbPath!);
+
+    // 4. normalizza i messaggi (widget & agentConfig)
+    final List<Map<String, dynamic>> updatedMessages = buffer.map((orig) {
+      final Map<String, dynamic> msg =
+          jsonDecode(jsonEncode(orig)) as Map<String, dynamic>;
+
+      // 4-a. widget → is_first_time = false
+      if (msg['widgetDataList'] != null) {
+        final List widgetList = msg['widgetDataList'];
+        for (int i = 0; i < widgetList.length; i++) {
+          final el = widgetList[i];
+          if (el is Map) {
+            final Map<String, dynamic> w = Map<String, dynamic>.from(el);
+            final Map<String, dynamic> jsonData =
+                (w['jsonData'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+            jsonData['is_first_time'] = false;
+            w['jsonData'] = jsonData;
+            widgetList[i] = w;
+          }
+        }
+        msg['widgetDataList'] = widgetList;
+      }
+
+      // 4-b. aggiorna agentConfig
+      final Map<String, dynamic> ag =
+          (msg['agentConfig'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+      ag['model']    = _selectedModel;
+      ag['contexts'] = _selectedContexts;
+      msg['agentConfig'] = ag;
+
+      return msg;
+    }).toList();
+
+    // 5. costruisci il record di chat
+    final Map<String, dynamic> chatDoc = {
+      'id'       : chatId,
+      'name'     : chatName,
+      'createdAt': chatIdx != -1
+          ? _chatHistory[chatIdx]['createdAt']
+          : currentTime,
+      'updatedAt': currentTime,
+      'messages' : updatedMessages,
+      'kb_path'  : _chatKbPath,
+    };
+
+    // 6. aggiorna lo stato locale _chatHistory
+    if (chatIdx != -1) {
+      _chatHistory[chatIdx] =
+          jsonDecode(jsonEncode(chatDoc)) as Map<String, dynamic>;
+    } else {
+      _chatHistory.insert(
+          0, jsonDecode(jsonEncode(chatDoc)) as Map<String, dynamic>);
+    }
+
+    // 7. persistenza locale
+    html.window.localStorage['chatHistory'] =
+        jsonEncode({'chatHistory': _chatHistory});
+
+    // 8. persistenza su DB
+    final String dbName         = "${widget.user.username}-database";
+    const String collectionName = 'chats';
+
+    // 8-a. cerca se la chat esiste già
+    final List existingChats = await _databaseService.fetchCollectionData(
+      dbName,
+      collectionName,
+      widget.token.accessToken,
+    );
+
+    final Map<String, dynamic>? existingChat = existingChats
+        .cast<Map<String, dynamic>>()
+        .firstWhere(
+          (c) => c['id'] == chatId,
+          orElse: () => <String, dynamic>{},
+        );
+
+    if (existingChat!.isNotEmpty && existingChat.containsKey('_id')) {
+      // update
+      await _databaseService.updateCollectionData(
+        dbName,
+        collectionName,
+        existingChat['_id'],
+        {
+          'name'     : chatDoc['name'],
+          'updatedAt': currentTime,
+          'messages' : updatedMessages,
+          'kb_path'  : _chatKbPath,
+        },
+        widget.token.accessToken,
+      );
+    } else {
+      // insert
+      await _databaseService.addDataToCollection(
+        dbName,
+        collectionName,
+        chatDoc,
+        widget.token.accessToken,
+      );
+    }
+
+    debugPrint('✔ Conversazione "$chatName" salvata (chatId=$chatId)');
+  } catch (e, st) {
+    debugPrint('❌ Errore salvataggio chat $chatId: $e\n$st');
   }
+}
+
 
   void _showContextDialog() async {
     // Carichiamo i contesti (se serve farlo qui) ...
@@ -3323,43 +3992,58 @@ Widget _buildNotifCard(TaskNotification n) {
           _selectedModel = newModel;
         });
         // E se vuoi, chiami la funzione set_context
-        set_context(_selectedContexts, _selectedModel);
+        set_context(_rawContextsForChain(), _selectedModel);
       },
     );
   }
 
-  void set_context(List<String> contexts, String model) async {
-    try {
-      final response = await _contextApiSdk.configureAndLoadChain(
-        widget.user.username,
-        widget.token.accessToken,
-        contexts,
-        model,
-      );
-      print(
-          'Chain configurata e caricata con successo per i contesti: $contexts');
-      print('Risultato della configurazione: $response');
+// ─────────────────────────────────────────────────────────────────────────────
+//  Configura (o riconfigura) la chain LLM
+//  • `userSelected`  = contesti scelti manualmente nel dialog
+//  • `model`         = modello LLM da usare
+//
+//  La funzione aggiunge AUTOMATICAMENTE – se esiste – la KB collegata
+//  alla chat corrente (_chatKbPath) in modo che il backend la indicizzi
+//  insieme agli altri contesti.
+// ─────────────────────────────────────────────────────────────────────────────
+Future<void> set_context(List<String> userSelected, String model) async {
+  try {
+    // 1.  salva subito le scelte manuali dell’utente
+    _selectedContexts = userSelected;
+    _selectedModel    = model;
 
-      // Estrai i dati dal JSON restituito
-      final chainIdFromResponse = response['load_result'] != null
-          ? response['load_result']['chain_id']
-          : null;
-      final configIdFromResponse = response['config_result'] != null
-          ? response['config_result']['config_id']
-          : null;
+    // 2.  lista “effettiva” da passare al backend
+    //     (= contesti scelti  +  KB-chat  senza doppi)
+    final List<String> effectiveRaw = _rawContextsForChain();
 
-      setState(() {
-        _selectedContexts = contexts;
-        _latestChainId = chainIdFromResponse;
-        _latestConfigId = configIdFromResponse;
-      });
-      // after setState() in set_context(...)
-      html.window.localStorage['latestChainId'] = _latestChainId ?? '';
-      html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
-    } catch (e) {
-      print('Errore nella configurazione e caricamento della chain: $e');
-    }
+    // 3.  chiama l’SDK
+    final response = await _contextApiSdk.configureAndLoadChain(
+      widget.user.username,
+      widget.token.accessToken,
+      effectiveRaw,
+      model,
+    );
+    debugPrint('Chain configurata su: $effectiveRaw');
+
+    // 4.  estrae gli ID restituiti
+    final String? chainIdFromResponse  =
+        response['load_result']?['chain_id']   as String?;
+    final String? configIdFromResponse =
+        response['config_result']?['config_id'] as String?;
+
+    // 5.  aggiorna stato + localStorage
+    setState(() {
+      _latestChainId  = chainIdFromResponse;
+      _latestConfigId = configIdFromResponse;
+    });
+
+    html.window.localStorage['latestChainId']  = _latestChainId  ?? '';
+    html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+  } catch (e, st) {
+    debugPrint('❌  set_context error: $e\n$st');
   }
+}
+
 
   // Sezione impostazioni TTS e customizzazione grafica nella barra laterale
   Widget _buildSettingsSection() {
@@ -3644,6 +4328,9 @@ Widget _buildNotifCard(TaskNotification n) {
   }
 
   Future<void> _sendMessageToAPI(String input) async {
+     final String chatId  = _currentChatId;
+    final List<Map<String,dynamic>> buffer = _bufferFor(chatId);
+
     if (_nlpApiUrl == null) {
       await _loadConfig(); // Assicurati che l'URL sia caricato
     }
@@ -3658,13 +4345,13 @@ Widget _buildNotifCard(TaskNotification n) {
     // Configurazione dell'agente
     final agentConfiguration = {
       'model': _selectedModel, // Modello selezionato
-      'contexts': _selectedContexts, // Contesti selezionati
+      'contexts': _formattedContextsForAgent(), // Contesti selezionati
       'chain_id': chainIdToUse, // Usa la chain ID dal backend (oppure fallback)
       'config_id': _latestConfigId, // Memorizza anche la config ID
     };
 
 // Trasforma la chat history sostituendo i placeholder dei widget con i JSON reali
-    final transformedChatHistory = messages.map((message) {
+    final transformedChatHistory = buffer.map((message) {
       String content = message['content'] as String;
       if (message.containsKey('widgetDataList')) {
         final List widgetList = message['widgetDataList'];
@@ -3753,6 +4440,11 @@ Widget _buildNotifCard(TaskNotification n) {
 
       // Un piccolo buffer circolare per rilevare retroattivamente la comparsa di startPattern
       final List<int> ringBuffer = [];
+// ────────── PARSER STATO TOOL-EVENTS ──────────
+final StringBuffer _toolBuf = StringBuffer();
+int  _toolDepth      = 0;    // { … }
+bool _inQuotes       = false;
+bool _escapeNextChar = false;
 
       // Funzione locale che processa un chunk di testo
 // -----------------------------------------------------------------------------
@@ -3770,53 +4462,106 @@ Widget _buildNotifCard(TaskNotification n) {
       bool seenEndMarker = false; // ▶ NEW
 // ringBuffer (startPattern) already exists; this one is for the END marker
       final List<int> _ringEnd = <int>[]; // ▶ NEW, per‑message state
-void _maybeHandleToolEvent(String chunk) {
-  print('###### $chunk');
-  // prova veloce di parse; se fallisce restituisce null
-  Map<String,dynamic>? _tryParse(String s) {
-    try { return jsonDecode(s) as Map<String,dynamic>; } catch (_) { return null; }
+/// Consuma il chunk e intercetta TUTTI gli eventi tool.{start|end}.
+/// Ritorna `true` se *almeno un carattere* apparteneva ad un JSON-evento
+/// (così il chiamante non lo passerà a `processChunk`).
+bool _maybeHandleToolEvent(String chunk) {
+  bool somethingHandled = false;
+
+  void _feed(int codeUnit) {
+    final String c = String.fromCharCode(codeUnit);
+
+    _toolBuf.write(c);
+
+    // ── gestione escape & stringhe JSON
+    if (_escapeNextChar) {
+      _escapeNextChar = false;
+      return;
+    }
+    if (c == r'\') {
+      _escapeNextChar = true;
+      return;
+    }
+    if (c == '"') {
+      _inQuotes = !_inQuotes;
+    }
+    if (_inQuotes) return;
+
+    // ── bilanciamento parentesi graffe
+    if (c == '{') _toolDepth++;
+    if (c == '}') _toolDepth--;
+
+    // JSON completo quando la depth torna a 0
+    if (_toolDepth == 0) {
+      final String rawJson = _toolBuf.toString().trim();
+      _toolBuf.clear();           // reset buffer per il prossimo evento
+
+      if (rawJson.isEmpty) return;
+
+      // prova di parse
+      Map<String, dynamic>? evt;
+      try {
+        evt = jsonDecode(rawJson) as Map<String, dynamic>;
+      } catch (_) {
+        return;                   // non era un JSON valido
+      }
+
+      if (evt == null || !evt.containsKey('event')) return;
+
+      somethingHandled = true;    // 👈 almeno un carattere gestito
+
+      final String runId = evt['run_id'] as String;
+      final String name  = evt['name']  as String;
+
+      switch (evt['event']) {
+
+        case 'on_tool_start':
+          final placeholder = "[TOOL_PLACEHOLDER_$runId]";
+          _toolEvents[runId] = {
+            'name'      : name,
+            'input'     : evt['data']['input'],
+            'isRunning' : true,
+            'placeholder': placeholder,
+          };
+
+          // inserisci placeholder nel testo visibile
+          displayOutput.write(placeholder);
+
+          // e relativa card
+          (buffer.last['widgetDataList'] ??= <dynamic>[]).add({
+            "_id"       : runId,
+            "widgetId"  : "ToolEventWidget",
+            "jsonData"  : _toolEvents[runId],
+            "placeholder": placeholder,
+          });
+
+          setState(() =>
+              buffer.last['content'] = displayOutput.toString());
+          break;
+
+        case 'on_tool_end':
+          final existing = _toolEvents[runId];
+          if (existing == null) break;
+
+          existing['output']    = evt['data']['output'];
+          existing['isRunning'] = false;
+
+          // forza rebuild della card
+          _widgetCache.remove(runId);
+          setState(() {});
+          break;
+      }
+    }
   }
 
-  final evt = _tryParse(chunk.trim());
-  print('******$evt');
-  if (evt == null || !evt.containsKey('event')) return;   // non è un tool-event
-
-  final runId = evt['run_id'] as String;
-  final name  = evt['name']    as String;
-
-  switch (evt['event']) {
-    case 'on_tool_start':
-      final placeholder = "[TOOL_PLACEHOLDER_$runId]";
-      _toolEvents[runId] = {
-        'name': name,
-        'input': evt['data']['input'],
-        'isRunning': true,
-        'placeholder': placeholder,
-      };
-
-      // ① inserisci placeholder nel displayOutput:
-      displayOutput.write(placeholder);
-
-      // ② attacca subito una scheda con spinner
-      (messages.last['widgetDataList'] ??= <dynamic>[]).add({
-        "_id":   runId,
-        "widgetId": "ToolEventWidget",
-        "jsonData": _toolEvents[runId],
-        "placeholder": placeholder,
-      });
-      break;
-
-    case 'on_tool_end':
-      final existing = _toolEvents[runId];
-      if (existing == null) return;                    // sicurezza
-      existing['output']    = evt['data']['output'];   // tutto il JSON
-      existing['isRunning'] = false;
-
-      // forza rebuild della UI:
-      setState(() {});   // ora la ToolEventCard mostra il check verde + output
-      break;
+  // ── feed carattere per carattere
+  for (final cu in chunk.codeUnits) {
+    _feed(cu);
   }
+
+  return somethingHandled;
 }
+
 // -----------------------------------------------------------------------------
       void processChunk(String chunk) {
         const String spinnerPlaceholder = "[WIDGET_SPINNER]";
@@ -3865,7 +4610,7 @@ void _maybeHandleToolEvent(String chunk) {
 
                 // ‑ mostra spinner + fake widget per placeholder
                 displayOutput.write(spinnerPlaceholder);
-                final lastMsg = messages.last;
+                final lastMsg = buffer.last;
                 (lastMsg['widgetDataList'] ??= <dynamic>[])
                   ..add({
                     "_id":
@@ -3875,7 +4620,7 @@ void _maybeHandleToolEvent(String chunk) {
                     "placeholder": spinnerPlaceholder,
                   });
                 setState(() =>
-                    messages.last['content'] = displayOutput.toString() + "▌");
+                    buffer.last['content'] = displayOutput.toString() + "▌");
               }
             }
             continue; // fine ramo "fuori" – passa al prossimo carattere
@@ -3920,7 +4665,7 @@ void _maybeHandleToolEvent(String chunk) {
         // 3) Aggiorna la UI dopo aver consumato l'intero chunk
         // ---------------------------------------------------------------------------
         setState(() {
-          messages.last['content'] = displayOutput.toString();
+          buffer.last['content'] = displayOutput.toString();
         });
       }
 
@@ -3937,46 +4682,54 @@ void _maybeHandleToolEvent(String chunk) {
             final chunkString = utf8.decode(bytes);
 
             // Processa il chunk (token per token)
-            _maybeHandleToolEvent(chunkString);
-            processChunk(chunkString);
+            final handled = _maybeHandleToolEvent(chunkString);
+
+            if (!handled) {
+              processChunk(chunkString);
+            }
 
             // Continua a leggere
             readChunk();
           } else {
-            // Fine streaming
-            // A questo punto, fullOutput contiene TUTTO il testo (inclusi « TYPE='WIDGET'...>)
-            // displayOutput conteneva la parte "visibile" durante lo stream
-            // Ora finalizziamo
+                       // ──────────────────────────────────────────────────────────────
+            //  FINE STREAMING  – patch di fusione widget
+            // ──────────────────────────────────────────────────────────────
             setState(() {
-              // Mettiamo dentro 'content' tutto il displayOutput
-              messages[messages.length - 1]['content'] =
-                  displayOutput.toString();
-              // Associa la configurazione dell'agente al messaggio
-              messages[messages.length - 1]['agentConfig'] = agentConfiguration;
-            });
+              final msg = buffer.last;           // l’ultimo (assistant)
 
-            // Ora effettuiamo il parse effettivo di fullOutput
-            final parsed = _parsePotentialWidgets(fullOutput.toString());
+              // 1) TESTO: tieni quello già visto in tempo reale
+              const String spinnerPh = "[WIDGET_SPINNER]";
+              final String visibleText =
+                  displayOutput.toString().replaceFirst(spinnerPh, "");
+              msg['content'] = visibleText;
 
-            // Sovrascriviamo il content finale con il testo pulito e la widgetDataList
-            setState(() {
-              messages[messages.length - 1]['content'] = parsed.text;
-              messages[messages.length - 1]['widgetDataList'] =
-                  parsed.widgetList;
+              // 2) PARSE dei blocchi < TYPE='WIDGET' … >
+              final parsed = _parsePotentialWidgets(fullOutput.toString());
+
+              // 3) MERGE  (vecchi widget + nuovi “classici”)
+              final List<dynamic> existing =
+                  (msg['widgetDataList'] ?? <dynamic>[]) as List<dynamic>;
+              msg['widgetDataList'] = [...existing, ...parsed.widgetList];
+              // 4) (opz.) rimuovi lo spinner provvisorio
+              msg['widgetDataList']
+                  .removeWhere((w) => w['widgetId'] == 'SpinnerPlaceholder');
+
+              // 5) aggiungi la agentConfig se serve
+              msg['agentConfig'] = agentConfiguration;
             });
 
             assistantTurnCompleted.value++;
-            
+
             print('$assistantTurnCompleted');
 
             // Salviamo la conversazione (DB/localStorage)
-            _saveConversation(messages);
+            _saveConversationFor(chatId, buffer);
           }
         }).catchError((error) {
           // Errore durante la lettura del chunk
           print('Errore durante la lettura del chunk: $error');
           setState(() {
-            messages[messages.length - 1]['content'] = 'Errore: $error';
+            buffer[buffer.length - 1]['content'] = 'Errore: $error';
           });
         });
       }

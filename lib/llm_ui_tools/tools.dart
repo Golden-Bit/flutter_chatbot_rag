@@ -314,8 +314,10 @@ class _ChangeChatNameWidgetToolState extends State<ChangeChatNameWidgetTool> {
       _operationCompleted = true;
     });
   }
-
+  /// 3. UI soppressa
   @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+  /*@override
   Widget build(BuildContext context) {
     final String providedChatId = widget.jsonData['chatId'] ?? '';
     final String newName = widget.jsonData['newName'] ?? '';
@@ -410,5 +412,5 @@ class _ChangeChatNameWidgetToolState extends State<ChangeChatNameWidgetTool> {
         ),
       ),
     );
-  }
+  }*/
 }

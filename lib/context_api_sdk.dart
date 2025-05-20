@@ -8,6 +8,26 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 //import 'package:http/http.dart' as http;
 import 'dart:html' as html;
 
+/// Documento restituito da GET /documents/{collection_name}/
+class DocumentModel {
+  final String pageContent;
+  final Map<String, dynamic>? metadata;
+  final String type;
+
+  DocumentModel({
+    required this.pageContent,
+    this.metadata,
+    required this.type,
+  });
+
+  factory DocumentModel.fromJson(Map<String, dynamic> json) => DocumentModel(
+        pageContent: json['page_content'],
+        metadata: json['metadata'],
+        type: json['type'],
+      );
+}
+
+
 // Eccezione personalizzata per errori API
 class ApiException implements Exception {
   final String message;
@@ -184,8 +204,8 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    //"chatbot_nlp_api": "http://127.0.0.1:8080"
+    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    "chatbot_nlp_api": "http://127.0.0.1:8000"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
@@ -194,9 +214,10 @@ class ContextApiSdk {
 Future<ContextMetadata> createContext(
   String contextNameUuid,
   String description,
-  String displayName,        // ⬅️ nuovo
+  String displayName, 
   String username,
   String token,
+  {Map<String, dynamic>? extraMetadata,}       // ⬅️ nuovo
 ) async {
   if (baseUrl == null) await loadConfig();
 
@@ -205,7 +226,8 @@ Future<ContextMetadata> createContext(
   final body = {
     'context_name' : contextNameUuid,   // path = UUID
     'description'  : description,
-    'display_name' : displayName,       // ⬅️ nuovo campo
+    'display_name' : displayName,
+    if (extraMetadata != null) 'extra_metadata': extraMetadata,       // ⬅️ nuovo campo
     'username'     : username,
     'token'        : token,
   };
@@ -279,7 +301,7 @@ Future<void> uploadFileToContexts(
     List<String> contexts,
     String username,
     String token, // Aggiungiamo username e token
-    {String? description, required String fileName}
+    {String? description, required String fileName, Map<String, dynamic>? extraMetadata,} 
 ) async {
   if (baseUrl == null) await loadConfig();
 
@@ -296,6 +318,7 @@ Future<void> uploadFileToContexts(
     }
     request.fields['username'] = username;  // Nuovo campo
     request.fields['token'] = token;  // Nuovo campo
+    if (extraMetadata != null) request.fields['extra_metadata'] = jsonEncode(extraMetadata);
 
     request.files.add(http.MultipartFile.fromBytes(
       'file',
@@ -384,6 +407,9 @@ Future<void> uploadFileToContexts(
       throw ApiException(
           'Errore durante il polling status: ${response.body}');
     }
+
+
+    
   }
 
 
@@ -478,6 +504,7 @@ Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
   }
 }
 
+
 /// Metodo aggiornato per supportare la nuova versione dell'endpoint con autenticazione
 Future<Map<String, dynamic>> configureAndLoadChain(
     String username, String token, List<String> contexts, String model) async {
@@ -524,11 +551,16 @@ Future<Map<String, dynamic>> configureAndLoadChain(
 }
 
   
-  Future<void> downloadFile(String fileId) async {
+  Future<void> downloadFile(String fileId, {String? token}) async {
     if (baseUrl == null) await loadConfig();
 
     // Costruisci l'URL di download
-    final uri = Uri.parse('$baseUrl/download?file_id=$fileId');
+    //final uri = Uri.parse('$baseUrl/download?file_id=$fileId');
+
+  final uri = Uri.parse('$baseUrl/download').replace(queryParameters: {
+    'file_id': fileId,
+    if (token != null) 'token': token,
+  });
 
     final response = await http.get(uri);
 
@@ -649,5 +681,41 @@ Future<FileMetadataUpdateResult> updateFileMetadata(
   }
 }
 
+/// Elenca i documenti di una collezione.
+///
+/// - `collectionName`  = nome della collezione MongoDB.
+/// - `prefix`          = filtra gli `_id` che iniziano con questo prefisso (opzionale).
+/// - `skip/limit`      = paginazione.
+/// - `token`           = Access-token (se il backend lo richiede).
+Future<List<DocumentModel>> listDocuments(
+  String collectionName, {
+  String? prefix,
+  int skip = 0,
+  int limit = 10,
+  String? token,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final query = <String, String>{
+    'skip':  skip.toString(),
+    'limit': limit.toString(),
+    if (prefix != null) 'prefix': prefix,
+    if (token  != null) 'token' : token,
+  };
+
+  final uri = Uri.parse('$baseUrl/documents/$collectionName/')
+      .replace(queryParameters: query);
+
+  final response = await http.get(uri);
+
+  if (response.statusCode == 200) {
+    final utf8Body = utf8.decode(response.bodyBytes);       // <— forziamo UTF-8
+    final data   = jsonDecode(utf8Body) as List<dynamic>;
+    return data.map((j) => DocumentModel.fromJson(j)).toList();
+  } else {
+    throw ApiException(
+        'Errore elenco documenti: ${response.body}');
+  }
+}
 
 }

@@ -1,14 +1,24 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_app/ui_components/icons/cube.dart';
 import 'package:flutter_app/utilities/localization.dart';
+import 'package:universal_html/html.dart' as html;
 import 'context_api_sdk.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert'; // per jsonEncode / jsonDecode
 import 'package:uuid/uuid.dart';
+import 'dart:convert' show JsonEncoder;
+
+/// Ritorna true se la KB è stata creata automaticamente come archivio di una chat
+bool _isChatContext(ContextMetadata ctx) {
+  final chatId = ctx.customMetadata?['chat_id'];
+  return chatId != null && chatId.toString().trim().isNotEmpty;
+}
+
 
 /*void main() {
   runApp(MyApp());
@@ -27,66 +37,96 @@ class MyApp extends StatelessWidget {
   }
 }*/
 
+/// Restituisce {icon, color} in base all’estensione del file.
+Map<String, dynamic> fileIconFor(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+
+  switch (ext) {
+    case 'pdf':
+      return {'icon': Icons.picture_as_pdf, 'color': Colors.red};
+    case 'doc':
+    case 'docx':
+      return {'icon': Icons.description, 'color': Colors.blue};
+    case 'xls':
+    case 'xlsx':
+      return {'icon': Icons.table_chart, 'color': Colors.green};
+    case 'ppt':
+    case 'pptx':
+      return {'icon': Icons.slideshow, 'color': Colors.orange};
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+      return {'icon': Icons.image, 'color': Colors.purple};
+    case 'zip':
+    case 'rar':
+      return {'icon': Icons.folder_zip, 'color': Colors.brown};
+    default:
+      return {'icon': Icons.insert_drive_file, 'color': Colors.grey};
+  }
+}
+
 /// Info persistente sui job di indicizzazione ancora in corso
 /// ①  aggiungi il campo `jobId`
+/// Info persistente sui job di indicizzazione ancora in corso
 class PendingUploadJob {
-  final String jobId;                // NEW
-  final String contextPath;
-  final String fileName;
+  final String jobId;                       // id univoco del job
+  final String chatId;                      // id della chat a cui appartiene
+  final String contextPath;                 // path KB
+  final String fileName;                    // nome file
   final Map<String, TaskIdsPerContext> tasksPerCtx;
 
   PendingUploadJob({
     required this.jobId,
+    required this.chatId,
     required this.contextPath,
     required this.fileName,
     required this.tasksPerCtx,
   });
 
-  Map<String,dynamic> toJson() => {
-    'jobId' : jobId,
-    'context': contextPath,
-    'fileName': fileName,
-    'tasks' : tasksPerCtx.map((k,v) => MapEntry(k,{
-      'loader': v.loaderTaskId,
-      'vector': v.vectorTaskId,
-    })),
-  };
+  Map<String, dynamic> toJson() => {
+        'jobId'  : jobId,
+        'chatId' : chatId,
+        'context': contextPath,
+        'fileName': fileName,
+        'tasks': tasksPerCtx.map((k, v) => MapEntry(k, {
+              'loader': v.loaderTaskId,
+              'vector': v.vectorTaskId,
+            })),
+      };
 
-  static PendingUploadJob fromJson(Map<String,dynamic> j) {
-    final tasks = (j['tasks'] as Map<String,dynamic>).map((ctx,ids) =>
-      MapEntry(ctx, TaskIdsPerContext(
-        loaderTaskId: ids['loader'],
-        vectorTaskId: ids['vector'],
-      )));
+  static PendingUploadJob fromJson(Map<String, dynamic> j) {
+    final tasks =
+        (j['tasks'] as Map<String, dynamic>).map((ctx, ids) => MapEntry(
+            ctx,
+            TaskIdsPerContext(
+              loaderTaskId: ids['loader'],
+              vectorTaskId: ids['vector'],
+            )));
 
     return PendingUploadJob(
-      jobId:      j['jobId'],
-      contextPath:j['context'],
-      fileName:   j['fileName'],
-      tasksPerCtx:tasks,
+      jobId       : j['jobId'],
+      chatId      : j['chatId'],
+      contextPath : j['context'],
+      fileName    : j['fileName'],
+      tasksPerCtx : tasks,
     );
   }
 }
+
 
 class DashboardScreen extends StatefulWidget {
   final String username;
   final String token;
 
   // ▼ AGGIUNGI
-final void Function(
-  String jobId,
-  String ctx,
-  String fileName,
-  Map<String,TaskIdsPerContext> tasks
-)? onNewPendingJob;
-
-
+  final void Function(String jobId, String chatId, String ctx, String fileName,
+      Map<String, TaskIdsPerContext> tasks)? onNewPendingJob;
 
   const DashboardScreen({
     Key? key,
     required this.username,
     required this.token,
-    this.onNewPendingJob,          // ◀︎ facoltativo
+    this.onNewPendingJob, // ◀︎ facoltativo
   }) : super(key: key);
 
   @override
@@ -95,9 +135,124 @@ final void Function(
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final ContextApiSdk _apiSdk = ContextApiSdk();
-  List<ContextMetadata> _contexts = [];
+
+
+// --- elenco “visibile” filtrato (senza KB-di-chat)
+List<ContextMetadata> _contexts = [];
+
   FilePickerResult? _selectedFile;
   final Map<String, Timer> _pollers = {}; // in cima allo State
+// ──────────────────────────────────────────────────────────────
+//  🔧  UTILITY: dal record "file" ⇒ fileId e collectionName
+// ──────────────────────────────────────────────────────────────
+  String _fileIdFrom(Map<String, dynamic> file) => file['name'] ?? '';
+
+  String _collectionNameFrom(Map<String, dynamic> file) {
+    final raw = file['name'] ?? '';
+    // es.: "ctx/filename.pdf"  →  "ctxfilename.pdf_collection"
+    return raw.replaceAll('/', '') + '_collection';
+  }
+// → tutte le KB, comprese quelle-chat (già esistente)
+List<ContextMetadata> _allContexts = [];
+
+// → solo KB “visibili”: senza quelle-chat
+List<ContextMetadata> _gridContexts = [];
+
+
+  void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
+    final collection = _collectionNameFrom(file);
+
+    showDialog(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+
+          // ──────────────────────────────────────────────────────
+          // ⬆️  TITOLO + PULSANTE DOWNLOAD JSON A DESTRA
+          // ──────────────────────────────────────────────────────
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  fileName,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Scarica JSON documenti',
+                icon: const Icon(Icons.download),
+                onPressed: () => _downloadDocumentsJson(collection, fileName),
+              ),
+            ],
+          ),
+
+          // ──────────────────────────────────────────────────────
+          //  Contenuto: lista documenti (scrollabile)
+          // ──────────────────────────────────────────────────────
+          content: FutureBuilder<List<DocumentModel>>(
+            future: _apiSdk.listDocuments(collection, token: widget.token),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  width: 300,
+                  height: 200,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snap.hasError) {
+                return Text('Errore caricamento documenti: ${snap.error}');
+              }
+
+              final jsonStr = const JsonEncoder.withIndent('  ').convert(
+                snap.data!
+                    .map((d) => {
+                          'page_content': d.pageContent,
+                          'metadata': d.metadata,
+                          'type': d.type,
+                        })
+                    .toList(),
+              );
+
+              return Container(
+                width: 400,
+                height: 400,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Scrollbar(
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      jsonStr,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Chiudi'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
 // convenience
   String _displayName(ContextMetadata ctx) =>
@@ -124,28 +279,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
 // ──────────────────────────────────────────────────────────────
 // 🔄  USIAMO jobId come chiave nella mappa persistita
 // ──────────────────────────────────────────────────────────────
-static const _prefsKey = 'kb_pending_jobs';
+  static const _prefsKey = 'kb_pending_jobs';
 
-Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
-  final prefs   = await SharedPreferences.getInstance();
-  final encoded = jobs.map((_, job) => MapEntry(job.jobId, job.toJson()));
-  await prefs.setString(_prefsKey, jsonEncode(encoded));
-}
+  Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = jobs.map((_, job) => MapEntry(job.jobId, job.toJson()));
+    await prefs.setString(_prefsKey, jsonEncode(encoded));
+  }
 
-Future<Map<String, PendingUploadJob>> _loadPendingJobs() async {
-  final prefs = await SharedPreferences.getInstance();
-  final raw   = prefs.getString(_prefsKey);
-  if (raw == null) return {};
+  Future<Map<String, PendingUploadJob>> _loadPendingJobs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_prefsKey);
+    if (raw == null) return {};
 
-  final Map<String,dynamic> decoded = jsonDecode(raw);
-  return decoded.map(
-    (_, j) {
-      final job = PendingUploadJob.fromJson(j);
-      return MapEntry(job.jobId, job);    // ⇠ chiave = jobId
-    },
-  );
-}
-
+    final Map<String, dynamic> decoded = jsonDecode(raw);
+    return decoded.map(
+      (_, j) {
+        final job = PendingUploadJob.fromJson(j);
+        return MapEntry(job.jobId, job); // ⇠ chiave = jobId
+      },
+    );
+  }
 
   late Map<String, PendingUploadJob> _pendingJobs;
 
@@ -164,21 +318,21 @@ Future<Map<String, PendingUploadJob>> _loadPendingJobs() async {
     super.dispose(); // ⬅️ sempre per ultimo
   }
 
-Future<void> _restorePendingState() async {
-  _pendingJobs = await _loadPendingJobs();
+  Future<void> _restorePendingState() async {
+    _pendingJobs = await _loadPendingJobs();
 
-  // (re)-inizia spinner e polling per i job ancora attivi
-  for (final entry in _pendingJobs.values) {
-    setState(() {
-      _isLoadingMap[entry.contextPath]     = true;
-      _loadingFileNamesMap[entry.contextPath] = entry.fileName;
-    });
+    // (re)-inizia spinner e polling per i job ancora attivi
+    for (final entry in _pendingJobs.values) {
+      setState(() {
+        _isLoadingMap[entry.contextPath] = true;
+        _loadingFileNamesMap[entry.contextPath] = entry.fileName;
+      });
 
-    _monitorUploadTasks(entry.jobId, entry.tasksPerCtx);   // 👈 jobId
+      _monitorUploadTasks(entry.jobId, entry.tasksPerCtx); // 👈 jobId
+    }
+
+    await _loadContexts(); // carica la lista KB dopo aver sistemato gli spinner
   }
-
-  await _loadContexts(); // carica la lista KB dopo aver sistemato gli spinner
-}
 
   /// Restituisce un'icona basata sull'estensione del file.
   Map<String, dynamic> _getIconForFileType(String fileName) {
@@ -210,44 +364,43 @@ Future<void> _restorePendingState() async {
     }
   }
 
-  // Funzione per caricare i contesti
-  Future<void> _loadContexts() async {
-    try {
-      final contexts =
-          await _apiSdk.listContexts(widget.username, widget.token);
-      if (mounted) {
-        setState(() {
-          _contexts = contexts;
-          _filteredContexts =
-              List.from(_contexts); // Inizializza la lista filtrata
-        });
-      }
-    } catch (e) {
-      print('Errore nel recupero dei contesti: $e');
-    }
+Future<void> _loadContexts() async {
+  try {
+    final all = await _apiSdk.listContexts(widget.username, widget.token);
+
+    if (!mounted) return;
+
+    setState(() {
+      _allContexts    = all;                              // tutto, chat incluse
+      _gridContexts   = all.where((c) => !_isChatContext(c)).toList();
+      _filteredContexts = List.from(_gridContexts);
+    });
+  } catch (e) {
+    debugPrint('Errore nel recupero dei contesti: $e');
   }
+}
+
 
   /// Filtra la lista dei contesti in base al testo immesso.
   ///
   /// ‣ Il filtro cerca sia nel “nome visualizzato” (`display_name` dentro
   ///   `customMetadata`) sia nel campo `description`.
   /// ‣ Se `display_name` non esiste (vecchi contesti) usa `path` come
-  ///   valore di fallback.
-  void _filterContexts() {
-    final query = _nameSearchController.text.toLowerCase().trim();
+void _filterContexts() {
+  final query = _nameSearchController.text.toLowerCase().trim();
 
-    setState(() {
-      _filteredContexts = _contexts.where((ctx) {
-        final displayName = (ctx.customMetadata?['display_name'] ?? ctx.path)
-            .toString()
-            .toLowerCase();
-        final description =
-            (ctx.customMetadata?['description'] ?? '').toString().toLowerCase();
+  setState(() {
+    _filteredContexts = _gridContexts.where((ctx) {
+      final displayName =
+          (ctx.customMetadata?['display_name'] ?? ctx.path).toString().toLowerCase();
+      final description =
+          (ctx.customMetadata?['description'] ?? '').toString().toLowerCase();
+      return displayName.contains(query) || description.contains(query);
+    }).toList();
+  });
+}
 
-        return displayName.contains(query) || description.contains(query);
-      }).toList();
-    });
-  }
+
 
   // Funzione per caricare i file di un contesto specifico
   Future<List<Map<String, dynamic>>> _loadFilesForContext(
@@ -301,74 +454,73 @@ Future<void> _restorePendingState() async {
   }
 
   /// Polla /tasks_status ogni 3 s finché tutti i task sono DONE/ERROR.
-/// Polla /tasks_status ogni 3 s finché TUTTI i task del job sono DONE/ERROR.
-/// Alla fine rimuove lo spinner dal Knowledge-Box collegato
-/// e cancella il job da `_pendingJobs`.
-void _monitorUploadTasks(
-  String jobId,
-  Map<String, TaskIdsPerContext> tasksPerCtx,
-) {
-  const pollInterval = Duration(seconds: 3);
-  Timer? timer;
+  /// Polla /tasks_status ogni 3 s finché TUTTI i task del job sono DONE/ERROR.
+  /// Alla fine rimuove lo spinner dal Knowledge-Box collegato
+  /// e cancella il job da `_pendingJobs`.
+  void _monitorUploadTasks(
+    String jobId,
+    Map<String, TaskIdsPerContext> tasksPerCtx,
+  ) {
+    const pollInterval = Duration(seconds: 3);
+    Timer? timer;
 
-  timer = Timer.periodic(pollInterval, (_) async {
-    try {
-      // 1. – richiede lo stato di TUTTI i task del job
-      final statusResp = await _apiSdk.getTasksStatus(tasksPerCtx.values);
+    timer = Timer.periodic(pollInterval, (_) async {
+      try {
+        // 1. – richiede lo stato di TUTTI i task del job
+        final statusResp = await _apiSdk.getTasksStatus(tasksPerCtx.values);
 
-      // 2. – log minimale di debug
-      statusResp.statuses.forEach((id, st) => debugPrint(
-          '[$id] → ${st.status}${st.error != null ? " | ${st.error}" : ""}'));
+        // 2. – log minimale di debug
+        statusResp.statuses.forEach((id, st) => debugPrint(
+            '[$id] → ${st.status}${st.error != null ? " | ${st.error}" : ""}'));
 
-      // 3. – verifica se tutti sono DONE o ERROR
-      final allDoneOrError = statusResp.statuses.values
-          .every((s) => s.status == 'DONE' || s.status == 'ERROR');
+        // 3. – verifica se tutti sono DONE o ERROR
+        final allDoneOrError = statusResp.statuses.values
+            .every((s) => s.status == 'DONE' || s.status == 'ERROR');
 
-      if (!allDoneOrError) return;       // → continua a pollare
+        if (!allDoneOrError) return; // → continua a pollare
 
-      // 4. – se siamo qui, il job è completato/errore  ► stop timer
-      timer?.cancel();
+        // 4. – se siamo qui, il job è completato/errore  ► stop timer
+        timer?.cancel();
 
-      // 5. – dati utili
-      final job      = _pendingJobs[jobId];
-      final ctxPath  = job?.contextPath ?? '<unknown>';
+        // 5. – dati utili
+        final job = _pendingJobs[jobId];
+        final ctxPath = job?.contextPath ?? '<unknown>';
 
-      debugPrint('📁  Upload completato su $ctxPath (jobId=$jobId)');
+        debugPrint('📁  Upload completato su $ctxPath (jobId=$jobId)');
 
-      if (mounted) {
-        setState(() {
-          // rimuove lo spinner dal KB interessato
-          _isLoadingMap.remove(ctxPath);
-          _loadingFileNamesMap.remove(ctxPath);
+        if (mounted) {
+          setState(() {
+            // rimuove lo spinner dal KB interessato
+            _isLoadingMap.remove(ctxPath);
+            _loadingFileNamesMap.remove(ctxPath);
 
-          // elimina il job da memoria + SharedPreferences
-          _pendingJobs.remove(jobId);
-          _savePendingJobs(_pendingJobs);
-        });
+            // elimina il job da memoria + SharedPreferences
+            _pendingJobs.remove(jobId);
+            _savePendingJobs(_pendingJobs);
+          });
+        }
+      } catch (e) {
+        debugPrint('Errore polling status: $e');
+        timer?.cancel();
+
+        final job = _pendingJobs[jobId];
+        final ctxPath = job?.contextPath ?? '<unknown>';
+
+        // rimuove comunque lo spinner in caso di eccezione
+        if (mounted) {
+          setState(() {
+            _isLoadingMap.remove(ctxPath);
+            _loadingFileNamesMap.remove(ctxPath);
+            _pendingJobs.remove(jobId);
+            _savePendingJobs(_pendingJobs);
+          });
+        }
       }
-    } catch (e) {
-      debugPrint('Errore polling status: $e');
-      timer?.cancel();
+    });
 
-      final job      = _pendingJobs[jobId];
-      final ctxPath  = job?.contextPath ?? '<unknown>';
-
-      // rimuove comunque lo spinner in caso di eccezione
-      if (mounted) {
-        setState(() {
-          _isLoadingMap.remove(ctxPath);
-          _loadingFileNamesMap.remove(ctxPath);
-          _pendingJobs.remove(jobId);
-          _savePendingJobs(_pendingJobs);
-        });
-      }
-    }
-  });
-
-  // salva il timer per eventuale cancellazione manuale
-  _pollers[jobId] = timer!;
-}
-
+    // salva il timer per eventuale cancellazione manuale
+    _pollers[jobId] = timer!;
+  }
 
   // Funzione per eliminare un contesto
   Future<void> _deleteContext(String contextName) async {
@@ -392,92 +544,94 @@ void _monitorUploadTasks(
 // ──────────────────────────────────────────────────────────────────────────────
 // UPLOAD “bloccante”: la pagina resta in attesa (niente polling)
 // ──────────────────────────────────────────────────────────────────────────────
-void _uploadFileForContext(String contextPath) async {
-  final result = await FilePicker.platform.pickFiles();
-  if (result == null || result.files.first.bytes == null) {
-    debugPrint('Nessun file selezionato');
-    return;
-  }
+  void _uploadFileForContext(String contextPath) async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result == null || result.files.first.bytes == null) {
+      debugPrint('Nessun file selezionato');
+      return;
+    }
 
-  setState(() {
-    _isLoadingMap[contextPath] = true;
-    _loadingFileNamesMap[contextPath] = result.files.first.name;
-  });
+    setState(() {
+      _isLoadingMap[contextPath] = true;
+      _loadingFileNamesMap[contextPath] = result.files.first.name;
+    });
 
-  try {
-    await _uploadFile(
-      result.files.first.bytes!,
-      [contextPath],
-      fileName: result.files.first.name,
-    );
-  } catch (e) {
-    debugPrint('Errore durante il caricamento: $e');
-  } finally {
-    if (mounted) {
-      setState(() {
-        _isLoadingMap.remove(contextPath);
-        _loadingFileNamesMap.remove(contextPath);
-      });
+    try {
+      await _uploadFile(
+        result.files.first.bytes!,
+        [contextPath],
+        fileName: result.files.first.name,
+      );
+    } catch (e) {
+      debugPrint('Errore durante il caricamento: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingMap.remove(contextPath);
+          _loadingFileNamesMap.remove(contextPath);
+        });
+      }
     }
   }
-}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // UPLOAD “async”: ottiene i task-id, li traccia con un jobId univoco
 // ──────────────────────────────────────────────────────────────────────────────
-void _uploadFileForContextAsync(String contextPath) async {
-  final result = await FilePicker.platform.pickFiles();
-  if (result == null || result.files.first.bytes == null) {
-    debugPrint('Nessun file selezionato');
-    return;
-  }
+  void _uploadFileForContextAsync(String contextPath) async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result == null || result.files.first.bytes == null) {
+      debugPrint('Nessun file selezionato');
+      return;
+    }
 
-  // 0. Spinner sul KB
-  setState(() {
-    _isLoadingMap[contextPath] = true;
-    _loadingFileNamesMap[contextPath] = result.files.first.name;
-  });
+    // 0. Spinner sul KB
+    setState(() {
+      _isLoadingMap[contextPath] = true;
+      _loadingFileNamesMap[contextPath] = result.files.first.name;
+    });
 
-  try {
-    // 1. Genera un UUID v4 per l’intero job
-    final String jobId = const Uuid().v4();
+    try {
+      // 1. Genera un UUID v4 per l’intero job
+      final String jobId = const Uuid().v4();
 
-    // 2. Chiamata POST /upload_async
-    final tasksPerCtx = await _uploadFileAsync(
-      result.files.first.bytes!,
-      [contextPath],
-      fileName: result.files.first.name,
-    );
+      // 2. Chiamata POST /upload_async
+      final tasksPerCtx = await _uploadFileAsync(
+        result.files.first.bytes!,
+        [contextPath],
+        fileName: result.files.first.name,
+      );
 
-    // 3. Salva in memoria + SharedPreferences (keyed su jobId)
-    _pendingJobs[jobId] = PendingUploadJob(
-      jobId: jobId,
-      contextPath: contextPath,
-      fileName: result.files.first.name,
-      tasksPerCtx: tasksPerCtx,
-    );
-    await _savePendingJobs(_pendingJobs);
+      // 3. Salva in memoria + SharedPreferences (keyed su jobId)
+      _pendingJobs[jobId] = PendingUploadJob(
+        jobId: jobId,
+        chatId: '',
+        contextPath: contextPath,
+        fileName: result.files.first.name,
+        tasksPerCtx: tasksPerCtx,
+      );
+      await _savePendingJobs(_pendingJobs);
 
-    // 4. Notifica il padre (Dashboard / ChatBotPage, ecc.)
-    widget.onNewPendingJob?.call(
-      jobId,
-      contextPath,
-      result.files.first.name,
-      tasksPerCtx,
-    );
+      // 4. Notifica il padre (Dashboard / ChatBotPage, ecc.)
+      widget.onNewPendingJob?.call(
+        jobId,
+        '',
+        contextPath,
+        result.files.first.name,
+        tasksPerCtx,
+      );
 
-    // 5. Avvia il polling finché tutti i task sono DONE/ERROR
-    _monitorUploadTasks(jobId, tasksPerCtx);
-  } catch (e) {
-    debugPrint('Errore durante il caricamento async: $e');
-    if (mounted) {
-      setState(() {
-        _isLoadingMap.remove(contextPath);
-        _loadingFileNamesMap.remove(contextPath);
-      });
+      // 5. Avvia il polling finché tutti i task sono DONE/ERROR
+      _monitorUploadTasks(jobId, tasksPerCtx);
+    } catch (e) {
+      debugPrint('Errore durante il caricamento async: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingMap.remove(contextPath);
+          _loadingFileNamesMap.remove(contextPath);
+        });
+      }
     }
   }
-}
 
   // Mostra il dialog per caricare file in contesti multipli
   /*void _showUploadFileToMultipleContextsDialog() {
@@ -726,49 +880,80 @@ void _uploadFileForContextAsync(String contextPath) async {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () {
-                if (contextNameController.text.isNotEmpty) {
-                  // Chiude il dialog prima di creare il contesto
-                  Navigator.of(context).pop();
-                  final friendly = contextNameController.text.trim();
-                  // Genera il UUID completo…
-final String fullUuid = const Uuid().v4();
-// …e ne prendi solo i primi 9 caratteri
-final String uuid = fullUuid.substring(0, 9);
+TextButton(
+  child: Text(localizations.create_knowledge_box),
+  // ──────────────────────────────────────────────────────────────
+  //  PULSANTE “CREA” COMPLETAMENTE RISCRITTO
+  //  • chiude il dialog subito
+  //  • crea la KB via API
+  //  • poi ricarica l’elenco dal server con _loadContexts()
+  // ──────────────────────────────────────────────────────────────
+  onPressed: () async {
+    final friendly = contextNameController.text.trim();
 
-                  _apiSdk.createContext(
-                    uuid, // path/ID
-                    contextDescriptionController.text,
-                    contextNameController.text, // display_name visibile
-                    widget.username,
-                    widget.token,
-                  );
+    // 1) validazione minima
+    if (friendly.isEmpty) {
+      debugPrint('Errore: nome del contesto obbligatorio.');
+      return;
+    }
 
-// keep local state in sync
-                  setState(() {
-                    _contexts.add(
-                      ContextMetadata(
-                        path: uuid,
-                        customMetadata: {
-                          'description': contextDescriptionController.text,
-                          'display_name': friendly, // ③
-                        },
-                      ),
-                    );
-                    _filteredContexts = List.from(_contexts);
-                    _filterContexts();
-                  });
-                } else {
-                  print('Errore: nome del contesto obbligatorio.');
-                }
-              },
-              child: Text(localizations.create_knowledge_box),
-            ),
+    Navigator.of(context).pop();                  // chiude il popup
+
+    // 2) genera un uuid (primi 9 caratteri)
+    final String fullUuid = const Uuid().v4();
+    final String uuid     = fullUuid.substring(0, 9);
+
+    // 3) chiamata API per creare la KB
+    await _apiSdk.createContext(
+      uuid,                                       // path / ID interno
+      contextDescriptionController.text.trim(),   // description
+      friendly,                                   // display_name
+      widget.username,
+      widget.token,
+    );
+
+    // 4) ricarica l’elenco completo delle KB dal backend
+    await _loadContexts();                        // aggiorna griglia + filtri
+  },
+)
+
           ],
         );
       },
     );
+  }
+
+  Future<void> _downloadDocumentsJson(
+      String collection, String baseFileName) async {
+    // 1) scarica i documenti
+    final docs = await _apiSdk.listDocuments(collection, token: widget.token);
+
+    // 2) serializza con indentazione
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(
+      docs
+          .map((d) => {
+                'page_content': d.pageContent,
+                'metadata': d.metadata,
+                'type': d.type,
+              })
+          .toList(),
+    );
+
+    // 3) disponibile solo per Web
+    if (!kIsWeb) {
+      throw UnsupportedError('Download JSON supportato solo su Web');
+    }
+
+    final blob = html.Blob([jsonStr], 'application/json');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', '${baseFileName}_docs.json');
+    html.document.body?.append(anchor);
+    anchor.click();
+    anchor.remove();
+
+    html.Url.revokeObjectUrl(url);
   }
 
   void _showFilesForContextDialog(String contextPath) async {
@@ -823,7 +1008,8 @@ final String uuid = fullUuid.substring(0, 9);
                     ),
                     SizedBox(width: 8.0),
                     Text(
-                      selectedContext.customMetadata?["display_name"] ?? selectedContext.path,
+                      selectedContext.customMetadata?["display_name"] ??
+                          selectedContext.path,
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -834,17 +1020,17 @@ final String uuid = fullUuid.substring(0, 9);
                     )
                   ]),
                   SizedBox(height: 8.0),
-if (description != null && description.trim().isNotEmpty)
-  Text(
-    description,
-    style: const TextStyle(
-      fontSize: 14,
-      color: Colors.grey,          // ← identico alla card
-      fontWeight: FontWeight.normal,
-    ),
-    maxLines: 2,
-    overflow: TextOverflow.ellipsis,
-  ),
+                  if (description != null && description.trim().isNotEmpty)
+                    Text(
+                      description,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey, // ← identico alla card
+                        fontWeight: FontWeight.normal,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   SizedBox(height: 16.0),
                   // Barra di ricerca
                   TextField(
@@ -965,26 +1151,52 @@ if (description != null && description.trim().isNotEmpty)
                                     // Spazio per spostare il cestino in basso
                                     Spacer(),
                                     // Cestino in basso a destra
-                                    Align(
-                                      alignment: Alignment.bottomRight,
-                                      child: IconButton(
-                                        icon: Icon(Icons.delete,
-                                            color:
-                                                Colors.black), // Cestino nero
-                                        onPressed: () async {
-                                          await _deleteFile(
-                                              fileUUID); // Funzione per eliminare il file
-                                          setState(() {
-                                            filesForContext.removeWhere(
-                                                (file) =>
-                                                    file['custom_metadata']
-                                                        ['file_uuid'] ==
-                                                    fileUUID);
-                                            _filterFiles(searchController
-                                                .text); // Aggiorna la lista filtrata
-                                          });
-                                        },
-                                      ),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        // 🆕 Download file sorgente
+                                        IconButton(
+                                          tooltip: 'Scarica',
+                                          icon: const Icon(Icons.download,
+                                              color: Colors.black),
+                                          onPressed: () {
+                                            final fileId = filteredFiles[index]
+                                                    ['name'] ??
+                                                '';
+                                            _apiSdk.downloadFile(fileId,
+                                                token: widget.token);
+                                          },
+                                        ),
+                                        // Visualizza anteprima + JSON
+                                        IconButton(
+                                          tooltip: 'Visualizza',
+                                          icon: const Icon(Icons.visibility,
+                                              color: Colors.black),
+                                          onPressed: () {
+                                            _showFilePreviewDialog(
+                                              filteredFiles[index],
+                                              fileName,
+                                            );
+                                          },
+                                        ),
+                                        // Elimina
+                                        IconButton(
+                                          tooltip: 'Elimina',
+                                          icon: const Icon(Icons.delete,
+                                              color: Colors.black),
+                                          onPressed: () async {
+                                            await _deleteFile(fileUUID);
+                                            setState(() {
+                                              filesForContext.removeWhere((f) =>
+                                                  f['custom_metadata']
+                                                      ['file_uuid'] ==
+                                                  fileUUID);
+                                              _filterFiles(
+                                                  searchController.text);
+                                            });
+                                          },
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -1009,82 +1221,82 @@ if (description != null && description.trim().isNotEmpty)
     );
   }
 
-void _showEditContextDialog(ContextMetadata ctx) {
-  final localizations = LocalizationProvider.of(context);
+  void _showEditContextDialog(ContextMetadata ctx) {
+    final localizations = LocalizationProvider.of(context);
 
-  final TextEditingController nameCtrl = TextEditingController(
-    text: ctx.customMetadata?['display_name'] ?? ctx.path,
-  );
-  final TextEditingController descCtrl = TextEditingController(
-    text: ctx.customMetadata?['description'] ?? '',
-  );
+    final TextEditingController nameCtrl = TextEditingController(
+      text: ctx.customMetadata?['display_name'] ?? ctx.path,
+    );
+    final TextEditingController descCtrl = TextEditingController(
+      text: ctx.customMetadata?['description'] ?? '',
+    );
 
-  showDialog(
-    context: context,
-    builder: (_) {
-      return AlertDialog(
-        title: Text(localizations.edit_knowledge_box),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration:
-                  InputDecoration(labelText: localizations.knowledge_box_name),
+    showDialog(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: Text(localizations.edit_knowledge_box),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: InputDecoration(
+                    labelText: localizations.knowledge_box_name),
+              ),
+              TextField(
+                controller: descCtrl,
+                decoration: InputDecoration(
+                    labelText: localizations.knowledge_box_description),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(localizations.cancel),
             ),
-            TextField(
-              controller: descCtrl,
-              decoration: InputDecoration(
-                  labelText: localizations.knowledge_box_description),
+            TextButton(
+              onPressed: () async {
+                final newName = nameCtrl.text.trim();
+                final newDesc = descCtrl.text.trim();
+
+                // ① chiamata API
+                await _apiSdk.updateContextMetadata(
+                  widget.username,
+                  widget.token,
+                  contextName: ctx.path,
+                  description: newDesc,
+                  extraMetadata: {'display_name': newName},
+                );
+
+                // ② sincronizza stato locale
+                final idx = _contexts.indexWhere((c) => c.path == ctx.path);
+                if (idx != -1) {
+                  setState(() {
+                    _contexts[idx] = ContextMetadata(
+                      path: ctx.path,
+                      customMetadata: {
+                        ...?ctx.customMetadata,
+                        'display_name': newName,
+                        'description': newDesc,
+                      },
+                    );
+                    _filterContexts(); // aggiorna vista filtrata
+                  });
+                }
+
+                Navigator.of(context).pop();
+              },
+              child: Text(localizations.save),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(localizations.cancel),
-          ),
-          TextButton(
-            onPressed: () async {
-              final newName = nameCtrl.text.trim();
-              final newDesc = descCtrl.text.trim();
-
-              // ① chiamata API
-              await _apiSdk.updateContextMetadata(
-                widget.username,
-                widget.token,
-                contextName: ctx.path,
-                description: newDesc,
-                extraMetadata: {'display_name': newName},
-              );
-
-              // ② sincronizza stato locale
-              final idx = _contexts.indexWhere((c) => c.path == ctx.path);
-              if (idx != -1) {
-                setState(() {
-                  _contexts[idx] = ContextMetadata(
-                    path: ctx.path,
-                    customMetadata: {
-                      ...?ctx.customMetadata,
-                      'display_name': newName,
-                      'description': newDesc,
-                    },
-                  );
-                  _filterContexts(); // aggiorna vista filtrata
-                });
-              }
-
-              Navigator.of(context).pop();
-            },
-            child: Text(localizations.save),
-          ),
-        ],
-      );
-    },
-  );
-}
-
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1175,25 +1387,25 @@ const SizedBox(width: 16),
 
                   Map<String, dynamic>? metadata =
                       contextMetadata.customMetadata;
-List<Widget> metadataWidgets = [];
-final desc = metadata?['description']?.toString().trim();
+                  List<Widget> metadataWidgets = [];
+                  final desc = metadata?['description']?.toString().trim();
 
-if (desc != null && desc.isNotEmpty) {
-  metadataWidgets.add(
-    Padding(
-      padding: const EdgeInsets.only(top: 5.0),
-      child: Text(
-        desc,                           // ← solo valore, niente prefisso
-        style: const TextStyle(
-          fontSize: 12,
-          color: Colors.grey,           // stesso colore della mini-card
-        ),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
-    ),
-  );
-}
+                  if (desc != null && desc.isNotEmpty) {
+                    metadataWidgets.add(
+                      Padding(
+                        padding: const EdgeInsets.only(top: 5.0),
+                        child: Text(
+                          desc, // ← solo valore, niente prefisso
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey, // stesso colore della mini-card
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    );
+                  }
 
                   return GestureDetector(
                     onTap: () {
@@ -1261,14 +1473,16 @@ if (desc != null && desc.isNotEmpty) {
                                       color: Colors.white,
                                       onSelected: (value) {
                                         if (value == 'delete') {
-                                          _deleteContext(
-                                              contextMetadata.path);
+                                          _deleteContext(contextMetadata.path);
                                         } else if (value == 'upload') {
                                           _uploadFileForContextAsync(
                                               contextMetadata.path);
-                                        } else if (value == 'edit') {                  // ③
-   _showEditContextDialog(contextMetadata);     // ④
-                                      }},
+                                        } else if (value == 'edit') {
+                                          // ③
+                                          _showEditContextDialog(
+                                              contextMetadata); // ④
+                                        }
+                                      },
                                       itemBuilder: (BuildContext context) =>
                                           <PopupMenuEntry<String>>[
                                         PopupMenuItem<String>(
@@ -1276,10 +1490,11 @@ if (desc != null && desc.isNotEmpty) {
                                           child:
                                               Text(localizations.upload_file),
                                         ),
-                                          PopupMenuItem<String>(
-    value: 'edit',                        // ① nuova voce
-    child: Text(localizations.edit),       // ② nuova label (aggiungi nelle i18n)
-  ),
+                                        PopupMenuItem<String>(
+                                          value: 'edit', // ① nuova voce
+                                          child: Text(localizations
+                                              .edit), // ② nuova label (aggiungi nelle i18n)
+                                        ),
                                         PopupMenuItem<String>(
                                           value: 'delete',
                                           child: Text(localizations.delete),
@@ -1292,10 +1507,8 @@ if (desc != null && desc.isNotEmpty) {
                             // Metadati del contesto
                             ...metadataWidgets,
                             SizedBox(height: 16),
-                            if (_isLoadingMap[contextMetadata.path] ==
-                                    true &&
-                                _loadingFileNamesMap[
-                                        contextMetadata.path] !=
+                            if (_isLoadingMap[contextMetadata.path] == true &&
+                                _loadingFileNamesMap[contextMetadata.path] !=
                                     null)
                               Row(
                                 children: [

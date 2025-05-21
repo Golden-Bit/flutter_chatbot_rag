@@ -15,6 +15,7 @@ import 'package:flutter_app/llm_ui_tools/tools.dart';
 import 'package:flutter_app/ui_components/buttons/blue_button.dart';
 import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
 import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
+import 'package:flutter_app/ui_components/message/table_md_builder.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/components/settings_dialog.dart';
 import 'package:flutter_app/user_manager/components/usage_analytics_dialog.dart';
@@ -42,6 +43,10 @@ import 'dart:async'; // Assicurati di importare il package Timer
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';   // se non c’era già
+// ↑ Nella sezione import esistente
+import 'package:markdown/markdown.dart' as md;           // parse Element
+import 'dart:html' as html;                              // download CSV
+import 'package:collection/collection.dart';
 
 /*void main() {
   runApp(MyApp());
@@ -292,6 +297,29 @@ Map<String, dynamic> _buildCurrentAgentConfig() {
   };
 }
 
+// Restituisce una stringa CSV escapando le virgolette
+String _toCsv(List<List<String>> rows) {
+  return rows.map((r) =>
+      r.map((c) => '"${c.replaceAll('"', '""')}"').join(',')
+    ).join('\r\n');
+}
+
+void _downloadCsv(List<List<String>> rows) {
+  final buffer = StringBuffer();
+  for (final r in rows) {
+    buffer.writeln(r.map((c) => '"${c.replaceAll('"', '""')}"').join(','));
+  }
+  final csvStr = buffer.toString();
+
+  final blob = html.Blob([csvStr], 'text/csv');
+  final url  = html.Url.createObjectUrlFromBlob(blob);
+  final a    = html.AnchorElement(href: url)..download = 'table.csv';
+  html.document.body!.append(a);
+  a.click();
+  a.remove();
+  html.Url.revokeObjectUrl(url);
+}
+
 
 // ──────────────────────────────────────────────────────────────────
 // crea una KB per la chat (se non esiste) e ne restituisce il path
@@ -311,6 +339,8 @@ Future<String> _ensureChatKb(String chatId, String chatName) async {
   _chatKbPath = uuid;
   return uuid;
 }
+
+
 /// Se la chat ha documenti indicizzati ma l’ultima chain non include la sua KB,
 /// riconfigura la chain includendo (solo) quella KB.
 Future<void> _ensureChainIncludesChatKb(String chatId) async {
@@ -437,34 +467,48 @@ Future<void> _prepareChainForCurrentChat() async {
 }
 
 Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
+  // ① costruisci un vero Map<String,dynamic>
+  final Map<String, dynamic> activeJobs = {
+    for (final e in jobs.entries)
+      if (e.value.tasksPerCtx.values.any((t) =>
+          t.loaderTaskId != null || t.vectorTaskId != null))
+        e.key: e.value.toJson(),
+  };
+
   final prefs = await SharedPreferences.getInstance();
-  final encoded = jobs.map((k, v) => MapEntry(k, v.toJson()));
-  await prefs.setString(_prefsKeyPending, jsonEncode(encoded));
+  await prefs.setString(_prefsKeyPending, jsonEncode(activeJobs));
 }
+
+
+
 TaskStage _mapStatus(String? s) {
   switch (s?.toUpperCase()) {
-    case 'PENDING':
-    case 'QUEUED':
-    case 'CREATED':
-    case 'SCHEDULED':
-      return TaskStage.pending;
-
-    case 'RUNNING':
-    case 'STARTED':
-      return TaskStage.running;
+    case 'FAILED':
+    case 'ERROR':
+    case 'CANCELLED':
+      return TaskStage.error;
 
     case 'DONE':
     case 'SUCCESS':
     case 'COMPLETED':
+    case 'SUCCEEDED':
       return TaskStage.done;
 
-    case 'FAILED':
-    case 'ERROR':
-    case 'CANCELLED':
-    default:
-      return TaskStage.error;
+    case 'RUNNING':
+    case 'STARTED':
+    case 'PROCESSING':
+    case 'INDEXING':
+      return TaskStage.running;
+
+    case 'PENDING':
+    case 'QUEUED':
+    case 'CREATED':
+    case 'SCHEDULED':
+    default:                      // fallback *non è* più errore
+      return TaskStage.pending;
   }
 }
+
 // all’interno di ChatBotPageState
 bool _isChainLoading = false;           // ← spinner / disabilita invio
 
@@ -1131,7 +1175,7 @@ final Map<String, Map<String, dynamic>> _toolEvents = {};
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: const [
-                Text("Caricamento widget in corso..."),
+                Text("Caricamento in corso..."),
                 SizedBox(width: 8),
                 CircularProgressIndicator(),
               ],
@@ -1395,7 +1439,7 @@ if (message.containsKey('fileUpload')) {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Caricamento widget in corso..."),
+                  const Text("Caricamento in corso..."),
                   const SizedBox(width: 8),
                   const CircularProgressIndicator(),
                 ],
@@ -1699,11 +1743,14 @@ Future<void> _bootstrap() async {
         borderRadius: BorderRadius.circular(8.0),
       ),
       child: MarkdownBody(
+        extensionSet: md.ExtensionSet.gitHubWeb,
         selectable: true,
         data: content,
         // Inserisci il builder personalizzato per i blocchi di codice
         builders: {
           'code': CodeBlockBuilder(context),
+          'table':ScrollableTableBuilder(onDownload: _downloadCsv),
+ 
         },
         styleSheet: MarkdownStyleSheet(
           p: const TextStyle(fontSize: 16.0, color: Colors.black87),
@@ -2120,6 +2167,9 @@ Future<void> _initTaskNotifications() async {
       );
     }
   });
+
+  await _savePendingJobs(_pendingJobs);
+  
 }
 
 /// Se non troviamo la chat, restituiamo stringa vuota
@@ -2141,29 +2191,61 @@ void _startNotifOverlay() {
   Overlay.of(context, rootOverlay: true)!.insert(_notifOverlay!);
 
   _notifPoller = Timer.periodic(const Duration(seconds: 3), (_) async {
+
     if (_taskNotifications.isEmpty) return;
+
+          if (_pendingJobs.isEmpty) {
+    _notifPoller?.cancel();
+    _notifPoller = null;
+    return;                       // niente GET se non c’è nulla da controllare
+  }
+  
 
     /* 1 ── chiedi lo stato di tutti i task ancora attivi */
     final allTaskIds =
         _pendingJobs.values.expand((j) => j.tasksPerCtx.values);
     final statusResp = await _apiSdk.getTasksStatus(allTaskIds);
 
+  // <<< QUI: log di tutti i task-id con lo stato grezzo e la mappatura >>>
+  statusResp.statuses.forEach((tid, st) {
+    debugPrint('$tid  -> ${st.status}  => ${_mapStatus(st.status)}');
+  });
+  
     /* 2 ── chat da salvare perché almeno un msg ha cambiato stato */
     final Set<String> finishedChatIds = {};
 
     /* 3 ── loop su ogni task-id restituito */
     statusResp.statuses.forEach((tid, st) {
-      final jobEntry = _pendingJobs.entries.firstWhere(
-        (e) => e.value.tasksPerCtx.values
-            .any((t) => t.loaderTaskId == tid || t.vectorTaskId == tid),
-      );
+// ✅ nuovo
+final jobEntry = _pendingJobs.entries.firstWhereOrNull(
+  (e) => e.value.tasksPerCtx.values.any(
+        (t) => t.loaderTaskId == tid || t.vectorTaskId == tid),
+);
 
+if (jobEntry == null) return;   // nessun job corrispondente ⇒ ignora
       final String jobId  = jobEntry.key;
       final job           = jobEntry.value;
       final String chatId = job.chatId;                 // può essere vuoto
       final bool   hasChat = chatId.isNotEmpty;         // <── NOVITÀ
 
       final newStage = _mapStatus(st.status);
+
+// ▼▼▼ BLOCCO A ▼▼▼  (pulisce job/task risolti)
+if (newStage == TaskStage.done || newStage == TaskStage.error) {
+  // 1. togli questo taskId dal job
+  job.tasksPerCtx.removeWhere((ctx, t) =>
+      t.loaderTaskId == tid || t.vectorTaskId == tid);
+
+  // 2. se non resta alcun task attivo → rimuovi l’intero job
+  final allResolved = job.tasksPerCtx.values.every((t) =>
+      t.loaderTaskId == null && t.vectorTaskId == null);
+
+  if (allResolved) {
+    _pendingJobs.remove(jobId);
+    // facoltativo: chiudi anche la card
+    //_dismissNotification(jobId);
+  }
+}
 
       // 3-a  ► card overlay (sempre presente)
       final notif = _taskNotifications[jobId];
@@ -4159,6 +4241,7 @@ if (newMsg['widgetDataList'] != null) {
 
     // Richiamiamo il dialog esterno
     await showSelectContextDialog(
+      chatHistory: _chatHistory,
       context: context,
       availableContexts: _availableContexts,
       initialSelectedContexts: _selectedContexts,

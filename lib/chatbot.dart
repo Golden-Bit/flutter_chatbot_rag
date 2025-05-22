@@ -296,7 +296,7 @@ Map<String, dynamic> _buildCurrentAgentConfig() {
     'config_id' : _latestConfigId,
   };
 }
-
+  bool _appReady = false;
 // Restituisce una stringa CSV escapando le virgolette
 String _toCsv(List<List<String>> rows) {
   return rows.map((r) =>
@@ -1601,26 +1601,40 @@ if (message.containsKey('fileUpload')) {
   }
 
   late Future<void> _chatHistoryFuture;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1.  initState ➜ delega tutto a un helper _initStateAsync() **await-safe**
-// ─────────────────────────────────────────────────────────────────────────────
 @override
 void initState() {
   super.initState();
-  _initStateAsync();                           // ← parte subito ma resta fuori
-}                                              //   dal ciclo di build
+  _initStateAsync();                 // parte subito ma resta fuori dal build
+}
 
 // helper “completo” (può usare await senza problemi)
 Future<void> _initStateAsync() async {
-  await _bootstrap();                          // ① config + contexts
-  await _prepareChainForCurrentChat();         // ② chain per la chat “vuota”
+  // ────────────────────────────────────────────────────────────────────
+  // ① bootstrap: config + contesti
+  // ────────────────────────────────────────────────────────────────────
+  await _bootstrap();
 
-  _initTaskNotifications();                    // ③ resto invariato
-  _speech       = stt.SpeechToText();
-  _flutterTts   = FlutterTts();
+  // ────────────────────────────────────────────────────────────────────
+  // ② prepara una chain “vuota” legata alla chat corrente
+  // ────────────────────────────────────────────────────────────────────
+  await _prepareChainForCurrentChat();
+
+  // ────────────────────────────────────────────────────────────────────
+  // ③ notifiche & inizializzazioni varie
+  // ────────────────────────────────────────────────────────────────────
+  _initTaskNotifications();
+  _speech     = stt.SpeechToText();
+  _flutterTts = FlutterTts();
+
+  // ────────────────────────────────────────────────────────────────────
+  // ④ carica *e aspetta* la chat-history
+  // ────────────────────────────────────────────────────────────────────
   _chatHistoryFuture = _loadChatHistory();
+  await _chatHistoryFuture;              // ← attesa effettiva
 
+  // ────────────────────────────────────────────────────────────────────
+  // ⑤ listener & scroll
+  // ────────────────────────────────────────────────────────────────────
   _controller.addListener(() => setState(() {}));
 
   _messagesScrollController.addListener(() {
@@ -1635,11 +1649,22 @@ Future<void> _initStateAsync() async {
     }
   });
 
-  _databaseService.createDatabase('database', widget.token.accessToken);
+  // ────────────────────────────────────────────────────────────────────
+  // ⑥ crea (o verifica) il DB – **attendi** prima di sbloccare la UI
+  // ────────────────────────────────────────────────────────────────────
+  await _databaseService.createDatabase('database', widget.token.accessToken);
+
+  // ────────────────────────────────────────────────────────────────────
+  // ⑦ ripristina eventuali ID di chain salvati in precedenza
+  // ────────────────────────────────────────────────────────────────────
   _latestChainId  = html.window.localStorage['latestChainId'];
   _latestConfigId = html.window.localStorage['latestConfigId'];
-}
 
+  // ────────────────────────────────────────────────────────────────────
+  // ⑧ tutto pronto → alza il flag (solo se il widget è ancora montato)
+  // ────────────────────────────────────────────────────────────────────
+  if (mounted) setState(() => _appReady = true);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2.  _bootstrap  ➜  solo pre-caricamenti “leggeri”
@@ -2558,12 +2583,14 @@ Widget _buildNotifCard(TaskNotification n) {
                               fullLogo,
                               // Icona di espansione/contrazione a destra
                               IconButton(
-                                icon: SvgPicture.network(
+                                icon: _appReady ? SvgPicture.network(
                                     'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
                                     width: 24,
                                     height: 24,
-                                    color: Colors.grey),
-                                onPressed: () {
+                                    color: Colors.grey) : const SizedBox(
+          width:24, height:24,
+          child:CircularProgressIndicator(strokeWidth:2)),
+                                onPressed: _appReady ? () {
                                   setState(() {
                                     isExpanded = !isExpanded;
                                     if (isExpanded) {
@@ -2577,7 +2604,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                       sidebarWidth = 0.0;
                                     }
                                   });
-                                },
+                                }: () {},
                               ),
                             ],
                           ),
@@ -3109,14 +3136,16 @@ Widget _buildNotifCard(TaskNotification n) {
                             children: [
                               if (sidebarWidth == 0.0) ...[
                                 IconButton(
-                                  icon: SvgPicture.network(
+                                  icon: _appReady ? SvgPicture.network(
                                       'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
                                       width: 24,
                                       height: 24,
                                       color:
-                                          Colors.grey), //const Icon(Icons.menu,
+                                          Colors.grey) : const SizedBox(
+          width:24, height:24,
+          child:CircularProgressIndicator(strokeWidth:2)), //const Icon(Icons.menu,
                                   //color: Colors.black),
-                                  onPressed: () {
+                                  onPressed: _appReady ? () {
                                     setState(() {
                                       isExpanded = true;
                                       sidebarWidth = MediaQuery.of(context)
@@ -3126,7 +3155,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                           ? MediaQuery.of(context).size.width
                                           : 300.0;
                                     });
-                                  },
+                                  } : () {},
                                 ),
                                 const SizedBox(width: 8),
                                 fullLogo,

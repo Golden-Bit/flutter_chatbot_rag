@@ -373,6 +373,9 @@ Future<void> _loadContexts() async {
     setState(() {
       _allContexts    = all;                              // tutto, chat incluse
       _gridContexts   = all.where((c) => !_isChatContext(c)).toList();
+
+            _contexts       = List.from(_gridContexts);  
+
       _filteredContexts = List.from(_gridContexts);
     });
   } catch (e) {
@@ -963,7 +966,7 @@ TextButton(
         await _loadFilesForContext(contextPath);
 
     // Trova la descrizione associata al contesto corrente
-    final selectedContext = _contexts.firstWhere(
+  final selectedContext = _allContexts.firstWhere(
       (context) => context.path == contextPath,
       orElse: () => ContextMetadata(path: '', customMetadata: {}),
     );

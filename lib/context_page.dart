@@ -158,7 +158,7 @@ List<ContextMetadata> _allContexts = [];
 // → solo KB “visibili”: senza quelle-chat
 List<ContextMetadata> _gridContexts = [];
 
-
+  bool _isCtxLoading = false;
   void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
     final collection = _collectionNameFrom(file);
 
@@ -307,6 +307,7 @@ List<ContextMetadata> _gridContexts = [];
   void initState() {
     super.initState();
     _restorePendingState(); // ①
+        _loadContexts();               // carica i contesti appena parte la pagina
   }
 
   @override
@@ -364,24 +365,30 @@ List<ContextMetadata> _gridContexts = [];
     }
   }
 
-Future<void> _loadContexts() async {
-  try {
-    final all = await _apiSdk.listContexts(widget.username, widget.token);
+  // ▼▼▼ 2.  _loadContexts: imposta/ripristina il flag
+  Future<void> _loadContexts() async {
+    if (mounted) setState(() => _isCtxLoading = true);
 
-    if (!mounted) return;
+    try {
+      final all = await _apiSdk.listContexts(
+        widget.username,
+        widget.token,
+      );
 
-    setState(() {
-      _allContexts    = all;                              // tutto, chat incluse
-      _gridContexts   = all.where((c) => !_isChatContext(c)).toList();
+      if (!mounted) return;
 
-            _contexts       = List.from(_gridContexts);  
-
-      _filteredContexts = List.from(_gridContexts);
-    });
-  } catch (e) {
-    debugPrint('Errore nel recupero dei contesti: $e');
+      setState(() {
+        _allContexts      = all;
+        _gridContexts     = all.where((c) => !_isChatContext(c)).toList();
+        _contexts         = List.from(_gridContexts);
+        _filteredContexts = List.from(_gridContexts);
+        _isCtxLoading     = false;                 // ✓ fine caricamento
+      });
+    } catch (e) {
+      debugPrint('Errore nel recupero dei contesti: $e');
+      if (mounted) setState(() => _isCtxLoading = false);
+    }
   }
-}
 
 
   /// Filtra la lista dei contesti in base al testo immesso.
@@ -1314,39 +1321,12 @@ TextButton(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            /*Row(
-  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-  children: [
-            //Text('Gestione dei Contesti', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            //SizedBox(height: 10),
-// Titolo e pulsante "Nuovo Contesto"
-            Text('Knowledge Boxes',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-// Barre di ricerca
-const SizedBox(width: 16),
-    ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: 250), // Limite di larghezza
-      child: TextField(
-        controller: _nameSearchController,
-        onChanged: (value) {
-          _filterContexts(); // Aggiorna i risultati del filtro
-        },
-        decoration: InputDecoration(
-          hintText: 'Cerca per nome o descrizione...',
-          prefixIcon: Icon(Icons.search),
-          contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8.0),
-          ),
-        ),
-      ),
-    ),
-  ],
-),*/
             _buildSearchAreaWithTitle(),
             SizedBox(height: 10),
             SizedBox(height: 10),
-            Expanded(
+            _isCtxLoading                    // ▼▼▼ 4. show/hide
+                      ? const Expanded(child: Center(child: CircularProgressIndicator()))
+                      : Expanded(
               flex: 1,
               child: GridView.builder(
                 gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(

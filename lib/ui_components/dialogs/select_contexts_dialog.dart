@@ -55,6 +55,8 @@ class _SelectContextDialogContent extends StatefulWidget {
 
 class _SelectContextDialogContentState
     extends State<_SelectContextDialogContent> {
+
+      bool _isSaving = false;  
   // ───────────────────────────────  STATE
   late List<ContextMetadata> _filteredContexts;
   late TextEditingController _searchController;
@@ -177,11 +179,22 @@ String _displayName(ContextMetadata ctx) {
   // ════════════════════════════════════════════════════════════════════════
   //  CALLBACK
   // ════════════════════════════════════════════════════════════════════════
-  void _handleConfirm() {
-    widget.onConfirm(_selectedContexts, _selectedModel);
-    Navigator.of(context).pop();
-  }
+ Future<void> _handleConfirm() async {
+   setState(() => _isSaving = true);              // mostra loader
 
+   try {
+     // cast a `dynamic` per poter catturare l’eventuale Future
+     final dynamic ret =
+         (widget.onConfirm as dynamic)(_selectedContexts, _selectedModel);
+
+     if (ret is Future) await ret;                // aspetta se serve
+   } finally {
+     if (mounted) {
+       setState(() => _isSaving = false);
+       Navigator.of(context).pop();               // chiudi dialog
+     }
+   }
+ }
   // ════════════════════════════════════════════════════════════════════════
   //  BUILD
   // ════════════════════════════════════════════════════════════════════════
@@ -193,7 +206,8 @@ String _displayName(ContextMetadata ctx) {
       backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: ConstrainedBox(
+      child: Stack(
+    children: [ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 600),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -273,7 +287,9 @@ String _displayName(ContextMetadata ctx) {
                   ),
                   padding: const EdgeInsets.all(8),
                   height: 220,
-                  child: ListView.builder(
+                  child: widget.availableContexts.isEmpty
+    ? const Center(child: CircularProgressIndicator())
+    : ListView.builder(
                     itemCount: _filteredContexts.length,
                     itemBuilder: (_, i) {
                       final ctx = _filteredContexts[i];
@@ -347,7 +363,16 @@ String _displayName(ContextMetadata ctx) {
             ),
           ],
         ),
-      ),
+      ),      // ── loader centrato ─────────────────────────────
+      if (_isSaving)
+        const Positioned.fill(
+          child: ColoredBox(
+            color: Colors.black26,               // semi-trasparente
+            child: Center(
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        ),]),
     );
   }
 

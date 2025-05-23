@@ -15,6 +15,7 @@ import 'package:flutter_app/llm_ui_tools/tools.dart';
 import 'package:flutter_app/ui_components/buttons/blue_button.dart';
 import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
 import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
+import 'package:flutter_app/ui_components/message/table_md_builder.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/components/settings_dialog.dart';
 import 'package:flutter_app/user_manager/components/usage_analytics_dialog.dart';
@@ -42,6 +43,10 @@ import 'dart:async'; // Assicurati di importare il package Timer
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';   // se non c’era già
+// ↑ Nella sezione import esistente
+import 'package:markdown/markdown.dart' as md;           // parse Element
+import 'dart:html' as html;                              // download CSV
+import 'package:collection/collection.dart';
 
 /*void main() {
   runApp(MyApp());
@@ -291,6 +296,29 @@ Map<String, dynamic> _buildCurrentAgentConfig() {
     'config_id' : _latestConfigId,
   };
 }
+  bool _appReady = false;
+// Restituisce una stringa CSV escapando le virgolette
+String _toCsv(List<List<String>> rows) {
+  return rows.map((r) =>
+      r.map((c) => '"${c.replaceAll('"', '""')}"').join(',')
+    ).join('\r\n');
+}
+
+void _downloadCsv(List<List<String>> rows) {
+  final buffer = StringBuffer();
+  for (final r in rows) {
+    buffer.writeln(r.map((c) => '"${c.replaceAll('"', '""')}"').join(','));
+  }
+  final csvStr = buffer.toString();
+
+  final blob = html.Blob([csvStr], 'text/csv');
+  final url  = html.Url.createObjectUrlFromBlob(blob);
+  final a    = html.AnchorElement(href: url)..download = 'table.csv';
+  html.document.body!.append(a);
+  a.click();
+  a.remove();
+  html.Url.revokeObjectUrl(url);
+}
 
 
 // ──────────────────────────────────────────────────────────────────
@@ -312,6 +340,91 @@ Future<String> _ensureChatKb(String chatId, String chatName) async {
   return uuid;
 }
 
+
+/// Se la chat ha documenti indicizzati ma l’ultima chain non include la sua KB,
+/// riconfigura la chain includendo (solo) quella KB.
+Future<void> _ensureChainIncludesChatKb(String chatId) async {
+  // ── recupera la chat
+  final chat = _chatHistory.firstWhere(
+    (c) => c['id'] == chatId,
+    orElse: () => null,
+  );
+  if (chat == null) return;
+
+  // ── path KB associata
+  final String? kbPath = chat['kb_path'] as String?;
+  if (kbPath == null || kbPath.isEmpty) return;
+
+  // ── verifica che esista ≥1 upload completato
+  final bool hasIndexedDocs = (chat['messages'] as List).any((m) {
+    final fu = m['fileUpload'] as Map<String, dynamic>?;
+    return fu != null &&
+        fu['ctxPath'] == kbPath &&
+        fu['stage'] == TaskStage.done.name;
+  });
+  if (!hasIndexedDocs) return;                     // nessun doc indicizzato
+
+  // ── estrai model + contesti dell’ultima agent-config
+  String   model     = _defaultModel;
+  List<String> ctx   = [];
+  if ((chat['messages'] as List).isNotEmpty) {
+    final cfg = (chat['messages'].last['agentConfig'] ??
+            const {}) as Map<String, dynamic>;
+    model = (cfg['model'] ?? _defaultModel) as String;
+    ctx   = List<String>.from(cfg['contexts'] ?? const []);
+  }
+
+  // ── i contesti salvati sono con prefisso "<user>-…" ⇒ toglilo
+  final List<String> rawCtx =
+      ctx.map((c) => _stripUserPrefix(c)).toList();
+
+  // ── se la KB è già presente non serve fare nulla
+  if (rawCtx.contains(kbPath)) return;
+
+  // ── prepara la nuova lista contesti
+  final List<String> newCtx = [...rawCtx, kbPath];
+
+  // ── chiama il backend
+  final resp = await _contextApiSdk.configureAndLoadChain(
+    widget.user.username,
+    widget.token.accessToken,
+    newCtx,
+    model,
+  );
+
+  final String? newChainId  = resp['load_result']?['chain_id'];
+  final String? newConfigId = resp['config_result']?['config_id'];
+
+  // ── salva nella chat (così resta persistente)
+  chat['latestChainId']  = newChainId;
+  chat['latestConfigId'] = newConfigId;
+
+  // aggiorna anche l’ultima agentConfig presente
+  if ((chat['messages'] as List).isNotEmpty) {
+    final cfg =
+        (chat['messages'].last['agentConfig'] ?? <String, dynamic>{})
+            as Map<String, dynamic>;
+    cfg['chain_id']  = newChainId;
+    cfg['config_id'] = newConfigId;
+    cfg['contexts']  =
+        newCtx.map((c) => "${widget.user.username}-$c").toList();
+    chat['messages'].last['agentConfig'] = cfg;
+  }
+
+  // ── se è la chat visibile, aggiorna lo stato globale
+  if (_activeChatIndex != null &&
+      _chatHistory[_activeChatIndex!]['id'] == chatId) {
+    setState(() {
+      _latestChainId  = newChainId;
+      _latestConfigId = newConfigId;
+    });
+  }
+
+  // ── persistenza localStorage (il blocco DB verrà gestito dal tuo save/auto-save)
+  html.window.localStorage['chatHistory'] =
+      jsonEncode({'chatHistory': _chatHistory});
+}
+
 // ────────────────────────────────────────────────────────────────
 //  CONFIG DI DEFAULT (usata quando apri una chat “vergine”)
 // ────────────────────────────────────────────────────────────────
@@ -323,7 +436,10 @@ String _stripUserPrefix(String ctx) {
   return ctx.startsWith(prefix) ? ctx.substring(prefix.length) : ctx;
 }
 
-
+/// Ritorna true se `ctxPath` esiste tra le KB note all’app
+bool _contextIsKnown(String ctxPath) =>
+    _availableContexts.any((c) => c.path == ctxPath);
+    
 static const _prefsKeyPending = 'kb_pending_jobs';
 // ──────────────────────────────────────────────────────────────────
 //  Prepara (se serve) la chain per la chat *corrente*
@@ -351,34 +467,80 @@ Future<void> _prepareChainForCurrentChat() async {
 }
 
 Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
+  // ① costruisci un vero Map<String,dynamic>
+  final Map<String, dynamic> activeJobs = {
+    for (final e in jobs.entries)
+      if (e.value.tasksPerCtx.values.any((t) =>
+          t.loaderTaskId != null || t.vectorTaskId != null))
+        e.key: e.value.toJson(),
+  };
+
   final prefs = await SharedPreferences.getInstance();
-  final encoded = jobs.map((k, v) => MapEntry(k, v.toJson()));
-  await prefs.setString(_prefsKeyPending, jsonEncode(encoded));
+  await prefs.setString(_prefsKeyPending, jsonEncode(activeJobs));
 }
+
+
+
 TaskStage _mapStatus(String? s) {
   switch (s?.toUpperCase()) {
-    case 'PENDING':
-    case 'QUEUED':
-    case 'CREATED':
-    case 'SCHEDULED':
-      return TaskStage.pending;
-
-    case 'RUNNING':
-    case 'STARTED':
-      return TaskStage.running;
+    case 'FAILED':
+    case 'ERROR':
+    case 'CANCELLED':
+      return TaskStage.error;
 
     case 'DONE':
     case 'SUCCESS':
     case 'COMPLETED':
+    case 'SUCCEEDED':
       return TaskStage.done;
 
-    case 'FAILED':
-    case 'ERROR':
-    case 'CANCELLED':
-    default:
-      return TaskStage.error;
+    case 'RUNNING':
+    case 'STARTED':
+    case 'PROCESSING':
+    case 'INDEXING':
+      return TaskStage.running;
+
+    case 'PENDING':
+    case 'QUEUED':
+    case 'CREATED':
+    case 'SCHEDULED':
+    default:                      // fallback *non è* più errore
+      return TaskStage.pending;
   }
 }
+
+// all’interno di ChatBotPageState
+bool _isChainLoading = false;           // ← spinner / disabilita invio
+
+/// Attende finché la chain non è pronta.
+/// Se mancano gli ID li richiede e li salva in stato.
+Future<void> _ensureChainReady() async {
+  // già configurata?
+  final bool ready = (_latestChainId?.isNotEmpty ?? false) &&
+                     (_latestConfigId?.isNotEmpty ?? false);
+  if (ready) return;
+
+  // evita doppie inizializzazioni concorrenti
+  if (_isChainLoading) {
+    while (_isChainLoading) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    return;
+  }
+
+  setState(() => _isChainLoading = true);
+  try {
+    // 1. KB della chat e chain “vuota”
+    await _prepareChainForCurrentChat();
+
+    // 2. configura davvero la chain con i contesti correnti
+    await set_context(_rawContextsForChain(), _selectedModel);
+  } finally {
+    setState(() => _isChainLoading = false);
+  }
+}
+
+
 // ⇠ dentro ChatBotPage (stesso livello di _uploadFileForContextAsync nel Dashboard)
 Future<void> _uploadFileForChatAsync({required bool isMedia}) async {
   // 1. scelta file -----------------------------------------------------------
@@ -425,9 +587,9 @@ Future<void> _uploadFileForChatAsync({required bool isMedia}) async {
     tasksPerCtx: tasksPerCtx,
   );
   await _savePendingJobs(_pendingJobs);   // persistenza
-final List<Map<String, dynamic>> buffer = _bufferFor(chatId);
+
   setState(() {
-  buffer.add({
+  messages.add({
     'id'        : uuid.v4(),
     'role'      : 'user',
     'content'   : 'File "$fName" caricato',   // testo visibile
@@ -441,9 +603,50 @@ final List<Map<String, dynamic>> buffer = _bufferFor(chatId);
     'agentConfig': _buildCurrentAgentConfig(),        //  <— aggiungi questo
   });
 
-  _saveConversationFor(chatId, buffer);
+  _saveConversation(messages);
 });
 
+}
+
+// ──────────────────────────────────────────────────────────────────
+// carica nella KB tutti i messaggi non ancora presenti (uno .txt per msg)
+Future<void> _syncMessagesToKb(String kbPath) async {
+  // lista dei file già presenti nella KB
+  final existing = await _contextApiSdk.listFiles(
+    widget.user.username,
+    widget.token.accessToken,
+    contexts: [kbPath],
+  );
+  final already = existing.map((f) => f['custom_metadata']?['msg_id'] as String?)
+                          .whereType<String>()
+                          .toSet();
+
+  for (final m in messages) {
+    final id = m['id'] as String;
+    if (already.contains(id) || _syncedMsgIds.contains(id)) continue;
+
+    // JSON "pulito" del singolo messaggio
+    final msgJson = jsonEncode({
+      'id'      : m['id'],
+      'role'    : m['role'],
+      'content' : m['content'],
+      'createdAt': m['createdAt'],
+    });
+    final bytes = utf8.encode(msgJson);
+
+    await _contextApiSdk.uploadFileToContexts(
+      Uint8List.fromList(bytes),
+      [kbPath],
+      widget.user.username,
+      widget.token.accessToken,
+      description : 'msg ${m['id']}',
+      fileName    : '${m['id']}.txt',
+      extraMetadata: {                                     // <-- traccia l’ID msg
+        'msg_id': id,
+      },
+    );
+    _syncedMsgIds.add(id);                                // evita doppioni futuri
+  }
 }
 
 /// Ritorna `true` se esiste almeno un messaggio “fileUpload”
@@ -532,21 +735,6 @@ Future<void> _reconfigureChainIfNeeded(String chatId) async {
     await set_context(_rawContextsForChain(), _selectedModel);
   }
 }
-/// ① Contiene i messaggi di ogni chat.
-///    Chiave = chatId,  valore = lista di messaggi di quella chat
-final Map<String, List<Map<String, dynamic>>> _chatBuffers = {};
-
-/// ② Listener che verranno chiamati quando si cambia chat
-final List<VoidCallback> _chatSwitchListeners = [];
-
-/// helper – restituisce l’id della chat attualmente a schermo
-String get _currentChatId => _activeChatIndex != null
-    ? _chatHistory[_activeChatIndex!]['id'] as String
-    : '';
-
-/// da usare al posto di `messages`
-List<Map<String,dynamic>> _bufferFor(String chatId) =>
-    _chatBuffers.putIfAbsent(chatId, () => []);
 
   /// ++ ogni volta che l’assistente **ha finito** di rispondere
   static final ValueNotifier<int> assistantTurnCompleted =
@@ -556,7 +744,9 @@ List<Map<String,dynamic>> _bufferFor(String chatId) =>
   int _widgetCounter = 0; // Contatore globale nella classe per i placeholder
 void _refreshNotifOverlay() {
   // ① se non c’è alcuna card visibile esci subito
-  final hasVisible = _taskNotifications.values.any((n) => n.isVisible);
+  final hasVisible = _taskNotifications.values.any(
+  (n) => n.isVisible && _contextIsKnown(n.contextPath),
+);
   if (!hasVisible) {
     // …ma tieniti pronto ad inserirlo alla prossima card “visibile”
     if (_notifOverlay != null) {
@@ -654,7 +844,7 @@ void _refreshNotifOverlay() {
     }
   }
 
-  List<Map<String, dynamic>> get messages => _bufferFor(_currentChatId);
+  List<Map<String, dynamic>> messages = [];
 
   final Map<String, Widget> _widgetCache = {}; // Cache dei widget
   final Uuid uuid = Uuid(); // Istanza di UUID (può essere globale nel file)
@@ -985,7 +1175,7 @@ final Map<String, Map<String, dynamic>> _toolEvents = {};
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: const [
-                Text("Caricamento widget in corso..."),
+                Text("Caricamento in corso..."),
                 SizedBox(width: 8),
                 CircularProgressIndicator(),
               ],
@@ -1249,7 +1439,7 @@ if (message.containsKey('fileUpload')) {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Caricamento widget in corso..."),
+                  const Text("Caricamento in corso..."),
                   const SizedBox(width: 8),
                   const CircularProgressIndicator(),
                 ],
@@ -1411,26 +1601,40 @@ if (message.containsKey('fileUpload')) {
   }
 
   late Future<void> _chatHistoryFuture;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1.  initState ➜ delega tutto a un helper _initStateAsync() **await-safe**
-// ─────────────────────────────────────────────────────────────────────────────
 @override
 void initState() {
   super.initState();
-  _initStateAsync();                           // ← parte subito ma resta fuori
-}                                              //   dal ciclo di build
+  _initStateAsync();                 // parte subito ma resta fuori dal build
+}
 
 // helper “completo” (può usare await senza problemi)
 Future<void> _initStateAsync() async {
-  await _bootstrap();                          // ① config + contexts
-  await _prepareChainForCurrentChat();         // ② chain per la chat “vuota”
+  // ────────────────────────────────────────────────────────────────────
+  // ① bootstrap: config + contesti
+  // ────────────────────────────────────────────────────────────────────
+  await _bootstrap();
 
-  _initTaskNotifications();                    // ③ resto invariato
-  _speech       = stt.SpeechToText();
-  _flutterTts   = FlutterTts();
+  // ────────────────────────────────────────────────────────────────────
+  // ② prepara una chain “vuota” legata alla chat corrente
+  // ────────────────────────────────────────────────────────────────────
+  await _prepareChainForCurrentChat();
+
+  // ────────────────────────────────────────────────────────────────────
+  // ③ notifiche & inizializzazioni varie
+  // ────────────────────────────────────────────────────────────────────
+  _initTaskNotifications();
+  _speech     = stt.SpeechToText();
+  _flutterTts = FlutterTts();
+
+  // ────────────────────────────────────────────────────────────────────
+  // ④ carica *e aspetta* la chat-history
+  // ────────────────────────────────────────────────────────────────────
   _chatHistoryFuture = _loadChatHistory();
+  await _chatHistoryFuture;              // ← attesa effettiva
 
+  // ────────────────────────────────────────────────────────────────────
+  // ⑤ listener & scroll
+  // ────────────────────────────────────────────────────────────────────
   _controller.addListener(() => setState(() {}));
 
   _messagesScrollController.addListener(() {
@@ -1445,11 +1649,22 @@ Future<void> _initStateAsync() async {
     }
   });
 
-  _databaseService.createDatabase('database', widget.token.accessToken);
+  // ────────────────────────────────────────────────────────────────────
+  // ⑥ crea (o verifica) il DB – **attendi** prima di sbloccare la UI
+  // ────────────────────────────────────────────────────────────────────
+  await _databaseService.createDatabase('database', widget.token.accessToken);
+
+  // ────────────────────────────────────────────────────────────────────
+  // ⑦ ripristina eventuali ID di chain salvati in precedenza
+  // ────────────────────────────────────────────────────────────────────
   _latestChainId  = html.window.localStorage['latestChainId'];
   _latestConfigId = html.window.localStorage['latestConfigId'];
-}
 
+  // ────────────────────────────────────────────────────────────────────
+  // ⑧ tutto pronto → alza il flag (solo se il widget è ancora montato)
+  // ────────────────────────────────────────────────────────────────────
+  if (mounted) setState(() => _appReady = true);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2.  _bootstrap  ➜  solo pre-caricamenti “leggeri”
@@ -1553,11 +1768,14 @@ Future<void> _bootstrap() async {
         borderRadius: BorderRadius.circular(8.0),
       ),
       child: MarkdownBody(
+        extensionSet: md.ExtensionSet.gitHubWeb,
         selectable: true,
         data: content,
         // Inserisci il builder personalizzato per i blocchi di codice
         builders: {
           'code': CodeBlockBuilder(context),
+          'table':ScrollableTableBuilder(onDownload: _downloadCsv),
+ 
         },
         styleSheet: MarkdownStyleSheet(
           p: const TextStyle(fontSize: 16.0, color: Colors.black87),
@@ -1974,6 +2192,9 @@ Future<void> _initTaskNotifications() async {
       );
     }
   });
+
+  await _savePendingJobs(_pendingJobs);
+  
 }
 
 /// Se non troviamo la chat, restituiamo stringa vuota
@@ -1995,29 +2216,61 @@ void _startNotifOverlay() {
   Overlay.of(context, rootOverlay: true)!.insert(_notifOverlay!);
 
   _notifPoller = Timer.periodic(const Duration(seconds: 3), (_) async {
+
     if (_taskNotifications.isEmpty) return;
+
+          if (_pendingJobs.isEmpty) {
+    _notifPoller?.cancel();
+    _notifPoller = null;
+    return;                       // niente GET se non c’è nulla da controllare
+  }
+  
 
     /* 1 ── chiedi lo stato di tutti i task ancora attivi */
     final allTaskIds =
         _pendingJobs.values.expand((j) => j.tasksPerCtx.values);
     final statusResp = await _apiSdk.getTasksStatus(allTaskIds);
 
+  // <<< QUI: log di tutti i task-id con lo stato grezzo e la mappatura >>>
+  statusResp.statuses.forEach((tid, st) {
+    debugPrint('$tid  -> ${st.status}  => ${_mapStatus(st.status)}');
+  });
+  
     /* 2 ── chat da salvare perché almeno un msg ha cambiato stato */
     final Set<String> finishedChatIds = {};
 
     /* 3 ── loop su ogni task-id restituito */
     statusResp.statuses.forEach((tid, st) {
-      final jobEntry = _pendingJobs.entries.firstWhere(
-        (e) => e.value.tasksPerCtx.values
-            .any((t) => t.loaderTaskId == tid || t.vectorTaskId == tid),
-      );
+// ✅ nuovo
+final jobEntry = _pendingJobs.entries.firstWhereOrNull(
+  (e) => e.value.tasksPerCtx.values.any(
+        (t) => t.loaderTaskId == tid || t.vectorTaskId == tid),
+);
 
+if (jobEntry == null) return;   // nessun job corrispondente ⇒ ignora
       final String jobId  = jobEntry.key;
       final job           = jobEntry.value;
       final String chatId = job.chatId;                 // può essere vuoto
       final bool   hasChat = chatId.isNotEmpty;         // <── NOVITÀ
 
       final newStage = _mapStatus(st.status);
+
+// ▼▼▼ BLOCCO A ▼▼▼  (pulisce job/task risolti)
+if (newStage == TaskStage.done || newStage == TaskStage.error) {
+  // 1. togli questo taskId dal job
+  job.tasksPerCtx.removeWhere((ctx, t) =>
+      t.loaderTaskId == tid || t.vectorTaskId == tid);
+
+  // 2. se non resta alcun task attivo → rimuovi l’intero job
+  final allResolved = job.tasksPerCtx.values.every((t) =>
+      t.loaderTaskId == null && t.vectorTaskId == null);
+
+  if (allResolved) {
+    _pendingJobs.remove(jobId);
+    // facoltativo: chiudi anche la card
+    //_dismissNotification(jobId);
+  }
+}
 
       // 3-a  ► card overlay (sempre presente)
       final notif = _taskNotifications[jobId];
@@ -2190,10 +2443,10 @@ OverlayEntry _buildOverlay() {
             constraints: const BoxConstraints(maxWidth: 400),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: _taskNotifications.values
-                  .where((n) => n.isVisible)
-                  .map(_buildNotifCard)
-                  .toList(),
+children: _taskNotifications.values
+    .where((n) => n.isVisible && _contextIsKnown(n.contextPath))
+    .map(_buildNotifCard)
+    .toList(),
             ),
           ),
         ),
@@ -2330,12 +2583,14 @@ Widget _buildNotifCard(TaskNotification n) {
                               fullLogo,
                               // Icona di espansione/contrazione a destra
                               IconButton(
-                                icon: SvgPicture.network(
+                                icon: _appReady ? SvgPicture.network(
                                     'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
                                     width: 24,
                                     height: 24,
-                                    color: Colors.grey),
-                                onPressed: () {
+                                    color: Colors.grey) : const SizedBox(
+          width:24, height:24,
+          child:CircularProgressIndicator(strokeWidth:2)),
+                                onPressed: _appReady ? () {
                                   setState(() {
                                     isExpanded = !isExpanded;
                                     if (isExpanded) {
@@ -2349,7 +2604,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                       sidebarWidth = 0.0;
                                     }
                                   });
-                                },
+                                }: () {},
                               ),
                             ],
                           ),
@@ -2881,14 +3136,16 @@ Widget _buildNotifCard(TaskNotification n) {
                             children: [
                               if (sidebarWidth == 0.0) ...[
                                 IconButton(
-                                  icon: SvgPicture.network(
+                                  icon: _appReady ? SvgPicture.network(
                                       'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
                                       width: 24,
                                       height: 24,
                                       color:
-                                          Colors.grey), //const Icon(Icons.menu,
+                                          Colors.grey) : const SizedBox(
+          width:24, height:24,
+          child:CircularProgressIndicator(strokeWidth:2)), //const Icon(Icons.menu,
                                   //color: Colors.black),
-                                  onPressed: () {
+                                  onPressed: _appReady ? () {
                                     setState(() {
                                       isExpanded = true;
                                       sidebarWidth = MediaQuery.of(context)
@@ -2898,7 +3155,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                           ? MediaQuery.of(context).size.width
                                           : 300.0;
                                     });
-                                  },
+                                  } : () {},
                                 ),
                                 const SizedBox(width: 8),
                                 fullLogo,
@@ -3658,78 +3915,85 @@ Future<void> _startNewChat() async {
   await _prepareChainForCurrentChat();   // creerà una chain VUOTA
 }
 
- /// Carica i messaggi di `chatId` nella UI, usando il buffer dedicato.
-/// Non tocca gli stream in corso (che continuano a operare sul loro buffer).
-void _loadMessagesForChat(String chatId) {
-  // 1. reset cache widget: forza la ricostruzione dei widget embedded
-  _widgetCache.clear();
+  void _loadMessagesForChat(String chatId) {
+    // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
+    _widgetCache.clear();
+    try {
+      final chat = _chatHistory.firstWhere(
+        (chat) => chat['id'] == chatId,
+        orElse: () => null, // se non trova nulla, restituisce null
+      );
 
-  try {
-    // 2. recupera la chat dal _chatHistory
-    final Map<String, dynamic>? chat = _chatHistory.firstWhere(
-      (c) => c['id'] == chatId,
-      orElse: () => null,
-    );
-
-    if (chat == null) {
-      debugPrint('❌ Nessuna chat trovata con ID $chatId');
-      return;
-    }
-
-    // 3. aggiorna variabili di supporto
-    _chatKbPath     = chat['kb_path'] as String?;
-    _syncedMsgIds.clear();
-
-    // 4. prepara (e ordina) i messaggi
-    final List<dynamic> chatMessages = (chat['messages'] ?? []) as List<dynamic>;
-    chatMessages.sort((a, b) =>
-        DateTime.parse(a['createdAt']).compareTo(DateTime.parse(b['createdAt'])));
-
-    // 5. ottieni (o crea) il buffer per questa chat
-    final List<Map<String, dynamic>> buffer = _bufferFor(chatId);
-
-    // 6. aggiorna lo stato in un unico setState
-    setState(() {
-      _activeChatIndex = _chatHistory.indexWhere((c) => c['id'] == chatId);
-
-      // rimpiazza interamente il buffer
-      buffer
-        ..clear()
-        ..addAll(chatMessages.map((m) => Map<String, dynamic>.from(m)));
-
-      // chiudi eventuali pannelli
-      showKnowledgeBase = false;
-      showSettings      = false;
-    });
-
-    // 7. ricava gli ultimi parametri di chain/model
-    if (buffer.isNotEmpty) {
-      final Map<String, dynamic>? lastCfg = buffer.last['agentConfig'];
-      if (lastCfg != null && (lastCfg['chain_id'] as String?)?.isNotEmpty == true) {
-        _latestChainId  = lastCfg['chain_id'];
-        _latestConfigId = lastCfg['config_id'];
+      if (chat == null) {
+        // gestisci il caso in cui la chat NON esiste
       } else {
+        // gestisci la chat trovata
+      }
+
+      if (chat == null) {
+        print('Errore: Nessuna chat trovata con ID $chatId');
+        return;
+      }
+
+_chatKbPath = chat['kb_path'] as String?;        // NEW
+_syncedMsgIds.clear();                           // reset cache
+
+      // Estrai e ordina i messaggi della chat
+      List<dynamic> chatMessages = chat['messages'] ?? [];
+      chatMessages.sort((a, b) {
+        final aCreatedAt = DateTime.parse(a['createdAt']);
+        final bCreatedAt = DateTime.parse(b['createdAt']);
+        return aCreatedAt
+            .compareTo(bCreatedAt); // Ordina dal più vecchio al più recente
+      });
+
+      // Aggiorna lo stato
+      setState(() {
+        _activeChatIndex = _chatHistory.indexWhere(
+            (c) => c['id'] == chatId); // Imposta l'indice della chat attiva
+        messages.clear();
+        messages.addAll(chatMessages.map((message) {
+          // Assicura che ogni messaggio sia un Map<String, dynamic>
+          return Map<String, dynamic>.from(message);
+        }).toList());
+
+        // Forza il passaggio alla schermata delle conversazioni
+        showKnowledgeBase = false; // Nascondi KnowledgeBase
+        showSettings = false; // Nascondi Impostazioni
+      });
+
+      if (messages.isNotEmpty) {
+        final lastConfig = messages.last['agentConfig'];
+        if (lastConfig != null &&
+            (lastConfig['chain_id'] as String?)?.isNotEmpty == true) {
+          _latestChainId  = lastConfig['chain_id'];
+          _latestConfigId = lastConfig['config_id'];
+        } else {
+          // chat senza chain precedente → reset
+          _latestChainId  = null;
+          _latestConfigId = null;
+        }
+      } else {
+        // chat vuota → reset
         _latestChainId  = null;
         _latestConfigId = null;
       }
-    } else {
-      _latestChainId  = null;
-      _latestConfigId = null;
+
+      _ensureChainIncludesChatKb(chatId);
+
+      // Debug: Messaggi caricati
+      print(
+          'Messaggi caricati per chat ID $chatId (${chat['name']}): $chatMessages');
+    } catch (e) {
+      print(
+          'Errore durante il caricamento dei messaggi per chat ID $chatId: $e');
     }
-
-    // 8. debug
-    debugPrint('✔ Buffer caricato per chat $chatId → ${buffer.length} messaggi');
-  } catch (e, st) {
-    debugPrint('❌ Errore caricamento chat $chatId: $e\n$st');
   }
-}
-
 
   Future<void> _handleUserInput(String input) async {
-
-    final String chatId  = _currentChatId;              // id stabile
-   final List<Map<String,dynamic>> buffer = _bufferFor(chatId);
     if (input.isEmpty) return;
+
+    await _ensureChainReady();
 
     // Make absolutely sure we have a chain.
     //await _ensureDefaultChainConfigured();
@@ -3739,13 +4003,13 @@ void _loadMessagesForChat(String chatId) {
     print("************************");
     // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
     String currentChatName = "New Chat";
- final chatIdx = _chatHistory.indexWhere((c) => c['id'] == chatId);
- if (chatIdx != -1) currentChatName = _chatHistory[chatIdx]['name'];
-
+    if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
+      currentChatName = _chatHistory[_activeChatIndex!]['name'] as String;
+    }
 
     // Qui decidiamo quanti messaggi sono già stati inviati
     // Puoi utilizzare messages.length oppure tenere un contatore separato
- final int currentMessageCount = buffer.length;
+    final int currentMessageCount = messages.length;
 
     // Ottieni l'input modificato usando la funzione esterna
     final modifiedInput = appendChatInstruction(
@@ -3754,12 +4018,11 @@ void _loadMessagesForChat(String chatId) {
       messageCount: currentMessageCount,
     );
 
-final currentTime = DateTime.now().toIso8601String();   // Ora corrente
-
-// ▼▼ DEFINISCI qui i due id -------------------------------
-final String userMsgId      = uuid.v4();   // id univoco utente
-final String assistMsgId = uuid.v4();   // id univoco assistant
-// ▲▲-------------------------------------------------------
+    final currentTime = DateTime.now().toIso8601String(); // Ora corrente
+    final userMessageId =
+        uuid.v4(); // Genera un ID univoco per il messaggio utente
+    final assistantMessageId =
+        uuid.v4(); // Genera un ID univoco per il messaggio dell'assistente
     final formattedContexts =
         _selectedContexts.map((c) => "${widget.user.username}-$c").toList();
 
@@ -3773,20 +4036,24 @@ final String assistMsgId = uuid.v4();   // id univoco assistant
 
     setState(() {
       // Aggiungi il messaggio dell'utente con le informazioni di configurazione
- buffer.add({
-     'id'        : userMsgId,
-     'role'      : 'user',
-     'content'   : input,
-     'createdAt' : currentTime,
-     'agentConfig': agentConfiguration,
-   });
-   buffer.add({
-     'id'        : assistMsgId,
-     'role'      : 'assistant',
-     'content'   : '',
-     'createdAt' : DateTime.now().toIso8601String(),
-     'agentConfig': agentConfiguration,
-   });
+      messages.add({
+        'id': userMessageId, // ID univoco del messaggio utente
+        'role': 'user', // Ruolo dell'utente
+        'content': input, // Contenuto del messaggio
+        'createdAt': currentTime, // Timestamp
+        'agentConfig': agentConfiguration, // Configurazione dell'agente
+      });
+
+      fullResponse = ""; // Reset della risposta completa
+
+      // Aggiungi un placeholder per la risposta dell'assistente
+      messages.add({
+        'id': assistantMessageId, // ID univoco del messaggio dell'assistente
+        'role': 'assistant', // Ruolo dell'assistente
+        'content': '', // Placeholder per il contenuto
+        'createdAt': DateTime.now().toIso8601String(), // Timestamp
+        'agentConfig': agentConfiguration, // Configurazione dell'agente
+      });
     });
 
     // Pulisce il campo di input
@@ -3796,7 +4063,7 @@ final String assistMsgId = uuid.v4();   // id univoco assistant
     await _sendMessageToAPI(modifiedInput);
 
     // Salva la conversazione con ID univoco per ogni messaggio
-    await _saveConversationFor(chatId, buffer);
+    _saveConversation(messages);
   }
 
   Map<String, List<Map<String, dynamic>>> _groupChatsByDate(
@@ -3833,148 +4100,169 @@ final String assistMsgId = uuid.v4();   // id univoco assistant
     return groupedChats;
   }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WRAPPER COMPATIBILITÀ  ── mantiene la vecchia firma usata in vari punti
-// ─────────────────────────────────────────────────────────────────────────────
-/// Chiama la nuova logica passando il chat-id “congelato” e una copia dei dati.
-Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
-  final String chatId = _currentChatId;                       // id stabile
-  final List<Map<String, dynamic>> snapshot =
-      jsonDecode(jsonEncode(messages)).cast<Map<String, dynamic>>();
-  await _saveConversationFor(chatId, snapshot);
-}
+  Future<void> _saveConversation(List<Map<String, dynamic>> messages) async {
+    try {
+      final currentTime =
+          DateTime.now().toIso8601String(); // Ora corrente in formato ISO
+      final chatId = _activeChatIndex != null
+          ? _chatHistory[_activeChatIndex!]['id'] // ID della chat esistente
+          : uuid.v4(); // Genera un nuovo ID univoco per una nuova chat
+      final chatName = _activeChatIndex != null
+          ? _chatHistory[_activeChatIndex!]['name'] // Nome della chat esistente
+          : 'New Chat'; // Nome predefinito per le nuove chat
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NUOVA IMPLEMENTAZIONE  (chat-safe)
-// ─────────────────────────────────────────────────────────────────────────────
-/// Salva **buffer** (profondamente copiato) nella chat indicata da `chatId`.
-/// Non legge mai `_activeChatIndex` né variabili che possono cambiare
-/// mentre gli `await` sono in corso.
-Future<void> _saveConversationFor(
-  String chatId,
-  List<Map<String, dynamic>> buffer,
-) async {
-  try {
-    // 1. dati base
-    final String currentTime = DateTime.now().toIso8601String();
-
-    final int chatIdx = _chatHistory.indexWhere((c) => c['id'] == chatId);
-    final String chatName =
-        chatIdx != -1 ? _chatHistory[chatIdx]['name'] as String : 'New Chat';
-
-    // 2. assicura la KB per la chat
-    if (_chatKbPath == null) {
+       // assicura che la KB esista anche per le chat appena create
+       if (_chatKbPath == null) {
       _chatKbPath = await _ensureChatKb(chatId, chatName);
     }
 
-    // 3. (opzionale) sincronizza nuovi messaggi nella KB
-    // await _syncMessagesToKb(_chatKbPath!);
+    
+     // ▸ 2. sincronizza tutti i messaggi non ancora presenti nella KB
+     //     (la funzione usa la variabile globale `messages` e _syncedMsgIds)
+     //await _syncMessagesToKb(_chatKbPath!);
+    
+      // Effettua una copia profonda di tutti i messaggi
+      final List<Map<String, dynamic>> updatedMessages =
+          messages.map((originalMessage) {
+        // Cloniamo l'intero messaggio (struttura annidata) con jsonDecode(jsonEncode(...))
+        final newMsg =
+            jsonDecode(jsonEncode(originalMessage)) as Map<String, dynamic>;
 
-    // 4. normalizza i messaggi (widget & agentConfig)
-    final List<Map<String, dynamic>> updatedMessages = buffer.map((orig) {
-      final Map<String, dynamic> msg =
-          jsonDecode(jsonEncode(orig)) as Map<String, dynamic>;
+        // Se il messaggio ha dei widget, forziamo is_first_time = false in ognuno
+if (newMsg['widgetDataList'] != null) {
+  final List widgetList = newMsg['widgetDataList'];
 
-      // 4-a. widget → is_first_time = false
-      if (msg['widgetDataList'] != null) {
-        final List widgetList = msg['widgetDataList'];
-        for (int i = 0; i < widgetList.length; i++) {
-          final el = widgetList[i];
-          if (el is Map) {
-            final Map<String, dynamic> w = Map<String, dynamic>.from(el);
-            final Map<String, dynamic> jsonData =
-                (w['jsonData'] ?? <String, dynamic>{}) as Map<String, dynamic>;
-            jsonData['is_first_time'] = false;
-            w['jsonData'] = jsonData;
-            widgetList[i] = w;
-          }
-        }
-        msg['widgetDataList'] = widgetList;
-      }
+  for (int i = 0; i < widgetList.length; i++) {
+    final element = widgetList[i];
+    print('****$element');
 
-      // 4-b. aggiorna agentConfig
-      final Map<String, dynamic> ag =
-          (msg['agentConfig'] ?? <String, dynamic>{}) as Map<String, dynamic>;
-      ag['model']    = _selectedModel;
-      ag['contexts'] = _selectedContexts;
-      msg['agentConfig'] = ag;
+    // ✔ 1. assicurati che SIA davvero una Map
+    if (element is Map) {
+      //    …e convertila in Map<String,dynamic>
+      final Map<String, dynamic> widgetMap = Map<String, dynamic>.from(element);
 
-      return msg;
-    }).toList();
+      // ✔ 2. forza is_first_time = false
+      final Map<String, dynamic> jsonData =
+          (widgetMap['jsonData'] ?? {}) as Map<String, dynamic>;
+      jsonData['is_first_time'] = false;
+      widgetMap['jsonData'] = jsonData;
 
-    // 5. costruisci il record di chat
-    final Map<String, dynamic> chatDoc = {
-      'id'       : chatId,
-      'name'     : chatName,
-      'createdAt': chatIdx != -1
-          ? _chatHistory[chatIdx]['createdAt']
-          : currentTime,
-      'updatedAt': currentTime,
-      'messages' : updatedMessages,
-      'kb_path'  : _chatKbPath,
-    };
-
-    // 6. aggiorna lo stato locale _chatHistory
-    if (chatIdx != -1) {
-      _chatHistory[chatIdx] =
-          jsonDecode(jsonEncode(chatDoc)) as Map<String, dynamic>;
-    } else {
-      _chatHistory.insert(
-          0, jsonDecode(jsonEncode(chatDoc)) as Map<String, dynamic>);
+      // ✔ 3. riscrivi l’elemento normalizzato
+      widgetList[i] = widgetMap;
     }
-
-    // 7. persistenza locale
-    html.window.localStorage['chatHistory'] =
-        jsonEncode({'chatHistory': _chatHistory});
-
-    // 8. persistenza su DB
-    final String dbName         = "${widget.user.username}-database";
-    const String collectionName = 'chats';
-
-    // 8-a. cerca se la chat esiste già
-    final List existingChats = await _databaseService.fetchCollectionData(
-      dbName,
-      collectionName,
-      widget.token.accessToken,
-    );
-
-    final Map<String, dynamic>? existingChat = existingChats
-        .cast<Map<String, dynamic>>()
-        .firstWhere(
-          (c) => c['id'] == chatId,
-          orElse: () => <String, dynamic>{},
-        );
-
-    if (existingChat!.isNotEmpty && existingChat.containsKey('_id')) {
-      // update
-      await _databaseService.updateCollectionData(
-        dbName,
-        collectionName,
-        existingChat['_id'],
-        {
-          'name'     : chatDoc['name'],
-          'updatedAt': currentTime,
-          'messages' : updatedMessages,
-          'kb_path'  : _chatKbPath,
-        },
-        widget.token.accessToken,
-      );
-    } else {
-      // insert
-      await _databaseService.addDataToCollection(
-        dbName,
-        collectionName,
-        chatDoc,
-        widget.token.accessToken,
-      );
-    }
-
-    debugPrint('✔ Conversazione "$chatName" salvata (chatId=$chatId)');
-  } catch (e, st) {
-    debugPrint('❌ Errore salvataggio chat $chatId: $e\n$st');
+    //    se NON è una Map lo lasci com’è (o rimuovilo se non ti serve)
   }
+
+  newMsg['widgetDataList'] = widgetList;
 }
 
+
+        // Aggiorniamo la agentConfig per riflettere contesti e modello
+        final Map<String, dynamic> oldAgentConfig =
+            (newMsg['agentConfig'] ?? {}) as Map<String, dynamic>;
+        oldAgentConfig['model'] = _selectedModel;
+        oldAgentConfig['contexts'] = _selectedContexts;
+        newMsg['agentConfig'] = oldAgentConfig;
+
+        return newMsg;
+      }).toList();
+
+      // Crea o aggiorna la chat corrente con ID, timestamp e messaggi
+      final Map<String, dynamic> currentChat = {
+        'id': chatId, // ID della chat
+        'name': chatName, // Nome della chat
+        'createdAt': _activeChatIndex != null
+            ? _chatHistory[_activeChatIndex!]['createdAt']
+            : currentTime, // Se esisteva già, mantengo la data di creazione, altrimenti quella attuale
+        'updatedAt': currentTime, // Aggiorna il timestamp di ultima modifica
+        'messages': updatedMessages, // Lista di messaggi clonati e modificati
+        'kb_path'  : _chatKbPath,        // ← salva sempre il path
+      };
+
+      if (_activeChatIndex != null) {
+        // Aggiorna la chat esistente nella lista locale
+        _chatHistory[_activeChatIndex!] =
+            jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>;
+      } else {
+        // Aggiungi una nuova chat alla lista locale
+        _chatHistory.insert(
+            0, jsonDecode(jsonEncode(currentChat)) as Map<String, dynamic>);
+        _activeChatIndex = 0; // Imposta l'indice della nuova chat
+      }
+
+      // Salva la cronologia delle chat nel Local Storage
+      final String jsonString = jsonEncode({'chatHistory': _chatHistory});
+      html.window.localStorage['chatHistory'] = jsonString;
+      print('Chat salvata correttamente nel Local Storage.');
+
+      // Salva o aggiorna la chat nel database
+      final dbName =
+          "${widget.user.username}-database"; // Nome del DB basato sull'utente
+      final collectionName = 'chats';
+
+      try {
+        // Carica le chat esistenti dal database
+        final existingChats = await _databaseService.fetchCollectionData(
+          dbName,
+          collectionName,
+          widget.token.accessToken,
+        );
+
+        // Trova la chat corrente nel database
+        final existingChat = existingChats.firstWhere(
+          (chat) => chat['id'] == chatId,
+          orElse: () =>
+              <String, dynamic>{}, // Ritorna una mappa vuota se non trovata
+        );
+
+        if (existingChat.isNotEmpty && existingChat.containsKey('_id')) {
+          // Chat esistente: aggiorniamo i campi
+          await _databaseService.updateCollectionData(
+            dbName,
+            collectionName,
+            existingChat['_id'], // ID del documento esistente
+            {
+              'name': currentChat['name'], // Aggiorna il nome della chat
+              'updatedAt': currentTime, // Aggiorna la data di ultima modifica
+              'messages': updatedMessages, // Aggiorna i messaggi
+            },
+            widget.token.accessToken,
+          );
+          print('Chat aggiornata nel database.');
+        } else {
+          // Chat non esistente, aggiungiamone una nuova
+          await _databaseService.addDataToCollection(
+            dbName,
+            collectionName,
+            currentChat,
+            widget.token.accessToken,
+          );
+          print('Nuova chat aggiunta al database.');
+        }
+      } catch (e) {
+        if (e.toString().contains('Failed to load collection data')) {
+          // Se la collection non esiste, la creiamo e aggiungiamo la chat
+          print('Collection "chats" non esistente. Creazione in corso...');
+          await _databaseService.createCollection(
+              dbName, collectionName, widget.token.accessToken);
+
+          // Aggiungi la nuova chat
+          await _databaseService.addDataToCollection(
+            dbName,
+            collectionName,
+            currentChat,
+            widget.token.accessToken,
+          );
+
+          print('Collection "chats" creata e chat aggiunta al database.');
+        } else {
+          throw e; // Propaga eventuali altri errori
+        }
+      }
+    } catch (e) {
+      print('Errore durante il salvataggio della conversazione: $e');
+    }
+  }
 
   void _showContextDialog() async {
     // Carichiamo i contesti (se serve farlo qui) ...
@@ -3982,6 +4270,7 @@ Future<void> _saveConversationFor(
 
     // Richiamiamo il dialog esterno
     await showSelectContextDialog(
+      chatHistory: _chatHistory,
       context: context,
       availableContexts: _availableContexts,
       initialSelectedContexts: _selectedContexts,
@@ -4328,9 +4617,6 @@ Future<void> set_context(List<String> userSelected, String model) async {
   }
 
   Future<void> _sendMessageToAPI(String input) async {
-     final String chatId  = _currentChatId;
-    final List<Map<String,dynamic>> buffer = _bufferFor(chatId);
-
     if (_nlpApiUrl == null) {
       await _loadConfig(); // Assicurati che l'URL sia caricato
     }
@@ -4351,7 +4637,7 @@ Future<void> set_context(List<String> userSelected, String model) async {
     };
 
 // Trasforma la chat history sostituendo i placeholder dei widget con i JSON reali
-    final transformedChatHistory = buffer.map((message) {
+    final transformedChatHistory = messages.map((message) {
       String content = message['content'] as String;
       if (message.containsKey('widgetDataList')) {
         final List widgetList = message['widgetDataList'];
@@ -4528,7 +4814,7 @@ bool _maybeHandleToolEvent(String chunk) {
           displayOutput.write(placeholder);
 
           // e relativa card
-          (buffer.last['widgetDataList'] ??= <dynamic>[]).add({
+          (messages.last['widgetDataList'] ??= <dynamic>[]).add({
             "_id"       : runId,
             "widgetId"  : "ToolEventWidget",
             "jsonData"  : _toolEvents[runId],
@@ -4536,7 +4822,7 @@ bool _maybeHandleToolEvent(String chunk) {
           });
 
           setState(() =>
-              buffer.last['content'] = displayOutput.toString());
+              messages.last['content'] = displayOutput.toString());
           break;
 
         case 'on_tool_end':
@@ -4610,7 +4896,7 @@ bool _maybeHandleToolEvent(String chunk) {
 
                 // ‑ mostra spinner + fake widget per placeholder
                 displayOutput.write(spinnerPlaceholder);
-                final lastMsg = buffer.last;
+                final lastMsg = messages.last;
                 (lastMsg['widgetDataList'] ??= <dynamic>[])
                   ..add({
                     "_id":
@@ -4620,7 +4906,7 @@ bool _maybeHandleToolEvent(String chunk) {
                     "placeholder": spinnerPlaceholder,
                   });
                 setState(() =>
-                    buffer.last['content'] = displayOutput.toString() + "▌");
+                    messages.last['content'] = displayOutput.toString() + "▌");
               }
             }
             continue; // fine ramo "fuori" – passa al prossimo carattere
@@ -4665,7 +4951,7 @@ bool _maybeHandleToolEvent(String chunk) {
         // 3) Aggiorna la UI dopo aver consumato l'intero chunk
         // ---------------------------------------------------------------------------
         setState(() {
-          buffer.last['content'] = displayOutput.toString();
+          messages.last['content'] = displayOutput.toString();
         });
       }
 
@@ -4695,7 +4981,7 @@ bool _maybeHandleToolEvent(String chunk) {
             //  FINE STREAMING  – patch di fusione widget
             // ──────────────────────────────────────────────────────────────
             setState(() {
-              final msg = buffer.last;           // l’ultimo (assistant)
+              final msg = messages.last;           // l’ultimo (assistant)
 
               // 1) TESTO: tieni quello già visto in tempo reale
               const String spinnerPh = "[WIDGET_SPINNER]";
@@ -4723,13 +5009,13 @@ bool _maybeHandleToolEvent(String chunk) {
             print('$assistantTurnCompleted');
 
             // Salviamo la conversazione (DB/localStorage)
-            _saveConversationFor(chatId, buffer);
+            _saveConversation(messages);
           }
         }).catchError((error) {
           // Errore durante la lettura del chunk
           print('Errore durante la lettura del chunk: $error');
           setState(() {
-            buffer[buffer.length - 1]['content'] = 'Errore: $error';
+            messages[messages.length - 1]['content'] = 'Errore: $error';
           });
         });
       }

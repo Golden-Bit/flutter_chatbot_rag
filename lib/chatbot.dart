@@ -320,7 +320,7 @@ void _downloadCsv(List<List<String>> rows) {
   html.Url.revokeObjectUrl(url);
 }
 
-
+final FocusNode _inputFocus = FocusNode();
 // ──────────────────────────────────────────────────────────────────
 // crea una KB per la chat (se non esiste) e ne restituisce il path
 Future<String> _ensureChatKb(String chatId, String chatName) async {
@@ -1684,18 +1684,37 @@ Future<void> _bootstrap() async {
       _loadChatHistory();  // Carica la chat history simulata
   }*/
 
-  // Funzione per caricare i contesti dal backend
-  Future<void> _loadAvailableContexts() async {
-    try {
-      List<ContextMetadata> contexts = await _contextApiSdk.listContexts(
-          widget.user.username, widget.token.accessToken);
-      setState(() {
-        _availableContexts = contexts; // Salva i contesti caricati nello stato
-      });
-    } catch (e) {
-      print('Errore nel caricamento dei contesti: $e');
-    }
+// ──────────────────────────────────────────────────────────────────
+// Carica (o ricarica) tutti i contesti disponibili dal backend.
+// Manteniamo la *stessa* istanza di `_availableContexts` in modo che
+// i widget già montati (es. il dialog di selezione) vedano subito
+// l’aggiornamento senza dover essere ri-creati.
+// ──────────────────────────────────────────────────────────────────
+bool _isCtxLoading = false;            // evita fetch concorrenti
+
+Future<void> _loadAvailableContexts() async {
+  if (_isCtxLoading) return;           // già in corso
+  _isCtxLoading = true;
+
+  try {
+    final ctx = await _contextApiSdk.listContexts(
+      widget.user.username,
+      widget.token.accessToken,
+    );
+
+    // aggiorniamo dentro `setState`, MA senza sostituire la lista
+    setState(() {
+      _availableContexts          // stessa List, nuovi elementi
+        ..clear()
+        ..addAll(ctx);
+    });
+  } catch (e, st) {
+    debugPrint('[contexts] errore: $e\n$st');
+  } finally {
+    _isCtxLoading = false;
   }
+}
+
 
   // Funzione per aprire il dialog con il ColorPicker
   void _showColorPickerDialog(
@@ -2959,17 +2978,18 @@ Widget _buildNotifCard(TaskNotification n) {
                                                   child: Row(
                                                     children: [
                                                       Expanded(
-                                                        child: Text(
-                                                          chatName, // Mostra il nome della chat
-                                                          style: TextStyle(
-                                                            color: Colors.black,
-                                                            fontWeight: isActive
-                                                                ? FontWeight
-                                                                    .bold // Evidenzia testo se attivo
-                                                                : FontWeight
-                                                                    .normal,
-                                                          ),
-                                                        ),
+                                                        
+  child: Text(
+    chatName,
+    maxLines: 1,                      // 👉 mai andare a capo
+    overflow: TextOverflow.ellipsis,  // 👉 “…”
+    softWrap: false,                  // 👉 disabilita il wrap
+    style: TextStyle(
+      color: Colors.black,
+      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+    ),
+  ),
+
                                                       ),
                                                       Theme(
                                                           data:
@@ -3327,7 +3347,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                 } else {
                                   // Altri casi di selezione
                                   switch (value) {
-                                    case 'Profilo':
+                                    //case 'Profilo':
                                       //Navigator.push(
                                       //context,
                                       //MaterialPageRoute(
@@ -3337,7 +3357,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                       //  ),
                                       //),
                                       //);
-                                      break;
+                                      //break;
                                     case 'Utilizzo':
                                       showDialog(
                                         context: context,
@@ -3366,7 +3386,7 @@ Widget _buildNotifCard(TaskNotification n) {
                               },
                               itemBuilder: (BuildContext context) {
                                 return [
-                                  PopupMenuItem(
+                                  /*PopupMenuItem(
                                     value: 'Profilo',
                                     child: Row(
                                       children: [
@@ -3375,7 +3395,7 @@ Widget _buildNotifCard(TaskNotification n) {
                                         Text(localizations.profile),
                                       ],
                                     ),
-                                  ),
+                                  ),*/
                                   PopupMenuItem(
                                     value: 'Utilizzo',
                                     child: Row(
@@ -3656,29 +3676,24 @@ Widget _buildNotifCard(TaskNotification n) {
                                                         controller:
                                                             _inputScroll,
                                                         child: TextField(
-                                                          controller:
-                                                              _controller,
-                                                          scrollController:
-                                                              _inputScroll, // ⬅︎ collega lo scroll
-                                                          minLines:
-                                                              1, // ⬅︎ inizia con una riga
-                                                          maxLines:
-                                                              null, // ⬅︎ espandi a quante linee servono
-                                                          keyboardType:
-                                                              TextInputType
-                                                                  .multiline,
-                                                          decoration:
-                                                              InputDecoration(
-                                                            hintText: localizations
-                                                                .write_here_your_message,
-                                                            border: InputBorder
-                                                                .none,
-                                                            isCollapsed:
-                                                                true, // ⬅︎ elimina padding interno extra
-                                                          ),
-                                                          onSubmitted:
-                                                              _handleUserInput,
-                                                        ),
+  controller: _controller,
+  focusNode: _inputFocus,        // 👈 nuovo
+  minLines: 1,
+  maxLines: null,
+  keyboardType: TextInputType.multiline,
+  textInputAction: TextInputAction.send,   // 👈 mostra “Send” su mobile
+  decoration: const InputDecoration(
+    hintText: 'Scrivi qui…',
+    border: InputBorder.none,
+    isCollapsed: true,
+  ),
+  onSubmitted: (value) => _handleUserInput(value), // ⇢ Enter invia
+  onEditingComplete: () {
+    // impedisce l’andare‐a‐capo quando TextInputAction.send non è supportato
+    _handleUserInput(_controller.text);
+  },
+),
+
                                                       ),
                                                     ),
                                                   ),
@@ -4264,24 +4279,24 @@ if (newMsg['widgetDataList'] != null) {
     }
   }
 
-  void _showContextDialog() async {
+  void _showContextDialog() {
     // Carichiamo i contesti (se serve farlo qui) ...
-    await _loadAvailableContexts();
+    _loadAvailableContexts();
 
     // Richiamiamo il dialog esterno
-    await showSelectContextDialog(
+    showSelectContextDialog(
       chatHistory: _chatHistory,
       context: context,
       availableContexts: _availableContexts,
       initialSelectedContexts: _selectedContexts,
       initialModel: _selectedModel,
-      onConfirm: (List<String> newContexts, String newModel) {
+      onConfirm: (List<String> newContexts, String newModel) async {
         setState(() {
           _selectedContexts = newContexts;
           _selectedModel = newModel;
         });
         // E se vuoi, chiami la funzione set_context
-        set_context(_rawContextsForChain(), _selectedModel);
+        await set_context(_rawContextsForChain(), _selectedModel);
       },
     );
   }

@@ -1501,9 +1501,9 @@ if (message.containsKey('fileUpload')) {
         "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://35.195.200.211:8100",
         "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        //"chatbot_nlp_api": "http://127.0.0.1:8100"
+        //"chatbot_nlp_api": "http://127.0.0.1:8000"
       };
-      _nlpApiUrl = data['nlp_api'];
+      _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {
       print("Errore nel caricamento del file di configurazione: $e");
     }
@@ -4637,7 +4637,7 @@ Future<void> set_context(List<String> userSelected, String model) async {
     }
 
     // URL della chain API
-    final url = "$_nlpApiUrl/chains/stream_events_chain";
+    final url = "$_nlpApiUrl/stream_events_chain";
 
     final chainIdToUse = _latestChainId?.isNotEmpty == true
         ? _latestChainId!

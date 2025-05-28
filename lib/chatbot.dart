@@ -3688,10 +3688,10 @@ Widget _buildNotifCard(TaskNotification n) {
     isCollapsed: true,
   ),
   onSubmitted: (value) => _handleUserInput(value), // ⇢ Enter invia
-  onEditingComplete: () {
+  /*onEditingComplete: () {
     // impedisce l’andare‐a‐capo quando TextInputAction.send non è supportato
     _handleUserInput(_controller.text);
-  },
+  },*/
 ),
 
                                                       ),

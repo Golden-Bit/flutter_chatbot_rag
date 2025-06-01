@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
 
 import 'models/change_password_request.dart';
 import 'models/confirm_forgot_password_request.dart';
@@ -79,9 +80,13 @@ class UserNotConfirmedException implements Exception {
 
 
 class CognitoApiClient {
+
+
   // Imposta qui il tuo endpoint base; ad esempio, se la tua API
   // gira in locale su http://localhost:8000:
   static const String baseUrl = 'https://teatek-llm.theia-innovation.com/auth';
+  //static const String baseUrl = 'http://127.0.0.1:8001/auth';
+
 
   // Variabile per salvare l'ultimo access token e la sua scadenza
   String? lastAccessToken;
@@ -309,5 +314,51 @@ Future<SignUpResponse> signUp(SignUpRequest request) async {
     }
   }
 
+  /// Restituisce l'URL di login federato di Cognito per Azure AD
+  Future<String> getAzureLoginUrl() async {
+    final url = Uri.parse('$baseUrl/v1/user/social/azure/login-url');
+    final response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      // Il backend risponde con {"auth_url": "<URL>"}
+      final Map<String, dynamic> data = jsonDecode(response.body);
+      return data['auth_url'] as String;
+    } else {
+      throw Exception('Errore getAzureLoginUrl: ${response.body}');
+    }
+  }
+
+    /// Scambia l'AWS Cognito authorization code (ottenuto dopo login Azure) in token JWT di Cognito
+  Future<Token> exchangeAzureCodeForTokens(String code) async {
+    final url = Uri.parse('$baseUrl/v1/user/social/azure/exchange-token');
+    final payload = jsonEncode({'code': code});
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: payload,
+    );
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(response.body);
+      // Il backend risponde con {"access_token": "...", "id_token": "...", "refresh_token": "...", ...}
+      return Token.fromJson(data);
+    } else {
+      throw Exception('Errore exchangeAzureCodeForTokens: ${response.body}');
+    }
+  }
+
+  /// Restituisce l'URL di logout federato (Cognito + Azure AD)
+  Future<String> getAzureLogoutUrl() async {
+    final url = Uri.parse('$baseUrl/v1/user/social/azure/logout-url');
+    final response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(response.body);
+      return data['logout_url'] as String;
+    } else {
+      throw Exception('Errore getAzureLogoutUrl: ${response.body}');
+    }
+  }
 
 }

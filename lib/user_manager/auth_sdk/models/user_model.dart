@@ -48,15 +48,37 @@ class User {
 }
 
 class Token {
-  late final String accessToken;
-  late final String refreshToken;
+  final String accessToken;
+  final String? refreshToken;
+  final String? idToken;
+  final int? expiresIn;
+  final String? tokenType;
 
-  Token({required this.accessToken, required this.refreshToken});
+  Token({
+    required this.accessToken,
+    this.refreshToken,
+    this.idToken,
+    this.expiresIn,
+    this.tokenType,
+  });
 
   factory Token.fromJson(Map<String, dynamic> json) {
     return Token(
-      accessToken: json['access_token'],
-      refreshToken: json['refresh_token'],
+      accessToken: json['access_token'] as String,
+      idToken: json['id_token'] as String?,
+      refreshToken: json['refresh_token'] as String?,
+      expiresIn: json['expires_in'] as int?,
+      tokenType: json['token_type'] as String?,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'access_token': accessToken,
+      if (refreshToken != null) 'refresh_token': refreshToken,
+      if (idToken != null) 'id_token': idToken,
+      if (expiresIn != null) 'expires_in': expiresIn,
+      if (tokenType != null) 'token_type': tokenType,
+    };
   }
 }

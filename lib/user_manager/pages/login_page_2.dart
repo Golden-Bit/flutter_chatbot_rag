@@ -119,7 +119,7 @@ void _setError(String msg) => _errorMessage = msg;
 
         // Memorizza il token nel localStorage
         html.window.localStorage['token'] = token.accessToken;
-        html.window.localStorage['refreshToken'] = token.refreshToken;
+        html.window.localStorage['refreshToken'] = token.refreshToken!;
         html.window.localStorage['user'] = user.toJson().toString();
 
         // Naviga alla ChatBotPage

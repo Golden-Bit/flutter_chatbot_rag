@@ -20,17 +20,141 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
-
+  final CognitoApiClient _apiClient = CognitoApiClient();
   bool _isLoading = false;
   String _errorMessage = '';
-
-  /// Variabile per mostrare il logo mentre carichiamo
-  bool _isCheckingToken = true;
+  bool _isCheckingToken = true; 
 
   @override
   void initState() {
     super.initState();
-    _checkLocalStorageAndNavigate();
+    //_checkLocalStorageAndNavigate();
+    _handleRedirectOrLocalToken();
+  }
+
+ /// 1) Controlla se esiste `token` in localStorage; se sì, prova a usare GetUserInfo.
+  /// 2) Se non c'è token o non è valido, controlla se nella URL è presente `code=...`.
+  ///    Se `code` esiste, chiama exchangeAzureCodeForTokens e procedi al login.
+  Future<void> _handleRedirectOrLocalToken() async {
+    final storedToken = html.window.localStorage['token'];
+    final storedRefresh = html.window.localStorage['refreshToken'];
+
+    // 1) Se ho token e refresh token salvati, provo a recuperarli
+    if (storedToken != null && storedRefresh != null) {
+      try {
+        final token = Token(
+          accessToken: storedToken,
+          refreshToken: storedRefresh,
+        );
+
+        // Provo a leggere le info utente
+        final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
+        final userInfo = await _apiClient.getUserInfo(userInfoRequest);
+
+        // Se vanno a buon fine, navigo direttamente
+        _navigateToChatBot(userInfo: userInfo, token: token);
+        return;
+      } catch (_) {
+        // Se fallisce, cadremo al “non ho token valido” e proveremo il redirect
+      }
+    }
+
+    // 2) Se non ho un token valido, controllo se nella URL del browser c'è “?code=...”
+    final urlSearch = html.window.location.search; // es. "?code=a55463c9-..."
+    if (urlSearch!.startsWith('?code=')) {
+      // Estraggo il valore di code
+      final code = Uri.parse(html.window.location.href).queryParameters['code'];
+      if (code != null && code.isNotEmpty) {
+        try {
+          // Scambio il code per i token Cognito
+          final token = await _apiClient.exchangeAzureCodeForTokens(code);
+
+          // Memorizzo in localStorage
+          html.window.localStorage['token'] = token.accessToken;
+          if (token.refreshToken != null) {
+            html.window.localStorage['refreshToken'] = token.refreshToken!;
+          }
+
+          // Ora richiedo GetUserInfo per recuperare l'utente
+          final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
+          final userInfo = await _apiClient.getUserInfo(userInfoRequest);
+
+          // Pulisco la querystring dalla URL per evitare di rifare login se ricarico
+          html.window.history.replaceState(null, 'LoggedIn', html.window.location.pathname);
+
+          // Navigo a ChatBotPage
+          _navigateToChatBot(userInfo: userInfo, token: token);
+          return;
+        } catch (e) {
+          // Se lo scambio code/token fallisce, mostro un errore
+          setState(() {
+            _isCheckingToken = false;
+            _errorMessage = 'Errore durante login federato: $e';
+          });
+          return;
+        }
+      }
+    }
+
+    // 3) Nessun token valido e nessun code in URL → mostro la UI di login
+    setState(() {
+      _isCheckingToken = false;
+    });
+  }
+
+  /// Dato `userInfo` e `token`, istanzia il modello User e naviga alla ChatBotPage
+  void _navigateToChatBot({
+    required Map<String, dynamic> userInfo,
+    required Token token,
+  }) {
+    // Estraggo Username
+    final username = userInfo['Username'] as String? ?? '';
+    // Estraggo email dal campo UserAttributes
+    String email = '';
+    if (userInfo['UserAttributes'] != null) {
+      for (final attr in (userInfo['UserAttributes'] as List<dynamic>)) {
+        if (attr['Name'] == 'email') {
+          email = attr['Value'] as String;
+          break;
+        }
+      }
+    }
+    // Creo il modello User (fullName = username, come prima)
+    final user = User(
+      username: username,
+      email: email,
+      fullName: username,
+    );
+    // Navigo sostituendo la pagina corrente
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => ChatBotPage(user: user, token: token)),
+    );
+  }
+
+  /// Quando l'utente clicca “Continua con Microsoft”, recupero l'URL di login da backend
+  /// e ridirigo il browser verso quell'endpoint (Hosted UI Cognito → Azure AD).
+  Future<void> _onSocialPressed(String providerName) async {
+    if (providerName != 'Microsoft') {
+      // Per ora gestiamo solo Microsoft; per gli altri (Google/Apple) metti un fallback
+      debugPrint('Provider non gestito: $providerName');
+      return;
+    }
+    setState(() {
+      _errorMessage = '';
+      _isLoading = true;
+    });
+    try {
+      final loginUrl = await _apiClient.getAzureLoginUrl();
+      // Effettuo il redirect del browser intero verso Cognito Hosted UI
+      html.window.location.href = loginUrl;
+      // Non serve fare altro: verrà richiamato initState alla redirect
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Errore Invio al login federato: $e';
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _checkLocalStorageAndNavigate() async {
@@ -123,9 +247,9 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  void _onSocialPressed(String providerName) {
+  /*void _onSocialPressed(String providerName) {
     debugPrint('Hai cliccato su login con: $providerName');
-  }
+  }*/
 
   @override
   Widget build(BuildContext context) {

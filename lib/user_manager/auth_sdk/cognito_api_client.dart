@@ -366,6 +366,9 @@ Future<String> getAzureLogoutUrl() async {
 
 Future<void> performAzureLogout() async {
   // 1) Ottieni l'URL di logout federato
+  html.window.localStorage.remove('token');
+  html.window.localStorage.remove('user');
+  html.window.localStorage.remove('auth_method');
   final logoutUrl = await getAzureLogoutUrl();
 
   // 2) Reindirizza il browser a Azure AD; la successiva catena di redirect

@@ -284,7 +284,7 @@ final Map<String /*jobId*/, TaskNotification> _taskNotifications = {};
   double _lastScrollPosition = 0;
 // Nuova flag per mostrare/nascondere il FloatingActionButton
   bool _showScrollToBottomButton = false;
-
+bool isLoggingOut = false;
 /// ---------------------------------------------------------------------------
 ///  Restituisce la stessa struttura che metti nei messaggi “normali”
 ///  (aggiungi qui dentro ogni metadato aggiuntivo che ti serve)             ↓↓
@@ -1532,12 +1532,44 @@ if (message.containsKey('fileUpload')) {
   }
 
 // Funzione di logout
-  void _logout(BuildContext context) {
-    // Rimuove il token dal localStorage
-    html.window.localStorage.remove('token');
-    html.window.localStorage.remove('user');
+  // Funzione di logout aggiornata
+  
+  Future<void> _logout(BuildContext context) async {
+    setState(() {
+      isLoggingOut = true;
+    });
 
-    // Reindirizza l'utente alla pagina di login
+    // 1) Leggi il tipo di login da localStorage
+    final authMethod = html.window.localStorage['auth_method'];
+
+    // 2) Se era "azure", fai prima il logout federato
+    if (authMethod == 'azure') {
+      try {
+        await _apiClient.performAzureLogout();
+        // Se il redirect riesce, il browser verrà spostato su AzureAD → Cognito → SPA.
+        // Non verrà eseguito il codice seguente, perché la pagina cambierà.
+        return;
+      } catch (e) {
+        // Se qualcosa va storto, rimuovi comunque i dati locali e rimaniamo nella UI
+        html.window.localStorage.remove('token');
+        html.window.localStorage.remove('user');
+        html.window.localStorage.remove('auth_method');
+        setState(() {
+          isLoggingOut = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Errore durante il logout federato: $e')),
+        );
+        return;
+      }
+    }
+
+    // 3) Altrimenti (login "standard"), rimuovi semplicemente i token e naviga su /login
+    html.window.localStorage.remove('token');
+    html.window.localStorage.remove('refreshToken');
+    html.window.localStorage.remove('user');
+    html.window.localStorage.remove('auth_method');
+
     Navigator.pushReplacementNamed(context, '/login');
   }
 

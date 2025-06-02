@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
-
+import 'dart:html' as html; // Necessario per modificare window.location in Flutter Web
 import 'models/change_password_request.dart';
 import 'models/confirm_forgot_password_request.dart';
 import 'models/confirm_sign_up_request.dart';
@@ -135,6 +135,8 @@ class CognitoApiClient {
       // Salva l'access token e la sua scadenza
       lastAccessToken = signInResponse.accessToken;
       lastExpiration = _getExpirationFromToken(signInResponse.accessToken!);
+      // Al termine del login standard:
+      html.window.localStorage['auth_method'] = 'standard';
       return signInResponse;
     } else {
        final body = response.body;
@@ -342,23 +344,33 @@ Future<SignUpResponse> signUp(SignUpRequest request) async {
     if (response.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(response.body);
       // Il backend risponde con {"access_token": "...", "id_token": "...", "refresh_token": "...", ...}
+      // Al termine del login Azure AD:
+      html.window.localStorage['auth_method'] = 'azure';
       return Token.fromJson(data);
     } else {
       throw Exception('Errore exchangeAzureCodeForTokens: ${response.body}');
     }
   }
 
-  /// Restituisce l'URL di logout federato (Cognito + Azure AD)
-  Future<String> getAzureLogoutUrl() async {
-    final url = Uri.parse('$baseUrl/v1/user/social/azure/logout-url');
-    final response = await http.get(url);
+Future<String> getAzureLogoutUrl() async {
+  final url = Uri.parse('$baseUrl/v1/user/social/azure/logout-url');
+  final response = await http.get(url);
 
-    if (response.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(response.body);
-      return data['logout_url'] as String;
-    } else {
-      throw Exception('Errore getAzureLogoutUrl: ${response.body}');
-    }
+  if (response.statusCode == 200) {
+    final Map<String, dynamic> data = jsonDecode(response.body);
+    return data['logout_url'] as String;
+  } else {
+    throw Exception('Errore getAzureLogoutUrl: ${response.body}');
   }
+}
+
+Future<void> performAzureLogout() async {
+  // 1) Ottieni l'URL di logout federato
+  final logoutUrl = await getAzureLogoutUrl();
+
+  // 2) Reindirizza il browser a Azure AD; la successiva catena di redirect
+  //    porterà l'utente a Cognito e, infine, alla vostra SPA.
+  html.window.location.href = logoutUrl;
+}
 
 }

@@ -39,6 +39,7 @@ class _ToolEventCardState extends State<ToolEventCard>
 
     // Padding lato scheda: più spazio verticale e leggero bordo
     return Card(
+      color: Colors.white,
       margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 4,

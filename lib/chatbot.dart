@@ -210,10 +210,14 @@ class FileUploadWidget extends StatelessWidget {
       actions.add(trailingSpinner);
     }
 
+    final bool showProgress =
+        info.stage == TaskStage.pending || info.stage == TaskStage.running;
+
     return Card(
       elevation: 4,
+      color: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
+      child: Column(children: [ListTile(
         leading: Stack(
           alignment: Alignment.topRight,
           children: [
@@ -228,7 +232,7 @@ class FileUploadWidget extends StatelessWidget {
               child: Icon(statusIcon, size: 14, color: statusColor),
             ),
           ],
-        ),
+        ),                       
         title: Text(
           info.fileName,
           overflow: TextOverflow.ellipsis,
@@ -239,6 +243,13 @@ class FileUploadWidget extends StatelessWidget {
           children: actions,
         ),
       ),
+                if (showProgress)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: LinearProgressIndicator(
+                minHeight: 3,              // sottile e discreta
+              ),
+            ),])
     );
   }
 }

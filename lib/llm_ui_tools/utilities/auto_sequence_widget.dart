@@ -106,6 +106,7 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
       width: double.infinity,                    // occupa tutta la larghezza disponibile
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: Card(
+        color:  Colors.white,
         elevation: 2,
         clipBehavior: Clip.hardEdge,
         child: Column(

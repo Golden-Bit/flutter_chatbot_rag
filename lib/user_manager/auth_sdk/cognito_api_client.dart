@@ -30,9 +30,9 @@ class UnknownCognitoException extends CognitoException {
 }
 
 class InvalidPassword     extends CognitoException { const InvalidPassword([String m='Password non valida'])      : super(m); }
-class UsernameExists      extends CognitoException { const UsernameExists([String m='Utente già registrato'])      : super(m); }
+class UsernameExists      extends CognitoException { const UsernameExists([String m='Utente già registrato'])     : super(m); }
 class UserNotFound        extends CognitoException { const UserNotFound([String m='Utente inesistente'])          : super(m); }
-class UserNotConfirmed    extends CognitoException { const UserNotConfirmed([String m='Utente non confermato'])   : super(m); }
+class UserNotConfirmed    extends CognitoException {const UserNotConfirmed([String m = 'Utente non confermato'])  : super(m); }
 class NotAuthorized       extends CognitoException { const NotAuthorized([String m='Credenziali errate'])         : super(m); }
 class CodeMismatch        extends CognitoException { const CodeMismatch([String m='Codice errato'])               : super(m); }
 class ExpiredCode         extends CognitoException { const ExpiredCode([String m='Codice scaduto'])               : super(m); }
@@ -61,7 +61,7 @@ CognitoException _parseError(String rawBody) {
   if (detail.contains('invalidpassword'))       return const InvalidPassword();
   if (detail.contains('usernameexists'))        return const UsernameExists();
   if (detail.contains('usernotfound'))          return const UserNotFound();
-  if (detail.contains('usernotconfirmed'))      return const UserNotConfirmed();
+  if (detail.contains('usernotconfirmed'))      return const UserNotConfirmed();  
   if (detail.contains('notauthorized'))         return const NotAuthorized();
   if (detail.contains('codemismatch'))          return const CodeMismatch();
   if (detail.contains('expiredcode'))           return const ExpiredCode();
@@ -71,12 +71,12 @@ CognitoException _parseError(String rawBody) {
 }
 
 
-class UserNotConfirmedException implements Exception {
+/*class UserNotConfirmedException implements Exception {
   final String message;
   UserNotConfirmedException([this.message = 'Utente non confermato']);
   @override
   String toString() => message;
-}
+}*/
 
 
 class CognitoApiClient {

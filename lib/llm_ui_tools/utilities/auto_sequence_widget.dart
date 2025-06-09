@@ -1,24 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot.dart'; // dove risiede ChatBotPageState
+import 'package:flutter_app/chatbot.dart'; // dove risiede ChatBotPageState
 
 /// Widget che invia automaticamente una sequenza di messaggi all’assistente
 /// (una volta sola) e permette all’utente di espandere/collassare la card per
 /// vedere l’elenco completo degli step.
 ///
-/// Requisiti implementati:
-/// * la sequenza parte **dopo** che l’assistente ha chiuso il turno in cui il
-///   widget è comparso **e** la conversazione è già stata salvata;
-/// * avvio garantito una sola volta grazie ai flag `_creationTurn` e
-///   `_hasStarted`;
-/// * `is_first_time` viene forzato subito a `false` in `jsonData` così non
-///   verrà rieseguito in un restore futuro;
-/// * listener su `assistantTurnCompleted` rimosso appena la sequenza termina
-///   (oltre che in `dispose()`);
-/// * card espandibile / collassabile con click sull’intestazione; a larghezza
-///   massima disponibile (usa `width: double.infinity`);
-/// * eliminato il concetto di delay tra step (campo ignorato se presente);
-/// * quando la card è espansa viene visualizzato l’elenco numerato degli step.
+/// Novità rispetto alla versione iniziale
+/// --------------------------------------
+/// • Il pulsante STOP del ChatBot ora interrompe **anche** le sequenze
+///   automatiche in esecuzione grazie al notifier globale
+///   `ChatBotPageState.cancelSequences`.
+/// • La sequenza termina immediatamente se riceve il segnale di annullo oppure
+///   se l’utente ha già completato tutti gli step.
+/// • Listener perfettamente puliti in `dispose()`.
 class AutoSequenceWidgetTool extends StatefulWidget {
   const AutoSequenceWidgetTool({super.key, required this.jsonData, required this.onReply});
 
@@ -31,16 +26,19 @@ class AutoSequenceWidgetTool extends StatefulWidget {
 
 class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
   /*─────────────────── config ──────────────────*/
-  late final List<dynamic> _steps;              // lista degli step
-  late final bool _isFirstTime;                 // flag dal JSON
+  late final List<dynamic> _steps;      // lista degli step
+  late final bool _isFirstTime;         // flag dal JSON (prima visualizzazione)
 
   /*─────────────────── stato logico ────────────*/
-  bool _expanded   = false;                     // card aperta/chiusa
-  bool _completed  = false;                     // sequenza terminata
-  bool _hasStarted = false;                     // per evitare re‑entry
+  bool _expanded   = false;             // card aperta/chiusa
+  bool _completed  = false;             // sequenza terminata o interrotta
+  bool _hasStarted = false;             // evita ri‑entry
 
-  int _creationTurn         = 0;               // valore del notifier al mount
-  Completer<void>? _waitForAssistant;          // si completa quando l’assistente chiude un turno
+  int _creationTurn         = 0;        // valore notifier al mount
+  Completer<void>? _waitForAssistant;   // completo quando l’assistente finisce
+
+  late final VoidCallback _assistantListener;
+  late final VoidCallback _cancelListener;
 
   @override
   void initState() {
@@ -49,30 +47,40 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
     _steps       = widget.jsonData['sequence'] ?? [];
     _isFirstTime = widget.jsonData['is_first_time'] ?? true;
 
-    // forza is_first_time=false per futuri restore
+    // forza is_first_time = false per i futuri restore da history
     widget.jsonData['is_first_time'] = false;
 
-    // valore del notifier al momento della creazione del widget
+    // memorizza il valore attuale del contatore dei turni completati
     _creationTurn = ChatBotPageState.assistantTurnCompleted.value;
 
-    // ascolta i turni dell’assistente
-    ChatBotPageState.assistantTurnCompleted.addListener(_onAssistantTurnEnded);
+    /*──────── listener sui turni dell'assistente ────────*/
+    _assistantListener = _onAssistantTurnEnded;
+    ChatBotPageState.assistantTurnCompleted.addListener(_assistantListener);
+
+    /*──────── listener sul segnale globale di annullo ───*/
+    _cancelListener = () {
+      if (ChatBotPageState.cancelSequences.value && !_completed) {
+        _abortSequence();
+      }
+    };
+    ChatBotPageState.cancelSequences.addListener(_cancelListener);
   }
 
   @override
   void dispose() {
-    ChatBotPageState.assistantTurnCompleted.removeListener(_onAssistantTurnEnded);
+    ChatBotPageState.assistantTurnCompleted.removeListener(_assistantListener);
+    ChatBotPageState.cancelSequences.removeListener(_cancelListener);
     super.dispose();
   }
 
   /*─────────────────── listener ────────────────*/
   void _onAssistantTurnEnded() {
-    // se stiamo aspettando la chiusura dell’assistente per uno step, completa il completer
+    // se stiamo aspettando la fine del turno dell’assistente per proseguire
     if (_waitForAssistant != null && !_waitForAssistant!.isCompleted) {
       _waitForAssistant!.complete();
     }
 
-    // avvia sequenza la prima volta che l’assistente termina **dopo** il turno di creazione
+    // avvia la sequenza appena l’assistente chiude **dopo** la creazione
     if (_isFirstTime && !_hasStarted &&
         ChatBotPageState.assistantTurnCompleted.value > _creationTurn) {
       _hasStarted = true;
@@ -83,30 +91,43 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
   /*─────────────────── sequenza ────────────────*/
   Future<void> _runSequence() async {
     for (int i = 0; i < _steps.length; i++) {
+      // se è stato premuto STOP → interrompi loop
+      if (_completed) break;
+
       final step = _steps[i];
       final String msg = (step['message'] ?? '').toString();
       if (msg.trim().isEmpty) continue;
 
-      widget.onReply(msg);                       // 1. invia messaggio
+      widget.onReply(msg);               // 1. invia messaggio
 
       // 2. aspetta che l’assistente risponda
       _waitForAssistant = Completer<void>();
       await _waitForAssistant!.future;
     }
 
-    setState(() => _completed = true);
-    // listener non più necessario
-    ChatBotPageState.assistantTurnCompleted.removeListener(_onAssistantTurnEnded);
+    if (!_completed) {
+      setState(() => _completed = true);
+    }
+
+    // non serve più ricevere notifiche
+    ChatBotPageState.assistantTurnCompleted.removeListener(_assistantListener);
+  }
+
+  /// Interrompe immediatamente la sequenza e aggiorna la UI.
+  void _abortSequence() {
+    _completed = true;
+    _waitForAssistant?.complete();
+    setState(() {});
   }
 
   /*─────────────────── UI ──────────────────────*/
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,                    // occupa tutta la larghezza disponibile
+      width: double.infinity,            // occupa tutta la larghezza disponibile
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: Card(
-        color:  Colors.white,
+        color: Colors.white,
         elevation: 2,
         clipBehavior: Clip.hardEdge,
         child: Column(

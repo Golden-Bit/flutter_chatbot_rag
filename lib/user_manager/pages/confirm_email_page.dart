@@ -112,9 +112,11 @@ class _ConfirmEmailPageState extends State<ConfirmEmailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
               backgroundColor: Colors.white,
-      body: Center(
-        // SingleChildScrollView per evitare overflow su schermi piccoli
-        child: SingleChildScrollView(
+      body: SafeArea(                     // opzionale ma utile
+    child: Container(
+      color: Colors.white,            // <- COPRE intero canvas
+      alignment: Alignment.center,    // (rimpiazza Center)
+      child:  SingleChildScrollView(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 350),
             child: Column(
@@ -233,6 +235,6 @@ class _ConfirmEmailPageState extends State<ConfirmEmailPage> {
           ),
         ),
       ),
-    );
+    ));
   }
 }

@@ -138,13 +138,10 @@ void _setError(String msg) => _errorMessage = msg;
           content: Text('Errore durante il login: $e'),
         ));
       }
-    } on UserNotConfirmedException {
-  // 👉 reindirizzo alla schermata di conferma e-mail
+    } on UserNotConfirmed {
   Navigator.pushReplacement(
     context,
-    MaterialPageRoute(
-      builder: (_) => ConfirmEmailPage(email: widget.email),
-    ),
+    MaterialPageRoute(builder: (_) => ConfirmEmailPage(email: widget.email)),
   );
 } catch (e) {
     showCognitoError(this, _setError, e);

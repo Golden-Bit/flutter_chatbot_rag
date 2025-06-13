@@ -349,6 +349,8 @@ Future<void> uploadFileToContexts(
     String token, {
     String? description,
     required String fileName,
+    Map<String, dynamic>? loaders,   
+   Map<String, dynamic>? loaderKwargs,   
   }) async {
     if (baseUrl == null) await loadConfig();
 
@@ -361,9 +363,15 @@ Future<void> uploadFileToContexts(
     request.fields['username'] = username;
     request.fields['token'] = token;
 
-    request.files
-        .add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
 
+
+  if (loaders      != null) request.fields['loaders']       = jsonEncode(loaders);
+  if (loaderKwargs != null) request.fields['loader_kwargs'] = jsonEncode(loaderKwargs);
+
+  request.files.add(
+    http.MultipartFile.fromBytes('file', fileBytes, filename: fileName),
+  );
+  
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
 
@@ -717,5 +725,35 @@ Future<List<DocumentModel>> listDocuments(
         'Errore elenco documenti: ${response.body}');
   }
 }
+
+/// Ritorna { estensione : [loader1, loader2, …] }
+Future<Map<String, List<String>>> getLoadersCatalog() async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/loaders_catalog');
+  final res  = await http.get(uri);
+
+  if (res.statusCode == 200) {
+    final raw = jsonDecode(res.body) as Map<String, dynamic>;
+    // cast in Map<String, List<String>>
+    return raw.map((k, v) => MapEntry(k, List<String>.from(v)));
+  }
+  throw ApiException('Errore loaders_catalog: ${res.body}');
+}
+
+
+/// Ritorna { loaderName : { field : {name,type,default,items,example}, … } }
+Future<Map<String, dynamic>> getLoaderKwargsSchema() async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/loader_kwargs_schema');
+  final res  = await http.get(uri);
+
+  if (res.statusCode == 200) {
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+  throw ApiException('Errore loader_kwargs_schema: ${res.body}');
+}
+
 
 }

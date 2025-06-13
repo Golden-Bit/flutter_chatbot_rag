@@ -253,165 +253,6 @@ List<ContextMetadata> _gridContexts = [];
       },
     );
   }
-// NEW – cache locale per evitare round-trip ripetuti
-Map<String, List<String>>? _extToLoaders;
-Map<String, dynamic>?      _kwargsSchema;
-
-Future<void> _ensureLoaderCatalog() async {
-  if (_extToLoaders != null && _kwargsSchema != null) return;
-  _extToLoaders = await _apiSdk.getLoadersCatalog();
-  _kwargsSchema = await _apiSdk.getLoaderKwargsSchema();
-}
-// NEW – mostra il form e restituisce (loader, kwargs) scelti oppure null
-Future<Map<String, dynamic>?> _showLoaderConfigDialog(
-  BuildContext ctx,
-  String fileName,
-) async {
-  await _ensureLoaderCatalog();
-  final ext = fileName.split('.').last.toLowerCase();
-  final loaders = _extToLoaders![ext] ?? _extToLoaders!['default']!;
-
-  String selectedLoader = loaders.first;
-  final Map<String, TextEditingController> ctrls = {};
-
-  Map<String, dynamic> _editableSchema() {
-    final raw = _kwargsSchema![selectedLoader] as Map<String, dynamic>;
-    return Map.fromEntries(
-      raw.entries.where((e) => (e.value['editable'] ?? true) == true),
-    );
-  }
-
-  void _initCtrls() {
-    for (final e in _editableSchema().entries) {
-      ctrls[e.key] = TextEditingController(text: jsonEncode(e.value['default']));
-    }
-  }
-
-  _initCtrls();
-
-  return showDialog<Map<String, dynamic>>(
-    context: ctx,
-    barrierDismissible: false,
-    builder: (_) => StatefulBuilder(
-      builder: (c, setSt) {
-        void _onLoaderChanged(String? v) {
-          if (v == null) return;
-          setSt(() {
-            selectedLoader = v;
-            _initCtrls();            // reset campi
-          });
-        }
-
-        final schema = _editableSchema();
-
-        List<Widget> _buildFieldWidgets() => schema.entries.map((e) {
-              final fld = e.value as Map<String, dynamic>;
-              final typ = fld['type'] as String;
-              final items = fld['items'];
-              final label = fld['name'];
-
-              // tooltip con "?"
-              final labelWidget = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(label),
-                  if (fld['description'] != null)                  // opzionale
-                    Tooltip(
-                      message: fld['description'],
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 4),
-                        child: Icon(Icons.help_outline, size: 16),
-                      ),
-                    ),
-                ],
-              );
-
-              // --- dropdown per campi enumerativi ----------------------------
-              if (items is List && items.isNotEmpty) {
-                return DropdownButtonFormField(
-                  value: ctrls[e.key]!.text,
-                  items: items
-                      .map((v) => DropdownMenuItem(value: v, child: Text('$v')))
-                      .toList(),
-                  onChanged: (v) => ctrls[e.key]!.text = jsonEncode(v),
-                  decoration: InputDecoration(label: labelWidget),
-                );
-              }
-
-              // --- checkbox per bool ----------------------------------------
-              if (typ == 'boolean' || typ == 'bool') {
-                bool current = jsonDecode(ctrls[e.key]!.text) as bool;
-                return CheckboxListTile(
-                  title: labelWidget,
-                  value: current,
-                  onChanged: (v) => setSt(() {
-                    ctrls[e.key]!.text = jsonEncode(v);
-                  }),
-                );
-              }
-
-              // --- default: TextField ---------------------------------------
-              return TextField(
-                controller: ctrls[e.key],
-                decoration: InputDecoration(
-                  label: labelWidget,
-                  hintText: '(${fld["type"]}) default ${jsonEncode(fld["default"])}',
-                ),
-              );
-            }).toList();
-
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Configura loader per $fileName'),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  // selettore loader
-                  DropdownButtonFormField<String>(
-                    value: selectedLoader,
-                    items: loaders
-                        .map((l) => DropdownMenuItem(value: l, child: Text(l)))
-                        .toList(),
-                    onChanged: _onLoaderChanged,
-                    decoration: const InputDecoration(labelText: 'Loader'),
-                  ),
-                  const SizedBox(height: 12),
-                  // campi kwargs dinamici
-                  ..._buildFieldWidgets(),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Annulla'),
-              onPressed: () => Navigator.of(c).pop(null),
-            ),
-            ElevatedButton(
-              child: const Text('Procedi'),
-              onPressed: () {
-                final loadersMap = {ext: selectedLoader};
-                final kwargsMap = {
-                  ext: ctrls.map(
-                    (k, v) => MapEntry(k, jsonDecode(v.text)),
-                  )
-                };
-                Navigator.of(c).pop({
-                  'loaders': loadersMap,
-                  'loader_kwargs': kwargsMap,
-                });
-              },
-            ),
-          ],
-        );
-      },
-    ),
-  );
-}
-
 
 // convenience
   String _displayName(ContextMetadata ctx) =>
@@ -604,30 +445,23 @@ void _filterContexts() {
     }
   }
 
-/// Restituisce la mappa <context → taskIds> così chi la chiama può
-/// avviare il polling.  Ora accetta anche `loaders` e `loaderKwargs`
-/// per passare le configurazioni personalizzate al backend.
-Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
-  Uint8List fileBytes,
-  List<String> contexts, {
-  String? description,
-  required String fileName,
-  Map<String, dynamic>? loaders,        // ⬅️ NEW
-  Map<String, dynamic>? loaderKwargs,   // ⬅️ NEW
-}) async {
-  final resp = await _apiSdk.uploadFileToContextsAsync(
-    fileBytes,
-    contexts,
-    widget.username,
-    widget.token,
-    description: description,
-    fileName: fileName,
-    loaders: loaders,                   // ⬅️ pass-through
-    loaderKwargs: loaderKwargs,         // ⬅️ pass-through
-  );
-
-  return resp.tasks; // 〈context, TaskIdsPerContext〉
-}
+  /// Restituisce la mappa <context → taskIds> così chi la chiama può avviare il polling
+  Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
+    Uint8List fileBytes,
+    List<String> contexts, {
+    String? description,
+    required String fileName,
+  }) async {
+    final resp = await _apiSdk.uploadFileToContextsAsync(
+      fileBytes,
+      contexts,
+      widget.username,
+      widget.token,
+      description: description,
+      fileName: fileName,
+    );
+    return resp.tasks; // <── RITORNA
+  }
 
   /// Polla /tasks_status ogni 3 s finché tutti i task sono DONE/ERROR.
   /// Polla /tasks_status ogni 3 s finché TUTTI i task del job sono DONE/ERROR.
@@ -760,13 +594,6 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
       return;
     }
 
-  // ① apre dialog di configurazione
-  final cfg = await _showLoaderConfigDialog(
-    context,
-    result.files.first.name,
-  );
-  if (cfg == null) return; // utente ha annullato
-
     // 0. Spinner sul KB
     setState(() {
       _isLoadingMap[contextPath] = true;
@@ -782,8 +609,6 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
         result.files.first.bytes!,
         [contextPath],
         fileName: result.files.first.name,
-        loaders: cfg['loaders'],
-        loaderKwargs: cfg['loader_kwargs'],
       );
 
       // 3. Salva in memoria + SharedPreferences (keyed su jobId)

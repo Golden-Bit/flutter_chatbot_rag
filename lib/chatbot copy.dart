@@ -4889,10 +4889,12 @@ void _applyChatVars(Map<String, dynamic> patch) {
 
 // ⬇︎ add these globals near the other stream‑parser state variables -------------
 
-      bool insideWidgetBlock = false; // ▶ already present in old code
-      bool seenEndMarker = false; // ▶ NEW
-// ringBuffer (startPattern) already exists; this one is for the END marker
-      final List<int> _ringEnd = <int>[]; // ▶ NEW, per‑message state
+      bool insideWidgetBlock = false;
+      bool seenEndMarker = false;
+      String? currentWidgetId;               // ID del widget esterno in parsing
+      String currentEndMarker = "";          // marker di chiusura su misura
+      int endLen = 0;                        // lunghezza del marker dinamico
+      final List<int> _ringEnd = <int>[];    // buffer circolare per comparison
       /// Consuma il chunk e intercetta TUTTI gli eventi tool.{start|end}.
       /// Ritorna `true` se *almeno un carattere* apparteneva ad un JSON-evento
       /// (così il chiamante non lo passerà a `processChunk`).
@@ -4998,7 +5000,7 @@ void _applyChatVars(Map<String, dynamic> patch) {
 
         // pattern di chiusura senza il '>' finale
         const String endMarker = "| TYPE='WIDGET'";
-        const int endLen = endMarker.length;
+        int endLen = endMarker.length;
 
         for (int i = 0; i < chunk.length; i++) {
           final String c = chunk[i];
@@ -5056,39 +5058,75 @@ void _applyChatVars(Map<String, dynamic> patch) {
             continue; // fine ramo "fuori" – passa al prossimo carattere
           }
 
-          // -----------------------------------------------------------------
-          // 2) ‑‑ siamo DENTRO a « TYPE='WIDGET' … »
-          // -----------------------------------------------------------------
-          widgetBuffer.write(c);
+       // ─────────────────────────────────────────────────────────────
+// 2) siamo DENTRO un blocco widget (aperto da startPattern)
+// ─────────────────────────────────────────────────────────────
+widgetBuffer.write(c);
 
-          // (a) aggiorna ringEnd per individuare endMarker
-          _ringEnd.add(c.codeUnitAt(0));
-          if (_ringEnd.length > endLen) _ringEnd.removeAt(0);
-          if (!seenEndMarker && _ringEnd.length == endLen) {
-            if (String.fromCharCodes(_ringEnd) == endMarker) {
-              seenEndMarker = true; // abbiamo visto "| TYPE='WIDGET'"
+// a) se non ho ancora l'ID del widget esterno, lo estraggo ora
+if (currentWidgetId == null) {
+  final m = RegExp(r"WIDGET_ID='([^']+)'")
+      .firstMatch(widgetBuffer.toString());
+  if (m != null) {
+    currentWidgetId = m.group(1);
+    currentEndMarker =
+      "| TYPE='WIDGET' WIDGET_ID='$currentWidgetId'";
+    endLen = currentEndMarker.length;
+  }
+}
+
+// b) aggiorno il buffer circolare per cercare il mio endMarker
+  // b) se widgetBuffer termina con "<endMarker> >", abbiamo chiusura
+  final fullBuf = widgetBuffer.toString();
+  if (!seenEndMarker &&
+      currentWidgetId != null &&
+      fullBuf.endsWith("$currentEndMarker >")) {
+    seenEndMarker = true;
+  }
+
+// c) chiudo il blocco solo quando vedo il mio endMarker + '>'
+if (seenEndMarker && c == '>') {
+  // rimuovo lo spinner
+  final String withoutSpin = displayOutput
+      .toString()
+      .replaceFirst(spinnerPlaceholder, "");
+  displayOutput
+    ..clear()
+    ..write(withoutSpin);
+
+  // finalize: converto il buffer in widget esterno
+  final String placeholder =
+    _finalizeWidgetBlock(widgetBuffer.toString());
+  displayOutput.write(placeholder);
+
+            // 3) POPOLA IMMEDIATAMENTE widgetDataList (solo esterno)
+            final rawJson = widgetBuffer
+                .toString()
+                .split('|')[1]  // fra le due barre verticali
+                .trim();
+            Map<String, dynamic> widgetJson;
+            try {
+              widgetJson = jsonDecode(rawJson) as Map<String, dynamic>;
+            } catch (_) {
+              widgetJson = <String, dynamic>{};
             }
-          }
+            final widgetUniqueId = uuid.v4();
+            final lastMsg = messages.last;
+            (lastMsg['widgetDataList'] ??= <dynamic>[]).add({
+              "_id": widgetUniqueId,
+              "widgetId": currentWidgetId!,
+              "jsonData": widgetJson,
+              "placeholder": placeholder,
+            });
 
-          // (b) chiusura: SOLO se endMarker visto *e* char corrente == '>'
-          if (c == '>' && seenEndMarker) {
-            // 1‑ togli lo spinner
-            final String currentText =
-                displayOutput.toString().replaceFirst(spinnerPlaceholder, "");
-            displayOutput
-              ..clear()
-              ..write(currentText);
+  // reset parser state
+  insideWidgetBlock = false;
+  seenEndMarker = false;
+  currentWidgetId = null;
+  currentEndMarker = "";
+  _ringEnd.clear();
+}
 
-            // 2‑ finalize
-            final String placeholder =
-                _finalizeWidgetBlock(widgetBuffer.toString());
-            displayOutput.write(placeholder);
-
-            // 3‑ reset stato interno
-            insideWidgetBlock = false;
-            seenEndMarker = false;
-            _ringEnd.clear();
-          }
         }
 
         // ---------------------------------------------------------------------------
@@ -5121,31 +5159,15 @@ void _applyChatVars(Map<String, dynamic> patch) {
             // Continua a leggere
             readChunk();
           } else {
-            // ──────────────────────────────────────────────────────────────
-            //  FINE STREAMING  – patch di fusione widget
-            // ──────────────────────────────────────────────────────────────
+            // ─── FINE STREAMING – chiusura semplice ───────────────────────
             setState(() {
-              final msg = messages.last; // l’ultimo (assistant)
-
-              // 1) TESTO: tieni quello già visto in tempo reale
+              final msg = messages.last;
+              // 1) rimuovo solo lo spinner textuale
               const String spinnerPh = "[WIDGET_SPINNER]";
-              final String visibleText =
+              msg['content'] =
                   displayOutput.toString().replaceFirst(spinnerPh, "");
-              msg['content'] = visibleText;
-
-              // 2) PARSE dei blocchi < TYPE='WIDGET' … >
-              final parsed = _parsePotentialWidgets(fullOutput.toString());
-
-              // 3) MERGE  (vecchi widget + nuovi “classici”)
-              final List<dynamic> existing =
-                  (msg['widgetDataList'] ?? <dynamic>[]) as List<dynamic>;
-              msg['widgetDataList'] = [...existing, ...parsed.widgetList];
-              // 4) (opz.) rimuovi lo spinner provvisorio
-              msg['widgetDataList']
-                  .removeWhere((w) => w['widgetId'] == 'SpinnerPlaceholder');
-
-              // 5) aggiungi la agentConfig se serve
-              msg['agentConfig'] = agentConfiguration;
+              // 2) NON rifaccio _parsePotentialWidgets: 
+              //    widgetDataList è già popolato dentro processChunk
             });
 
             assistantTurnCompleted.value++;

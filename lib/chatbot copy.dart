@@ -1525,10 +1525,10 @@ Map<String, dynamic> _chatVars = {};   // <── NEW
       //final data = jsonDecode(response);
       final data = {
         "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
-        "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-        //"nlp_api": "http://35.195.200.211:8100",
+        //"nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
+        "nlp_api": "http://127.0.0.1:8777",
         //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        "chatbot_nlp_api": "http://127.0.0.1:8000"
+        "chatbot_nlp_api": "http://127.0.0.1:8777"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {

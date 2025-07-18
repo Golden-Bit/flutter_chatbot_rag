@@ -3,8 +3,9 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:uuid/uuid.dart';
-
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:math' as math;
+import 'package:expressions/expressions.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 //import 'package:http/http.dart' as http;
 import 'dart:html' as html;
 
@@ -192,6 +193,235 @@ class TaskNotification {
   });
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+//  MODELS → cost‑estimate
+// ───────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
+//  MODEL ▸ FileCost
+// ───────────────────────────────────────────────────────────────────────────
+class FileCost {
+  // ── campi ----------------------------------------------------------------
+  final String filename;
+  final String kind;                        // "document" | "image" | "video"
+  final int?    pages;
+  final double? minutes;
+  final String? strategy;
+  final int?    sizeBytes;
+  final int?    tokensEst;
+  final double? costUsd;
+  final String? formula;
+  final Map<String, dynamic>? params;
+  final Map<String, String>?  paramsConditions;
+  final String? error;
+
+  // ── ctor -----------------------------------------------------------------
+  const FileCost({
+    required this.filename,
+    required this.kind,
+    this.pages,
+    this.minutes,
+    this.strategy,
+    this.sizeBytes,
+    this.tokensEst,
+    this.costUsd,
+    this.formula,
+    this.params,
+    this.paramsConditions,
+    this.error,
+  });
+
+  // ── JSON ↔︎ model --------------------------------------------------------
+  factory FileCost.fromJson(Map<String, dynamic> j) => FileCost(
+        filename        : j['filename']  as String,
+        kind            : j['kind']      as String,
+        pages           : j['pages']     as int?,
+        minutes         : (j['minutes']  as num?)?.toDouble(),
+        strategy        : j['strategy']  as String?,
+        sizeBytes       : j['size_bytes']?? j['sizeBytes'] as int?, // doppia chiave safety
+        tokensEst       : j['tokens_est']?? j['tokensEst'] as int?,
+        costUsd         : (j['cost_usd'] ?? j['costUsd'] as num?)?.toDouble(),
+        formula         : j['formula']   as String?,
+        params          : (j['params']   as Map?)?.cast<String, dynamic>(),
+        paramsConditions: (j['params_conditions'] ?? j['paramsConditions'] as Map?)
+                            ?.cast<String, String>(),
+        error           : j['error']     as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'filename'        : filename,
+        'kind'            : kind,
+        if (pages          != null) 'pages'            : pages,
+        if (minutes        != null) 'minutes'          : minutes,
+        if (strategy       != null) 'strategy'         : strategy,
+        if (sizeBytes      != null) 'size_bytes'       : sizeBytes,
+        if (tokensEst      != null) 'tokens_est'       : tokensEst,
+        if (costUsd        != null) 'cost_usd'         : costUsd,
+        if (formula        != null) 'formula'          : formula,
+        if (params         != null) 'params'           : params,
+        if (paramsConditions != null) 'params_conditions': paramsConditions,
+        if (error          != null) 'error'            : error,
+      };
+
+  // ── util: copyWith -------------------------------------------------------
+  FileCost copyWith({
+    String?               filename,
+    String?               kind,
+    int?                  pages,
+    double?               minutes,
+    String?               strategy,
+    int?                  sizeBytes,
+    int?                  tokensEst,
+    double?               costUsd,
+    String?               formula,
+    Map<String, dynamic>? params,
+    Map<String, String>?  paramsConditions,
+    String?               error,
+  }) =>
+      FileCost(
+        filename        : filename        ?? this.filename,
+        kind            : kind            ?? this.kind,
+        pages           : pages           ?? this.pages,
+        minutes         : minutes         ?? this.minutes,
+        strategy        : strategy        ?? this.strategy,
+        sizeBytes       : sizeBytes       ?? this.sizeBytes,
+        tokensEst       : tokensEst       ?? this.tokensEst,
+        costUsd         : costUsd         ?? this.costUsd,
+        formula         : formula         ?? this.formula,
+        params          : params          ?? this.params,
+        paramsConditions: paramsConditions?? this.paramsConditions,
+        error           : error           ?? this.error,
+      );
+
+  // ── equality / hash ------------------------------------------------------
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FileCost &&
+          runtimeType == other.runtimeType &&
+          filename == other.filename &&
+          kind     == other.kind &&
+          pages    == other.pages &&
+          minutes  == other.minutes &&
+          strategy == other.strategy &&
+          sizeBytes== other.sizeBytes &&
+          tokensEst== other.tokensEst &&
+          costUsd  == other.costUsd &&
+          formula  == other.formula &&
+          error    == other.error;
+
+  @override
+  int get hashCode =>
+      Object.hash(
+        filename, kind, pages, minutes, strategy,
+        sizeBytes, tokensEst, costUsd, formula, error,
+      );
+
+  @override
+  String toString() => 'FileCost(${toJson()})';
+}
+
+class CostEstimateResponse {
+  final List<FileCost> files;
+  final double grandTotal;
+
+  CostEstimateResponse({required this.files, required this.grandTotal});
+
+  factory CostEstimateResponse.fromJson(Map<String, dynamic> j) =>
+      CostEstimateResponse(
+        files      : (j['files'] as List).map((e) => FileCost.fromJson(e)).toList(),
+        grandTotal : (j['grand_total'] as num).toDouble(),
+      );
+     Map<String, dynamic> toJson() => {
+        'files'       : files.map((f) => f.toJson()).toList(),
+        'grand_total' : grandTotal,
+      };
+    
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  MODEL ▸ InteractionCost
+// ───────────────────────────────────────────────────────────────────────────
+class InteractionCost {
+  final String  modelName;
+  final int     inputTokens;
+  final int     outputTokens;
+  final int     totalTokens;
+  final double  costInputUsd;
+  final double  costOutputUsd;
+  final double  costTotalUsd;
+  final String  formula;
+  final Map<String, dynamic> params;
+  final Map<String, String>  paramsConditions;
+
+  InteractionCost({
+    required this.modelName,
+    required this.inputTokens,
+    required this.outputTokens,
+    required this.totalTokens,
+    required this.costInputUsd,
+    required this.costOutputUsd,
+    required this.costTotalUsd,
+    required this.formula,
+    required this.params,
+    required this.paramsConditions,
+  });
+
+  /*────────────── JSON helpers ─────────────*/
+  factory InteractionCost.fromJson(Map<String, dynamic> j) => InteractionCost(
+        modelName        : j['model_name'],
+        inputTokens      : j['input_tokens'],
+        outputTokens     : j['output_tokens'],
+        totalTokens      : j['total_tokens'],
+        costInputUsd     : (j['cost_input_usd']  as num).toDouble(),
+        costOutputUsd    : (j['cost_output_usd'] as num).toDouble(),
+        costTotalUsd     : (j['cost_total_usd']  as num).toDouble(),
+        formula          : j['formula'],
+        params           : Map<String,dynamic>.from(j['params']),
+        paramsConditions : Map<String,String>.from(j['params_conditions']),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'model_name'       : modelName,
+        'input_tokens'     : inputTokens,
+        'output_tokens'    : outputTokens,
+        'total_tokens'     : totalTokens,
+        'cost_input_usd'   : costInputUsd,
+        'cost_output_usd'  : costOutputUsd,
+        'cost_total_usd'   : costTotalUsd,
+        'formula'          : formula,
+        'params'           : params,
+        'params_conditions': paramsConditions,
+      };
+
+  /*────────────── copyWith (patch F‑1) ─────────────*/
+  InteractionCost copyWith({
+    String?                modelName,
+    int?                   inputTokens,
+    int?                   outputTokens,
+    int?                   totalTokens,
+    double?                costInputUsd,
+    double?                costOutputUsd,
+    double?                costTotalUsd,
+    String?                formula,
+    Map<String,dynamic>?   params,
+    Map<String,String>?    paramsConditions,
+  }) =>
+      InteractionCost(
+        modelName       : modelName       ?? this.modelName,
+        inputTokens     : inputTokens     ?? this.inputTokens,
+        outputTokens    : outputTokens    ?? this.outputTokens,
+        totalTokens     : totalTokens     ?? this.totalTokens,
+        costInputUsd    : costInputUsd    ?? this.costInputUsd,
+        costOutputUsd   : costOutputUsd   ?? this.costOutputUsd,
+        costTotalUsd    : costTotalUsd    ?? this.costTotalUsd,
+        formula         : formula         ?? this.formula,
+        params          : params          ?? this.params,
+        paramsConditions: paramsConditions?? this.paramsConditions,
+      );
+}
+
+
+
 
 // SDK per le API
 class ContextApiSdk {
@@ -205,7 +435,7 @@ class ContextApiSdk {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
     "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    //"chatbot_nlp_api": "http://127.0.0.1:8000"
+    //"chatbot_nlp_api": "http://127.0.0.1:8777"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
@@ -755,5 +985,295 @@ Future<Map<String, dynamic>> getLoaderKwargsSchema() async {
   throw ApiException('Errore loader_kwargs_schema: ${res.body}');
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+//  2.1  Calcola costo di preprocessing file
+// ───────────────────────────────────────────────────────────────────────────
+Future<CostEstimateResponse> estimateFileProcessingCost(
+  List<Uint8List> fileBytes,
+  List<String>    fileNames, {
+  Map<String, dynamic>? loaderKwargs,
+}) async {
+  if (baseUrl == null) await loadConfig();
+  if (fileBytes.length != fileNames.length) {
+    throw ArgumentError('fileBytes e fileNames devono avere la stessa length');
+  }
+
+  final uri = Uri.parse('$baseUrl/estimate_file_processing_cost');
+  final req = http.MultipartRequest('POST', uri);
+
+  for (int i = 0; i < fileBytes.length; ++i) {
+    req.files.add(http.MultipartFile.fromBytes(
+      'files',
+      fileBytes[i],
+      filename: fileNames[i],
+    ));
+  }
+
+  if (loaderKwargs != null && loaderKwargs.isNotEmpty) {
+    req.fields['loader_kwargs'] = jsonEncode(loaderKwargs);
+  }
+
+  final streamed = await req.send();
+  final res      = await http.Response.fromStream(streamed);
+
+  if (res.statusCode == 200) {
+    return CostEstimateResponse.fromJson(jsonDecode(res.body));
+  }
+  throw ApiException('Errore estimate_file_processing_cost: ${res.body}');
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  2.2  Calcola costo di un singolo turn di chat
+// ───────────────────────────────────────────────────────────────────────────
+Future<InteractionCost> estimateChainInteractionCost({
+  String? chainId,
+  Map<String, dynamic>? chainConfig,
+  required String message,
+  List<List<String>> chatHistory = const [],
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri  = Uri.parse('$baseUrl/estimate_chain_interaction_cost');
+  final body = {
+    if (chainId     != null) 'chain_id'    : chainId,
+    if (chainConfig != null) 'chain_config': chainConfig,
+    'message'      : message,
+    'chat_history' : chatHistory,
+  };
+
+  final res = await http.post(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (res.statusCode == 200) {
+    return InteractionCost.fromJson(jsonDecode(res.body));
+  }
+  throw ApiException('Errore estimate_chain_interaction_cost: ${res.body}');
+}
+
+///  Ricalcola locally il costo di un FileCost.
+///  Restituisce **SEMPRE** un nuovo oggetto (non muta l’originale).
+/*  ────────────────────────────────────────────────────────────────────────
+    Ricalcola il costo di preprocessing **localmente** (senza round‑trip).
+    - original …… FileCost ricevuto dal backend
+    - configOverride … parametri che l’utente modifica a runtime
+   ─────────────────────────────────────────────────────────────────────── */
+
+FileCost recomputeFileCost(
+  FileCost original, {
+  Map<String, dynamic> configOverride = const {},
+}) {
+  // ── helper log cross‑platform ─────────────────────────────────────────
+  void _log(Object msg) =>
+      (const bool.fromEnvironment('dart.vm.product')) ? print(msg) : debugPrint(msg.toString());
+
+  if (original.formula == null) {
+    throw ArgumentError('FileCost.formula mancante.');
+  }
+
+  // 1️⃣  Ambiente iniziale ------------------------------------------------
+  final env = <String, dynamic>{
+    ...?original.params,          // parametri noti
+    ...configOverride,            // override dell’utente
+    // funzioni utili che la formula potrebbe chiamare
+    'ceil' : (num x) => x.ceil(),
+    'round': (num x) => x.round(),
+    'min'  : math.min,
+    'max'  : math.max,
+  };
+  _log('[cost‑eval] ENV iniziale  → ${_pretty(env)}');
+
+  // 2️⃣  Risolvi i parametri NULL usando paramsConditions -----------------
+  bool _resolvedSomething() {
+    var changed = false;
+
+    original.paramsConditions?.forEach((key, condRaw) {
+      if (env[key] != null) return;                      // già valorizzato
+
+      // Python‑style «A if cond else B» → ternario Dart
+      final cond = condRaw
+          .replaceAllMapped(RegExp(r'(.+?)\s+if\s+(.+?)\s+else\s+(.+)'),
+              (m) => '(${m[2]}) ? (${m[1]}) : (${m[3]})')
+          .replaceAll('{', '')
+          .replaceAll('}', '');
+
+      try {
+        final val = const ExpressionEvaluator()
+            .eval(Expression.parse(cond), env);
+        env[key] = val;
+        _log('[cost‑eval]   ✔  $key = $val   (via condition)');
+        changed = true;
+      } catch (e) {
+        // dipendenza non ancora risolta – riprovare al giro successivo
+        _log('[cost‑eval]   ⏳  $key in attesa (deps mancanti)');
+      }
+    });
+
+    return changed;
+  }
+
+  // max 5 passate per evitare loop infiniti
+  for (var i = 0; i < 5 && _resolvedSomething(); i++) {}
+
+  // 3️⃣  Prepara la formula per l’evaluator -------------------------------
+  var exprSrc = original.formula!
+      .split('=').last                    // rimuove "cost ="
+      .replaceAll('×', '*')               // unicode × → *
+      .replaceAllMapped(
+          RegExp(r'{([^}]+)}'), (m) => m[1]!); // {var} → var
+  _log('[cost‑eval] FORMULA finale → $exprSrc');
+
+  // 4️⃣  Valuta l’espressione --------------------------------------------
+  final result = const ExpressionEvaluator()
+      .eval(Expression.parse(exprSrc), env);
+  _log('[cost‑eval] RESULT → $result USD');
+
+  // 5️⃣  Aggiorna i params senza includere Funzioni -----------------------
+  final cleaned = <String, dynamic>{};
+  env.forEach((k, v) {
+    if (v is! Function) cleaned[k] = v;
+  });
+
+  // NB:  copyWith deve già esistere nel tuo modello FileCost
+  return original.copyWith(
+    costUsd: (result as num).toDouble(),
+    params : cleaned,
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Pretty‑printer che scarta le Funzioni (JsonEncoder fallisce altrimenti)
+   ─────────────────────────────────────────────────────────────────────── */
+String _pretty(Object obj) {
+  dynamic _sanitize(dynamic v) {
+    if (v is Map) {
+      final m = <String, dynamic>{};
+      v.forEach((k, val) {
+        if (val is! Function) m[k.toString()] = _sanitize(val);
+      });
+      return m;
+    }
+    if (v is Iterable) return v.map(_sanitize).toList();
+    if (v is Function)  return '<fn>';
+    return v;
+  }
+
+  return const JsonEncoder.withIndent('  ').convert(_sanitize(obj));
+}
+/* ─────────────────────────────────────────────────────────────────────────────
+   Ricalcola **in locale** il costo di UNA interazione chat.
+
+   • `original` … oggetto `InteractionCost` restituito dal backend
+   • `configOverride`
+       – qualunque parametro che l’utente voglia forzare a runtime
+         (es.: {"price_in": 0.012, "price_out": 0.036})
+       – viene fuso dentro `original.params` PRIMA di valutare la formula
+
+   Il metodo funziona con la **nuova** formula:
+
+     cost_total = (({tokens_system} + {tokens_user} +
+                    {tokens_history} + {tokens_tools}) / 1000) * {price_in}
+                  + ({output_tokens} / 1000) * {price_out}
+
+   Restituisce SEMPRE un nuovo oggetto (immutabile).
+   ───────────────────────────────────────────────────────────────────────── */
+InteractionCost recomputeInteractionCost(
+  InteractionCost original, {
+  Map<String, dynamic> configOverride = const {},
+}) {
+  /*────────────────── logger cross‑platform ──────────────────*/
+  void _log(Object msg) =>
+      (const bool.fromEnvironment('dart.vm.product'))
+          ? print(msg)
+          : debugPrint(msg.toString());
+
+  if (original.formula.isEmpty) {
+    throw ArgumentError('InteractionCost.formula mancante.');
+  }
+
+  /* 1️⃣  Ambiente iniziale (params + override + util‑fn) */
+  final env = <String, dynamic>{
+    ...original.params,            // valori dal backend
+    ...configOverride,             // override dell’utente
+    'ceil' : (num x) => x.ceil(),
+    'round': (num x) => x.round(),
+    'min'  : math.min,
+    'max'  : math.max,
+  };
+  _log('[chat‑eval] ENV iniziale  → ${_pretty(env)}');
+
+  /* 2️⃣  Risolvi parametri NULL tramite paramsConditions */
+  bool _resolveLoop() {
+    var changed = false;
+    original.paramsConditions.forEach((key, condRaw) {
+      if (env[key] != null) return;                // già risolto
+
+      // if … else …  →  ternario Dart
+      final ternary = condRaw
+          .replaceAllMapped(
+              RegExp(r'(.+?)\s+if\s+(.+?)\s+else\s+(.+)'),
+              (m) => '(${m[2]}) ? (${m[1]}) : (${m[3]})')
+          .replaceAll('{', '')
+          .replaceAll('}', '');
+
+      try {
+        final val = const ExpressionEvaluator()
+            .eval(Expression.parse(ternary), env);
+        env[key] = val;
+        _log('[chat‑eval]   ✔  $key = $val   (via condition)');
+        changed = true;
+      } catch (_) {
+        _log('[chat‑eval]   ⏳  $key in attesa');
+      }
+    });
+    return changed;
+  }
+
+  // risoluzione iterativa
+  for (var i = 0; i < 5 && _resolveLoop(); i++) {}
+
+  /* 3️⃣  Formula finale da valutare */
+  final expr = original.formula
+      .split('=').last
+      .replaceAll('×', '*')
+      .replaceAllMapped(RegExp(r'{([^}]+)}'), (m) => m[1]!);
+  _log('[chat‑eval] FORMULA finale → $expr');
+
+  /* 4️⃣  Valuta il costo totale */
+  final total = const ExpressionEvaluator()
+      .eval(Expression.parse(expr), env) as num;
+
+  /* 5️⃣  Ricalcola token e costi */
+  final newInTok  = (env['tokens_system']   as int) +
+                    (env['tokens_user']     as int) +
+                    (env['tokens_history']  as int);
+
+  final newOutTok = env['output_tokens']    as int;
+
+  final priceIn   = env['price_in']  as num;
+  final priceOut  = env['price_out'] as num;
+
+  final newCostIn  = (newInTok  / 1000) * priceIn;
+  final newCostOut = (newOutTok / 1000) * priceOut;
+
+  /* 6️⃣  Pulisci env da eventuali funzioni  */
+  final cleaned = <String, dynamic>{};
+  env.forEach((k, v) {
+    if (v is! Function) cleaned[k] = v;
+  });
+
+  /* 7️⃣  Restituisci la nuova InteractionCost */
+  return original.copyWith(
+    inputTokens    : newInTok,
+    outputTokens   : newOutTok,
+    totalTokens    : newInTok + newOutTok,
+    costInputUsd   : newCostIn.toDouble(),
+    costOutputUsd  : newCostOut.toDouble(),
+    costTotalUsd   : total.toDouble(),
+    params         : cleaned,
+  );
+}
 
 }

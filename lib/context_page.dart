@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -261,17 +262,168 @@ Future<void> _ensureLoaderCatalog() async {
   if (_extToLoaders != null && _kwargsSchema != null) return;
   _extToLoaders = await _apiSdk.getLoadersCatalog();
   _kwargsSchema = await _apiSdk.getLoaderKwargsSchema();
+}// ───────────────────────────────────────────────────────────────────────────
+//  DROPDOWN stile material‑v3 ri‑utilizzabile
+// ───────────────────────────────────────────────────────────────────────────
+Widget _styledDropdown({
+  required String value,
+  required List<String> items,
+  required void Function(String?) onChanged,
+}) {
+  return DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.grey[100],
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.grey[300]!),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton2<String>(
+          isExpanded: true,
+          value: value,
+          items: items
+              .map((it) => DropdownMenuItem(value: it, child: Text(it)))
+              .toList(),
+          onChanged: onChanged,
+          style: const TextStyle(color: Colors.black87),
+          buttonStyleData: const ButtonStyleData(
+            padding: EdgeInsets.zero,
+            height: 48,
+          ),
+          dropdownStyleData: DropdownStyleData(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
-// NEW – mostra il form e restituisce (loader, kwargs) scelti oppure null
+// ───────────────────────────────────────────────────────────────────────────
+//  Riquadro grigio che contiene i parametri dinamici del loader
+// ───────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
+//  Riquadro grigio che contiene i parametri dinamici del loader
+// ───────────────────────────────────────────────────────────────────────────
+Widget _kwargsPanel(List<Widget> fields) {
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(top: 12),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.grey[50],
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.grey[300]!),
+    ),
+    child: Column(children: fields),
+  );
+}
+
+
+/// helper per una riga “chiave: valore”
+/// (ritorna SizedBox.shrink se `value` è null / vuoto)
+Widget _kvCell(String key, String? value) {
+  if (value == null || value.isEmpty) return const SizedBox.shrink();
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: RichText(
+      text: TextSpan(
+        style: const TextStyle(color: Colors.black, fontSize: 13),
+        children: [
+          TextSpan(
+            text: '$key: ',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          TextSpan(text: value),
+        ],
+      ),
+    ),
+  );
+}
+
+/// box riassuntivo della stima costo (pre‑processing)
+Widget _buildCostBox(FileCost fc) {
+  /* 1️⃣  Genera dinamicamente le coppie label‑value */
+  final rowsRaw = <List<String?>>[
+    ['Filename',    fc.filename],
+    ['Kind',        fc.kind],
+    ['Pages',       fc.pages?.toString()],               // documents
+    ['Minutes',     fc.minutes?.toStringAsFixed(2)],     // video
+    ['Strategy',    fc.strategy],
+    ['Size (B)',    fc.sizeBytes.toString()],
+    ['Tokens est.', fc.tokensEst?.toString()],           // può essere null
+  ];
+
+  // tieni solo le righe con value non‑null
+  final kv = rowsRaw.where((r) => r[1] != null).toList();
+
+  /* 2️⃣  Costruisci la tabella 2 colonne, spazio costante */
+  final tableRows = <TableRow>[];
+  for (var i = 0; i < kv.length; i += 2) {
+    final left  = kv[i];
+    // se dispari, la seconda cella è vuota → _kvCell la ignorerà
+    final right = (i + 1 < kv.length) ? kv[i + 1] : ['', null];
+
+    tableRows.add(
+      TableRow(
+        children: [
+          _kvCell(left[0]!,  left[1]),   // 🔹 value può essere null
+          _kvCell(right[0]!, right[1]),  // 🔹 idem
+        ],
+      ),
+    );
+  }
+
+  /* 3️⃣  UI finale */
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Table(
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        columnWidths: const {
+          0: FlexColumnWidth(1),
+          1: FlexColumnWidth(1),
+        },
+        children: tableRows,
+      ),
+      const SizedBox(height: 8),
+      const Divider(height: 1),
+      const SizedBox(height: 6),
+      Align(
+        alignment: Alignment.centerRight,          // costo in basso a destra
+        child: Text(
+          '\$${fc.costUsd!.toStringAsFixed(4)}',
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+
+// ───────────────────────────────────────────────────────────────────────────
+//  DIALOG «Configura loader»  +  stima costo preprocessing (live‑recompute)
+// ───────────────────────────────────────────────────────────────────────────
 Future<Map<String, dynamic>?> _showLoaderConfigDialog(
   BuildContext ctx,
-  String fileName,
+  String       fileName,
+  Uint8List    fileBytes,
 ) async {
+  /* 1.  cataloghi & schema */
   await _ensureLoaderCatalog();
-  final ext = fileName.split('.').last.toLowerCase();
-  final loaders = _extToLoaders![ext] ?? _extToLoaders!['default']!;
 
+  final ext     = fileName.split('.').last.toLowerCase();
+  final loaders = _extToLoaders![ext] ?? _extToLoaders!['default']!;
   String selectedLoader = loaders.first;
+
+  /* 2.  controller kwargs */
   final Map<String, TextEditingController> ctrls = {};
 
   Map<String, dynamic> _editableSchema() {
@@ -282,105 +434,189 @@ Future<Map<String, dynamic>?> _showLoaderConfigDialog(
   }
 
   void _initCtrls() {
+    ctrls.clear();
     for (final e in _editableSchema().entries) {
-      ctrls[e.key] = TextEditingController(text: jsonEncode(e.value['default']));
+      ctrls[e.key] = TextEditingController(
+        text: jsonEncode(e.value['default']),
+      );
     }
   }
 
-  _initCtrls();
+  _initCtrls();                                // init prima apertura
 
+  /* 3.  prima (e unica) chiamata HTTP /estimate_file_processing_cost */
+  late FileCost _baseCost;
+  String _costJson = '…';
+
+late Widget _costBox = const SizedBox.shrink();
+
+  Future<void> _fetchInitialCost() async {
+    final kwargsMap = {
+      ext: ctrls.map((k, v) => MapEntry(k, jsonDecode(v.text))),
+    };
+
+    final estimate = await _apiSdk.estimateFileProcessingCost(
+      [fileBytes],
+      [fileName],
+      loaderKwargs: kwargsMap,
+    );
+
+    _baseCost = estimate.files.first;
+    //_costJson = const JsonEncoder.withIndent('  ').convert(estimate.toJson());
+    _costBox = _buildCostBox(_baseCost);
+  }
+
+  await _fetchInitialCost();                   // bloccante
+
+  /* 4.  ricalcolo locale a ogni variazione */
+  void _applyChange(StateSetter setSt) {
+    final override = {
+      ext: selectedLoader,                       // se servisse in condizioni
+      ...ctrls.map((k, v) => MapEntry(k, jsonDecode(v.text))),
+    };
+
+    final newCost = _apiSdk.recomputeFileCost(
+      _baseCost,
+      configOverride: override,
+    );
+
+    final jsonLike = {
+      'files'      : [newCost.toJson()],
+      'grand_total': newCost.costUsd,
+    };
+
+    //_costJson = const JsonEncoder.withIndent('  ').convert(jsonLike);
+    _costBox = _buildCostBox(newCost);
+    setSt(() {});                               // forza rebuild dialog
+  }
+
+  /* ════════════════════════ DIALOG ════════════════════════ */
   return showDialog<Map<String, dynamic>>(
     context: ctx,
     barrierDismissible: false,
     builder: (_) => StatefulBuilder(
       builder: (c, setSt) {
-        void _onLoaderChanged(String? v) {
+        /* helper cambio‑loader */
+        Future<void> _onLoaderChanged(String? v) async {
           if (v == null) return;
-          setSt(() {
-            selectedLoader = v;
-            _initCtrls();            // reset campi
-          });
+          selectedLoader = v;
+          _initCtrls();
+          _applyChange(setSt);
         }
 
-        final schema = _editableSchema();
-
-        List<Widget> _buildFieldWidgets() => schema.entries.map((e) {
-              final fld = e.value as Map<String, dynamic>;
-              final typ = fld['type'] as String;
+        /* campi dinamici */
+        List<Widget> _buildFieldWidgets() => _editableSchema().entries.map((e) {
+              final fld   = e.value as Map<String, dynamic>;
+              final typ   = fld['type'] as String;
               final items = fld['items'];
               final label = fld['name'];
 
-              // tooltip con "?"
-              final labelWidget = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(label),
-                  if (fld['description'] != null)                  // opzionale
-                    Tooltip(
-                      message: fld['description'],
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 4),
-                        child: Icon(Icons.help_outline, size: 16),
-                      ),
-                    ),
-                ],
-              );
+              Widget _label() => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(label),
+                      if (fld['description'] != null)
+                        Tooltip(
+                          message: fld['description'],
+                          child: const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(Icons.help_outline, size: 16),
+                          ),
+                        ),
+                    ],
+                  );
 
-              // --- dropdown per campi enumerativi ----------------------------
+              /* ENUM */
               if (items is List && items.isNotEmpty) {
-                return DropdownButtonFormField(
-                  value: ctrls[e.key]!.text,
-                  items: items
-                      .map((v) => DropdownMenuItem(value: v, child: Text('$v')))
-                      .toList(),
-                  onChanged: (v) => ctrls[e.key]!.text = jsonEncode(v),
-                  decoration: InputDecoration(label: labelWidget),
+                final curr = jsonDecode(ctrls[e.key]!.text) ?? items.first;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 8),
+                    _label(),
+                    _styledDropdown(
+                      value: curr.toString(),
+                      items: items.map((v) => v.toString()).toList(),
+                      onChanged: (v) {
+                        ctrls[e.key]!.text = jsonEncode(v);
+                        _applyChange(setSt);
+                      },
+                    ),
+                  ],
                 );
               }
 
-              // --- checkbox per bool ----------------------------------------
+              /* BOOL */
               if (typ == 'boolean' || typ == 'bool') {
-                bool current = jsonDecode(ctrls[e.key]!.text) as bool;
+                final curr = jsonDecode(ctrls[e.key]!.text) as bool;
                 return CheckboxListTile(
-                  title: labelWidget,
-                  value: current,
-                  onChanged: (v) => setSt(() {
+                  title: _label(),
+                  value: curr,
+                  onChanged: (v) {
                     ctrls[e.key]!.text = jsonEncode(v);
-                  }),
+                    _applyChange(setSt);
+                  },
                 );
               }
 
-              // --- default: TextField ---------------------------------------
+              /* TEXT / NUMBER */
               return TextField(
                 controller: ctrls[e.key],
-                decoration: InputDecoration(
-                  label: labelWidget,
-                  hintText: '(${fld["type"]}) default ${jsonEncode(fld["default"])}',
-                ),
+                decoration: InputDecoration(label: _label()),
+                onChanged: (_) => _applyChange(setSt),
               );
             }).toList();
 
+        /* UI */
         return AlertDialog(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Configura loader per $fileName'),
-          content: SizedBox(
-            width: 420,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text('Configura loader – $fileName'),
+          content: ConstrainedBox(                     // limite altezza
+            constraints: const BoxConstraints(maxHeight: 600),
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  // selettore loader
-                  DropdownButtonFormField<String>(
-                    value: selectedLoader,
-                    items: loaders
-                        .map((l) => DropdownMenuItem(value: l, child: Text(l)))
-                        .toList(),
-                    onChanged: _onLoaderChanged,
-                    decoration: const InputDecoration(labelText: 'Loader'),
+                  /* loader dropdown */
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Loader',
+                        style: const TextStyle(color: Colors.black54)),
                   ),
-                  const SizedBox(height: 12),
-                  // campi kwargs dinamici
-                  ..._buildFieldWidgets(),
+                  _styledDropdown(
+                    value: selectedLoader,
+                    items: loaders,
+                    onChanged: _onLoaderChanged,
+                  ),
+                  const SizedBox(height: 16),
+
+                  /* kwargs dinamici */
+                  _kwargsPanel(_buildFieldWidgets()),
+                  const SizedBox(height: 20),
+
+                  /* risultato costo */
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: const Text(
+                      'Stima costo preprocessing',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: _costBox,
+                  ),
                 ],
               ),
             ),
@@ -394,13 +630,13 @@ Future<Map<String, dynamic>?> _showLoaderConfigDialog(
               child: const Text('Procedi'),
               onPressed: () {
                 final loadersMap = {ext: selectedLoader};
-                final kwargsMap = {
+                final kwargsMap  = {
                   ext: ctrls.map(
                     (k, v) => MapEntry(k, jsonDecode(v.text)),
-                  )
+                  ),
                 };
                 Navigator.of(c).pop({
-                  'loaders': loadersMap,
+                  'loaders'      : loadersMap,
                   'loader_kwargs': kwargsMap,
                 });
               },
@@ -411,6 +647,8 @@ Future<Map<String, dynamic>?> _showLoaderConfigDialog(
     ),
   );
 }
+
+
 
 
 // convenience
@@ -764,6 +1002,7 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
   final cfg = await _showLoaderConfigDialog(
     context,
     result.files.first.name,
+    result.files.first.bytes!, 
   );
   if (cfg == null) return; // utente ha annullato
 

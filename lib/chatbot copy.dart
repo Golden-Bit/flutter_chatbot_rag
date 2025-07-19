@@ -49,6 +49,7 @@ import 'package:shared_preferences/shared_preferences.dart'; // se non c’era g
 import 'package:markdown/markdown.dart' as md; // parse Element
 import 'dart:html' as html; // download CSV
 import 'package:collection/collection.dart';
+import 'dart:async';
 
 class FileUploadInfo {
   String jobId;
@@ -77,6 +78,156 @@ class FileUploadInfo {
         stage: TaskStage.values
             .firstWhere((e) => e.name == (j['stage'] ?? 'pending')),
       );
+}
+class _PaginatedDocViewer extends StatefulWidget {
+  final ContextApiSdk apiSdk;
+  final String        token;
+  final String        collection;
+  final int           pageSize;
+
+  const _PaginatedDocViewer({
+    Key? key,
+    required this.apiSdk,
+    required this.token,
+    required this.collection,
+    this.pageSize = 1,
+  }) : super(key: key);
+
+  @override
+  State<_PaginatedDocViewer> createState() => _PaginatedDocViewerState();
+}
+
+class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
+  late Future<List<DocumentModel>> _future;
+  int  _page  = 0;        // 0‑based
+  int? _total;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetch();           // ► prima pagina
+  }
+
+  /*──────── helper API (skip / limit fissi) ────────*/
+  Future<List<DocumentModel>> _fetch() async {
+    return widget.apiSdk.listDocuments(
+      widget.collection,
+      token : widget.token,
+      skip  : _page * widget.pageSize,
+      limit : widget.pageSize,        // sempre = pageSize
+      onTotal: (t) => _total = t,
+    );
+  }
+
+  /*──────── cambio pagina (con guard‑rail) ────────*/
+  void _go(int delta) {
+    final next = _page + delta;
+    if (next < 0) return;                                   // < 0
+    if (_total != null && next * widget.pageSize >= _total!) return; // oltre fine
+
+    setState(() {
+      _page   = next;
+      _future = _fetch();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width : 400,
+      height: 400,
+      child : FutureBuilder<List<DocumentModel>>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError) {
+            return Text('Errore caricamento documenti: ${snap.error}');
+          }
+
+          final docs    = snap.data!;
+          final isEmpty = docs.isEmpty;
+
+          final jsonStr = isEmpty
+              ? ''
+              : const JsonEncoder.withIndent('  ').convert(
+                  docs.map((d) => {
+                    'page_content': d.pageContent,
+                    'metadata'    : d.metadata,
+                    'type'        : d.type,
+                  }).toList(),
+                );
+
+          /*───────── UI completa ─────────*/
+          return Column(
+            children: [
+              /*───── frecce + contatore ─────*/
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    tooltip : 'Pagina precedente',
+                    icon    : const Icon(Icons.arrow_back_ios_new, size: 16),
+                    onPressed: _page == 0 ? null : () => _go(-1),
+                  ),
+                  Text(
+                    _total == null
+                      ? 'Pagina ${_page + 1}'
+                      : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  IconButton(
+                    tooltip : 'Pagina successiva',
+                    icon    : const Icon(Icons.arrow_forward_ios, size: 16),
+                    onPressed: (isEmpty || docs.length < widget.pageSize)
+                      ? null
+                      : () => _go(1),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+
+              /*───── riquadro scroll / placeholder ─────*/
+              Expanded(
+                child: Container(
+                  width : double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: isEmpty
+                      ? const Center(
+                          child: Text(
+                            '— Nessun documento disponibile —',
+                            style: TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : Scrollbar(
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              jsonStr,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize : 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// Restituisce la coppia **icona + colore** in base all’estensione del file.
@@ -315,6 +466,96 @@ class ChatBotPageState extends State<ChatBotPage> {
 
 // Streaming in corso?
   bool _isStreaming = false;
+// ─────────────────────────────────────────────────────────────
+//  cost‑estimate  (widget ChatBotPageState)
+// ─────────────────────────────────────────────────────────────
+InteractionCost? _baseCost;     // baseline ufficiale (arriva UNA volta)
+double           _liveCost   = 0;
+bool             _isCostLoading = false;
+
+// ─────────────────────────────────────────────────────────────
+//  util: stima rapida token → #char / 4
+// ─────────────────────────────────────────────────────────────
+int _estimateTokens(String txt) => (txt.length / 4).ceil();
+// ─────────────────────────────────────────────────────────────
+//  helper: converte messages ➔ chat_history per il backend
+// ─────────────────────────────────────────────────────────────
+List<List<String>> _transformChatHistory(List<Map<String, dynamic>> msgs) {
+  // tieni solo user / assistant, in ordine cronologico
+  return msgs
+      .where((m) => m['role'] == 'user' || m['role'] == 'assistant')
+      .map((m) {
+        final role = m['role'] as String? ?? 'assistant';
+        var txt    = m['content'] as String? ?? '';
+
+        // rimuovi eventuali spinner / placeholder di caret
+        txt = txt.replaceAll("[WIDGET_SPINNER]", "").replaceAll("▌", "");
+
+        return [role, txt];
+      })
+      .toList();
+}
+
+/// ❶  backend – una sola volta per configurazione
+Future<void> _fetchInitialCost() async {
+  if (_latestChainId?.isEmpty ?? true) return;
+
+  setState(() => _isCostLoading = true);
+  try {
+    _baseCost = await _apiSdk.estimateChainInteractionCost(
+      chainId:     _latestChainId!,
+      message:     "",
+      chatHistory: _transformChatHistory(messages),
+    );
+    _liveCost = _baseCost!.costTotalUsd;
+  } catch (e) {
+    debugPrint('[cost] errore: $e');
+  } finally {
+    if (mounted) setState(() {
+      _isCostLoading = false;
+    });                             // F‑6
+  }
+}
+
+/// ❷  live‑preview mentre l’utente digita
+void _updateLiveCost(String draft) {
+  if (_baseCost == null) return;
+
+  final newTokensUser = _estimateTokens(draft);
+
+  final est = _apiSdk.recomputeInteractionCost(
+    _baseCost!,
+    configOverride: {
+      'tokens_user'   : newTokensUser,
+      'tokens_history': _baseCost!.params['tokens_history'],  // int safe
+    },
+  );
+
+  setState(() => _liveCost = est.costTotalUsd);
+}
+
+/// ❸  roll‑forward: nuova baseline in locale
+///
+///  sentTxt  → contenuto appena inviato dall’utente  
+///  outTok   → token di output dell’assistente (reali o stimati)
+void _advanceBaseline(String sentTxt, int outTok) {
+  if (_baseCost == null) return;
+
+  final sentTok = _estimateTokens(sentTxt);
+  final oldHist = (_baseCost!.params['tokens_history'] as int?) ?? 0;  // F‑3
+
+  _baseCost = _apiSdk.recomputeInteractionCost(
+    _baseCost!,
+    configOverride: {
+      'tokens_history': oldHist + sentTok + outTok,
+      'tokens_user'   : 0,                           // reset per il turno dopo
+    },
+  );
+
+  _liveCost = _baseCost!.costTotalUsd;
+  setState(() {});                                   // refresh UI
+}
+
 
 // Riferimenti per cancellare lo stream
   dynamic _streamReader; // il reader JS
@@ -463,6 +704,7 @@ class ChatBotPageState extends State<ChatBotPage> {
 
     // 2‧ chain con SOLO la KB-chat
     await set_context(_rawContextsForChain(), _selectedModel);
+    await _fetchInitialCost();          // unica call al backend
   }
 
   Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
@@ -532,6 +774,7 @@ class ChatBotPageState extends State<ChatBotPage> {
 
       // 2. configura davvero la chain con i contesti correnti
       await set_context(_rawContextsForChain(), _selectedModel);
+      await _fetchInitialCost();          // unica call al backend
     } finally {
       setState(() => _isChainLoading = false);
     }
@@ -728,6 +971,7 @@ class ChatBotPageState extends State<ChatBotPage> {
     // Se la KB-chat ora ha documenti indicizzati rifai la set_context
     if (_chatKbHasIndexedDocs()) {
       await set_context(_rawContextsForChain(), _selectedModel);
+      await _fetchInitialCost();          // unica call al backend
     }
   }
 
@@ -1247,101 +1491,56 @@ Map<String, dynamic> _chatVars = {};   // <── NEW
     return raw.replaceAll('/', '') + '_collection';
   }
 
-  void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
-    final collection = _collectionNameFrom(file);
 
-    showDialog(
-      context: context,
-      builder: (_) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
+  final collection = _collectionNameFrom(file);
 
-          // ──────────────────────────────────────────────────────
-          // ⬆️  TITOLO + PULSANTE DOWNLOAD JSON A DESTRA
-          // ──────────────────────────────────────────────────────
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  fileName,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Scarica JSON documenti',
-                icon: const Icon(Icons.download),
-                onPressed: () => _downloadDocumentsJson(collection, fileName),
-              ),
-            ],
-          ),
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding   : const EdgeInsets.fromLTRB(16,16,16,0),
+      contentPadding : const EdgeInsets.fromLTRB(16,8,16,16),
 
-          // ──────────────────────────────────────────────────────
-          //  Contenuto: lista documenti (scrollabile)
-          // ──────────────────────────────────────────────────────
-          content: FutureBuilder<List<DocumentModel>>(
-            future: _apiSdk.listDocuments(collection,
-                token: widget.token.accessToken),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const SizedBox(
-                  width: 300,
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snap.hasError) {
-                return Text('Errore caricamento documenti: ${snap.error}');
-              }
-
-              final jsonStr = const JsonEncoder.withIndent('  ').convert(
-                snap.data!
-                    .map((d) => {
-                          'page_content': d.pageContent,
-                          'metadata': d.metadata,
-                          'type': d.type,
-                        })
-                    .toList(),
-              );
-
-              return Container(
-                width: 400,
-                height: 400,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Scrollbar(
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    child: SelectableText(
-                      jsonStr,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Chiudi'),
-              onPressed: () => Navigator.of(context).pop(),
+      /*──────────────────────── titolo + pulsante download ─────────────────────*/
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              fileName,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-        );
-      },
-    );
-  }
+          ),
+          IconButton(
+            tooltip: 'Scarica JSON documenti',
+            icon   : const Icon(Icons.download),
+            onPressed: () => _downloadDocumentsJson(collection, fileName),
+          ),
+        ],
+      ),
+
+      /*──────────────────────── corpo paginato (Stateful) ──────────────────────*/
+      content: _PaginatedDocViewer(
+        apiSdk     : _apiSdk,
+        token      : widget.token.accessToken,              // stringa token
+        collection : collection,
+        pageSize   : 1,                         // mostra 1 doc per pagina
+      ),
+
+      actions: [
+        TextButton(
+          child: const Text('Chiudi'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    ),
+  );
+}
+
+
 
   Widget _buildMixedContent(Map<String, dynamic> message) {
     // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
@@ -1525,8 +1724,8 @@ Map<String, dynamic> _chatVars = {};   // <── NEW
       //final data = jsonDecode(response);
       final data = {
         "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
-        //"nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-        "nlp_api": "http://127.0.0.1:8777",
+        "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
+        //"nlp_api": "http://127.0.0.1:8777",
         //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
         "chatbot_nlp_api": "http://127.0.0.1:8777"
       };
@@ -3792,6 +3991,7 @@ void _applyChatVars(Map<String, dynamic> patch) {
                                                                 .none,
                                                             isCollapsed: true,
                                                           ),
+                                                          onChanged:   _updateLiveCost,
                                                           onSubmitted: (value) =>
                                                               _handleUserInput(
                                                                   value), // ⇢ Enter invia
@@ -3864,7 +4064,19 @@ void _applyChatVars(Map<String, dynamic> patch) {
                                                         ),
 
                                                         const Spacer(),
-
+/*────────────── QUI il numerino del costo (o spinner) ─────────────*/
+    _isCostLoading
+        ? const SizedBox(
+            width: 40, height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2))
+        : Text(
+            "\$${_liveCost.toStringAsFixed(4)}",
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),  
 // ───────────────────────── pulsante finale ─────────────────────────
                                                         _isStreaming
                                                             // ① streaming in corso → STOP ▢
@@ -4051,83 +4263,81 @@ void _applyChatVars(Map<String, dynamic> patch) {
     });
 
     await _prepareChainForCurrentChat(); // creerà una chain VUOTA
+    await _fetchInitialCost();
   }
 
-  void _loadMessagesForChat(String chatId) {
-    _cancelActiveStreamAndPersist(); // 🔹 NEW
-    // Svuota la cache dei widget per forzare la ricostruzione con i nuovi dati
-    _widgetCache.clear();
-    try {
-      final chat = _chatHistory.firstWhere(
-        (chat) => chat['id'] == chatId,
-        orElse: () => null, // se non trova nulla, restituisce null
-      );
+/// Carica i messaggi di `chatId`, riallinea la chain
+/// e ricalcola la baseline del costo.
+Future<void> _loadMessagesForChat(String chatId) async {
+  // 1. interrompi eventuale stream in corso e svuota cache widget
+  _cancelActiveStreamAndPersist();
+  _widgetCache.clear();
 
-      if (chat == null) {
-        // gestisci il caso in cui la chat NON esiste
-      } else {
-        // gestisci la chat trovata
-      }
-
-      if (chat == null) {
-        print('Errore: Nessuna chat trovata con ID $chatId');
-        return;
-      }
-
-      _chatKbPath = chat['kb_path'] as String?; // NEW
-      _syncedMsgIds.clear(); // reset cache
-
-      // Estrai e ordina i messaggi della chat
-      List<dynamic> chatMessages = chat['messages'] ?? [];
-      chatMessages.sort((a, b) {
-        final aCreatedAt = DateTime.parse(a['createdAt']);
-        final bCreatedAt = DateTime.parse(b['createdAt']);
-        return aCreatedAt
-            .compareTo(bCreatedAt); // Ordina dal più vecchio al più recente
-      });
-      _chatVars = Map<String, dynamic>.from(chat['chatVars'] ?? {});
-      // Aggiorna lo stato
-      setState(() {
-        _activeChatIndex = _chatHistory.indexWhere(
-            (c) => c['id'] == chatId); // Imposta l'indice della chat attiva
-        messages.clear();
-        messages.addAll(chatMessages.map((message) {
-          // Assicura che ogni messaggio sia un Map<String, dynamic>
-          return Map<String, dynamic>.from(message);
-        }).toList());
-
-        // Forza il passaggio alla schermata delle conversazioni
-        showKnowledgeBase = false; // Nascondi KnowledgeBase
-        showSettings = false; // Nascondi Impostazioni
-      });
-
-      if (messages.isNotEmpty) {
-        final lastConfig = messages.last['agentConfig'];
-        if (lastConfig != null &&
-            (lastConfig['chain_id'] as String?)?.isNotEmpty == true) {
-          _latestChainId = lastConfig['chain_id'];
-          _latestConfigId = lastConfig['config_id'];
-        } else {
-          // chat senza chain precedente → reset
-          _latestChainId = null;
-          _latestConfigId = null;
-        }
-      } else {
-        // chat vuota → reset
-        _latestChainId = null;
-        _latestConfigId = null;
-      }
-
-      _ensureChainIncludesChatKb(chatId);
-
-      // Debug: Messaggi caricati
-      print(
-          'Messaggi caricati per chat ID $chatId (${chat['name']}): $chatMessages');
-    } catch (e) {
-      print(
-          'Errore durante il caricamento dei messaggi per chat ID $chatId: $e');
+  try {
+    /* ──────────────────────────────────────────────────────────────
+     * 2. recupero chat dal local‑state
+     * ────────────────────────────────────────────────────────────── */
+    final chat = _chatHistory.firstWhere(
+      (c) => c['id'] == chatId,
+      orElse: () => null,
+    );
+    if (chat == null) {
+      debugPrint('[chat] Nessuna chat con ID $chatId');
+      return;
     }
+
+    _chatKbPath     = chat['kb_path'] as String?;
+    _syncedMsgIds.clear();
+
+    /* ─────────────── messaggi ordinati cronologicamente ─────────── */
+    final List<dynamic> chatMessages = List<dynamic>.from(chat['messages'] ?? []);
+    chatMessages.sort((a, b) =>
+        DateTime.parse(a['createdAt']).compareTo(DateTime.parse(b['createdAt'])));
+
+    _chatVars = Map<String, dynamic>.from(chat['chatVars'] ?? {});
+
+    /* ────────────────────────────── setState UI ─────────────────── */
+    setState(() {
+      _activeChatIndex = _chatHistory.indexWhere((c) => c['id'] == chatId);
+
+      messages
+        ..clear()
+        ..addAll(chatMessages.map<Map<String, dynamic>>(
+          (m) => Map<String, dynamic>.from(m),
+        ));
+
+      showKnowledgeBase = false;
+      showSettings      = false;
+    });
+
+    /* ─────────── chain‑id / config‑id dal messaggio più recente ─── */
+    if (messages.isNotEmpty) {
+      final cfg = messages.last['agentConfig'] as Map<String, dynamic>?;
+      _latestChainId  = cfg?['chain_id'];
+      _latestConfigId = cfg?['config_id'];
+    } else {
+      _latestChainId  = null;
+      _latestConfigId = null;
+    }
+
+    /* ──────────────────────────────────────────────────────────────
+     * 3. assicura che la KB‑chat sia inclusa nella chain
+     *    (attendi il completamento)
+     * ────────────────────────────────────────────────────────────── */
+    await _ensureChainIncludesChatKb(chatId);
+
+    /* ──────────────────────────────────────────────────────────────
+     * 4. ricalcola baseline costo per la nuova chat‑history
+     *    (attendi la fine per avere _baseCost valorizzata)
+     * ────────────────────────────────────────────────────────────── */
+    await _fetchInitialCost();      // spinner visibile in UI
+    _updateLiveCost("");            // reset preview
+
+    debugPrint('[chat] Caricata chat $chatId ‑ msg: ${messages.length}');
+  } catch (e, st) {
+    debugPrint('[chat] errore loadMessages: $e\n$st');
   }
+}
 
   Future<void> _handleUserInput(String input) async {
     if (input.isEmpty) return;
@@ -4182,7 +4392,7 @@ void _applyChatVars(Map<String, dynamic> patch) {
         'createdAt': currentTime, // Timestamp
         'agentConfig': agentConfiguration, // Configurazione dell'agente
       });
-
+      
       fullResponse = ""; // Reset della risposta completa
 
       // Aggiungi un placeholder per la risposta dell'assistente
@@ -4194,7 +4404,7 @@ void _applyChatVars(Map<String, dynamic> patch) {
         'agentConfig': agentConfiguration, // Configurazione dell'agente
       });
     });
-
+_updateLiveCost("");
     // Pulisce il campo di input
     _controller.clear();
 
@@ -4421,6 +4631,7 @@ void _applyChatVars(Map<String, dynamic> patch) {
         });
         // E se vuoi, chiami la funzione set_context
         await set_context(_rawContextsForChain(), _selectedModel);
+        await _fetchInitialCost();          // unica call al backend
       },
     );
   }
@@ -5160,6 +5371,8 @@ if (seenEndMarker && c == '>') {
             readChunk();
           } else {
             // ─── FINE STREAMING – chiusura semplice ───────────────────────
+            final generatedTok = _estimateTokens(fullOutput.toString());   // F‑4
+_advanceBaseline(input, generatedTok);
             setState(() {
               final msg = messages.last;
               // 1) rimuovo solo lo spinner textuale

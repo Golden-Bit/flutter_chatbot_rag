@@ -79,6 +79,156 @@ class FileUploadInfo {
             .firstWhere((e) => e.name == (j['stage'] ?? 'pending')),
       );
 }
+class _PaginatedDocViewer extends StatefulWidget {
+  final ContextApiSdk apiSdk;
+  final String        token;
+  final String        collection;
+  final int           pageSize;
+
+  const _PaginatedDocViewer({
+    Key? key,
+    required this.apiSdk,
+    required this.token,
+    required this.collection,
+    this.pageSize = 1,
+  }) : super(key: key);
+
+  @override
+  State<_PaginatedDocViewer> createState() => _PaginatedDocViewerState();
+}
+
+class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
+  late Future<List<DocumentModel>> _future;
+  int  _page  = 0;        // 0‑based
+  int? _total;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetch();           // ► prima pagina
+  }
+
+  /*──────── helper API (skip / limit fissi) ────────*/
+  Future<List<DocumentModel>> _fetch() async {
+    return widget.apiSdk.listDocuments(
+      widget.collection,
+      token : widget.token,
+      skip  : _page * widget.pageSize,
+      limit : widget.pageSize,        // sempre = pageSize
+      onTotal: (t) => _total = t,
+    );
+  }
+
+  /*──────── cambio pagina (con guard‑rail) ────────*/
+  void _go(int delta) {
+    final next = _page + delta;
+    if (next < 0) return;                                   // < 0
+    if (_total != null && next * widget.pageSize >= _total!) return; // oltre fine
+
+    setState(() {
+      _page   = next;
+      _future = _fetch();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width : 400,
+      height: 400,
+      child : FutureBuilder<List<DocumentModel>>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError) {
+            return Text('Errore caricamento documenti: ${snap.error}');
+          }
+
+          final docs    = snap.data!;
+          final isEmpty = docs.isEmpty;
+
+          final jsonStr = isEmpty
+              ? ''
+              : const JsonEncoder.withIndent('  ').convert(
+                  docs.map((d) => {
+                    'page_content': d.pageContent,
+                    'metadata'    : d.metadata,
+                    'type'        : d.type,
+                  }).toList(),
+                );
+
+          /*───────── UI completa ─────────*/
+          return Column(
+            children: [
+              /*───── frecce + contatore ─────*/
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    tooltip : 'Pagina precedente',
+                    icon    : const Icon(Icons.arrow_back_ios_new, size: 16),
+                    onPressed: _page == 0 ? null : () => _go(-1),
+                  ),
+                  Text(
+                    _total == null
+                      ? 'Pagina ${_page + 1}'
+                      : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  IconButton(
+                    tooltip : 'Pagina successiva',
+                    icon    : const Icon(Icons.arrow_forward_ios, size: 16),
+                    onPressed: (isEmpty || docs.length < widget.pageSize)
+                      ? null
+                      : () => _go(1),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+
+              /*───── riquadro scroll / placeholder ─────*/
+              Expanded(
+                child: Container(
+                  width : double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: isEmpty
+                      ? const Center(
+                          child: Text(
+                            '— Nessun documento disponibile —',
+                            style: TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : Scrollbar(
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              jsonStr,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize : 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
 
 /// Restituisce la coppia **icona + colore** in base all’estensione del file.
 Map<String, dynamic> fileIconFor(String fileName) {
@@ -277,7 +427,11 @@ class ChatBotPageState extends State<ChatBotPage> {
 // Nuova flag per mostrare/nascondere il FloatingActionButton
   bool _showScrollToBottomButton = false;
   bool isLoggingOut = false;
-
+// ──────────────────────────────────────────────
+//  Retry sulla risposta dell’agente
+// ──────────────────────────────────────────────
+static const int _maxRetries = 5;               // tentativi massimi
+final Map<String,int> _retryCounts = {};        // msgId → tentativi fatti
   /// ---------------------------------------------------------------------------
   ///  Restituisce la stessa struttura che metti nei messaggi “normali”
   ///  (aggiungi qui dentro ogni metadato aggiuntivo che ti serve)             ↓↓
@@ -1341,101 +1495,56 @@ Map<String, dynamic> _chatVars = {};   // <── NEW
     return raw.replaceAll('/', '') + '_collection';
   }
 
-  void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
-    final collection = _collectionNameFrom(file);
 
-    showDialog(
-      context: context,
-      builder: (_) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
+  final collection = _collectionNameFrom(file);
 
-          // ──────────────────────────────────────────────────────
-          // ⬆️  TITOLO + PULSANTE DOWNLOAD JSON A DESTRA
-          // ──────────────────────────────────────────────────────
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  fileName,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Scarica JSON documenti',
-                icon: const Icon(Icons.download),
-                onPressed: () => _downloadDocumentsJson(collection, fileName),
-              ),
-            ],
-          ),
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding   : const EdgeInsets.fromLTRB(16,16,16,0),
+      contentPadding : const EdgeInsets.fromLTRB(16,8,16,16),
 
-          // ──────────────────────────────────────────────────────
-          //  Contenuto: lista documenti (scrollabile)
-          // ──────────────────────────────────────────────────────
-          content: FutureBuilder<List<DocumentModel>>(
-            future: _apiSdk.listDocuments(collection,
-                token: widget.token.accessToken),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const SizedBox(
-                  width: 300,
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snap.hasError) {
-                return Text('Errore caricamento documenti: ${snap.error}');
-              }
-
-              final jsonStr = const JsonEncoder.withIndent('  ').convert(
-                snap.data!
-                    .map((d) => {
-                          'page_content': d.pageContent,
-                          'metadata': d.metadata,
-                          'type': d.type,
-                        })
-                    .toList(),
-              );
-
-              return Container(
-                width: 400,
-                height: 400,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Scrollbar(
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    child: SelectableText(
-                      jsonStr,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Chiudi'),
-              onPressed: () => Navigator.of(context).pop(),
+      /*──────────────────────── titolo + pulsante download ─────────────────────*/
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              fileName,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-        );
-      },
-    );
-  }
+          ),
+          IconButton(
+            tooltip: 'Scarica JSON documenti',
+            icon   : const Icon(Icons.download),
+            onPressed: () => _downloadDocumentsJson(collection, fileName),
+          ),
+        ],
+      ),
+
+      /*──────────────────────── corpo paginato (Stateful) ──────────────────────*/
+      content: _PaginatedDocViewer(
+        apiSdk     : _apiSdk,
+        token      : widget.token.accessToken,              // stringa token
+        collection : collection,
+        pageSize   : 1,                         // mostra 1 doc per pagina
+      ),
+
+      actions: [
+        TextButton(
+          child: const Text('Chiudi'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    ),
+  );
+}
+
+
 
   Widget _buildMixedContent(Map<String, dynamic> message) {
     // Se il messaggio non contiene nessuna lista di widget, rendiamo il testo direttamente
@@ -4287,7 +4396,7 @@ Future<void> _loadMessagesForChat(String chatId) async {
         'createdAt': currentTime, // Timestamp
         'agentConfig': agentConfiguration, // Configurazione dell'agente
       });
-      
+      _retryCounts[assistantMessageId] = 0;     // reset tentativi
       fullResponse = ""; // Reset della risposta completa
 
       // Aggiungi un placeholder per la risposta dell'assistente
@@ -4304,7 +4413,7 @@ _updateLiveCost("");
     _controller.clear();
 
     // Invia il messaggio all'API per ottenere la risposta
-    await _sendMessageToAPI(modifiedInput);
+    await _sendMessageToAPI(modifiedInput, assistantMessageId);
 
     // Salva la conversazione con ID univoco per ogni messaggio
     _saveConversation(messages);
@@ -4860,7 +4969,10 @@ _updateLiveCost("");
     );
   }
 
-  Future<void> _sendMessageToAPI(String input) async {
+  Future<void> _sendMessageToAPI(String input, String assistantMsgId) async {
+
+    final int currentRetry = _retryCounts[assistantMsgId] ?? 0;
+
     if (_nlpApiUrl == null) {
       await _loadConfig(); // Assicurati che l'URL sia caricato
     }
@@ -5289,29 +5401,63 @@ _advanceBaseline(input, generatedTok);
             _streamReader = null;
             _abortController = null;
           }
-        }).catchError((error) {
-          // Errore durante la lettura del chunk
-          print('Errore durante la lettura del chunk: $error');
-          setState(() {
-            messages[messages.length - 1]['content'] = 'Errore: $error';
-          });
-          // 🔻 STOP pulsante solo *qui*
-          setState(() => _isStreaming = false);
-          _streamReader = null;
-          _abortController = null;
-        });
+        }).catchError((error) async {
+  // 1️⃣ log + placeholder d’errore
+  print('Errore durante la lettura del chunk: $error');
+
+  final idx = messages.indexWhere((m) => m['id'] == assistantMsgId);
+  if (idx != -1) {
+    setState(() => messages[idx]['content'] = 'Errore: $error');
+  }
+
+  // 2️⃣ chiudi in modo CLEAN lo streaming corrente
+  setState(() => _isStreaming = false);   // ri‑abilita i controlli UI
+  _streamReader  = null;                  // libera il reader JS
+  _abortController = null;                // chiude la fetch
+
+  // 3️⃣ tenta di rigenerare la risposta (max 5 volte)
+  await _retrySendMessage(input, assistantMsgId, currentRetry);
+});
       }
 
       // Avvia la lettura dei chunk
       readChunk();
     } catch (e) {
-      // Gestione errori fetch
-      print('Errore durante il fetch dei dati: $e');
-      setState(() {
-        messages[messages.length - 1]['content'] = 'Errore: $e';
-      });
-    }
+  // Errore PRIMA che lo stream inizi (o in fetch)
+  print('Errore durante il fetch dei dati: $e');
+
+  final idx = messages.indexWhere((m) => m['id'] == assistantMsgId);
+  if (idx != -1) {
+    setState(() => messages[idx]['content'] = 'Errore: $e');
   }
+
+  // riprova finché non superi il limite maxRetry
+  await _retrySendMessage(input, assistantMsgId, currentRetry);
+}
+  }
+
+Future<void> _retrySendMessage(
+  String originalInput,
+  String assistantMsgId,
+  int previousRetry,
+) async {
+  if (previousRetry + 1 >= _maxRetries) return;      // esauriti i tentativi
+
+  _retryCounts[assistantMsgId] = previousRetry + 1;
+
+  // sostituisci l’errore con lo spinner visivo
+  setState(() {
+    final idx = messages.indexWhere((m) => m['id'] == assistantMsgId);
+    if (idx != -1) messages[idx]['content'] = "[WIDGET_SPINNER]";
+    _isStreaming = false;                            // reset stato UI
+  });
+
+  // piccolo delay per evitare loop troppo rapidi
+  await Future.delayed(const Duration(milliseconds: 300));
+
+  // riprova
+  await _sendMessageToAPI(originalInput, assistantMsgId);
+}
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {
     final buffer = js_util.getProperty(jsArrayBuffer, 'buffer') as ByteBuffer;

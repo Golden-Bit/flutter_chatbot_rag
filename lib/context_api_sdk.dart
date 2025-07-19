@@ -925,17 +925,24 @@ Future<FileMetadataUpdateResult> updateFileMetadata(
 /// - `prefix`          = filtra gli `_id` che iniziano con questo prefisso (opzionale).
 /// - `skip/limit`      = paginazione.
 /// - `token`           = Access-token (se il backend lo richiede).
+/* ────────────────────────────────────────────────────────────────
+ * SDK ▸ listDocuments  ▶︎  restituisce anche il totale record
+ * ──────────────────────────────────────────────────────────────── */
+/*───────────────────────────────────────────────────────────────────────────
+  API SDK ▸ lista documenti con callback onTotal
+───────────────────────────────────────────────────────────────────────────*/
 Future<List<DocumentModel>> listDocuments(
   String collectionName, {
   String? prefix,
   int skip = 0,
   int limit = 10,
   String? token,
+  void Function(int total)? onTotal,       // ← NEW (totale record server)
 }) async {
   if (baseUrl == null) await loadConfig();
 
   final query = <String, String>{
-    'skip':  skip.toString(),
+    'skip' : skip.toString(),
     'limit': limit.toString(),
     if (prefix != null) 'prefix': prefix,
     if (token  != null) 'token' : token,
@@ -947,14 +954,21 @@ Future<List<DocumentModel>> listDocuments(
   final response = await http.get(uri);
 
   if (response.statusCode == 200) {
-    final utf8Body = utf8.decode(response.bodyBytes);       // <— forziamo UTF-8
-    final data   = jsonDecode(utf8Body) as List<dynamic>;
+    /* il backend espone il totale in una response‑header
+       “X-Total-Count: 57” (→ adattare se diverso) */
+    if (onTotal != null &&
+        response.headers.containsKey('x-total-count')) {
+      onTotal(int.tryParse(response.headers['x-total-count']!) ?? 0);
+    }
+
+    final utf8Body = utf8.decode(response.bodyBytes);   // forza UTF‑8
+    final data     = jsonDecode(utf8Body) as List<dynamic>;
     return data.map((j) => DocumentModel.fromJson(j)).toList();
-  } else {
-    throw ApiException(
-        'Errore elenco documenti: ${response.body}');
   }
+
+  throw ApiException('Errore elenco documenti: ${response.body}');
 }
+
 
 /// Ritorna { estensione : [loader1, loader2, …] }
 Future<Map<String, List<String>>> getLoadersCatalog() async {

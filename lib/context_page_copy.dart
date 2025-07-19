@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -36,6 +37,156 @@ class MyApp extends StatelessWidget {
     );
   }
 }*/
+class _PaginatedDocViewer extends StatefulWidget {
+  final ContextApiSdk apiSdk;
+  final String        token;
+  final String        collection;
+  final int           pageSize;
+
+  const _PaginatedDocViewer({
+    Key? key,
+    required this.apiSdk,
+    required this.token,
+    required this.collection,
+    this.pageSize = 1,
+  }) : super(key: key);
+
+  @override
+  State<_PaginatedDocViewer> createState() => _PaginatedDocViewerState();
+}
+
+class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
+  late Future<List<DocumentModel>> _future;
+  int  _page  = 0;        // 0‑based
+  int? _total;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetch();           // ► prima pagina
+  }
+
+  /*──────── helper API (skip / limit fissi) ────────*/
+  Future<List<DocumentModel>> _fetch() async {
+    return widget.apiSdk.listDocuments(
+      widget.collection,
+      token : widget.token,
+      skip  : _page * widget.pageSize,
+      limit : widget.pageSize,        // sempre = pageSize
+      onTotal: (t) => _total = t,
+    );
+  }
+
+  /*──────── cambio pagina (con guard‑rail) ────────*/
+  void _go(int delta) {
+    final next = _page + delta;
+    if (next < 0) return;                                   // < 0
+    if (_total != null && next * widget.pageSize >= _total!) return; // oltre fine
+
+    setState(() {
+      _page   = next;
+      _future = _fetch();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width : 400,
+      height: 400,
+      child : FutureBuilder<List<DocumentModel>>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError) {
+            return Text('Errore caricamento documenti: ${snap.error}');
+          }
+
+          final docs    = snap.data!;
+          final isEmpty = docs.isEmpty;
+
+          final jsonStr = isEmpty
+              ? ''
+              : const JsonEncoder.withIndent('  ').convert(
+                  docs.map((d) => {
+                    'page_content': d.pageContent,
+                    'metadata'    : d.metadata,
+                    'type'        : d.type,
+                  }).toList(),
+                );
+
+          /*───────── UI completa ─────────*/
+          return Column(
+            children: [
+              /*───── frecce + contatore ─────*/
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    tooltip : 'Pagina precedente',
+                    icon    : const Icon(Icons.arrow_back_ios_new, size: 16),
+                    onPressed: _page == 0 ? null : () => _go(-1),
+                  ),
+                  Text(
+                    _total == null
+                      ? 'Pagina ${_page + 1}'
+                      : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  IconButton(
+                    tooltip : 'Pagina successiva',
+                    icon    : const Icon(Icons.arrow_forward_ios, size: 16),
+                    onPressed: (isEmpty || docs.length < widget.pageSize)
+                      ? null
+                      : () => _go(1),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+
+              /*───── riquadro scroll / placeholder ─────*/
+              Expanded(
+                child: Container(
+                  width : double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: isEmpty
+                      ? const Center(
+                          child: Text(
+                            '— Nessun documento disponibile —',
+                            style: TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : Scrollbar(
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              jsonStr,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize : 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
 
 /// Restituisce {icon, color} in base all’estensione del file.
 Map<String, dynamic> fileIconFor(String fileName) {
@@ -159,100 +310,494 @@ List<ContextMetadata> _allContexts = [];
 List<ContextMetadata> _gridContexts = [];
 
   bool _isCtxLoading = false;
-  void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
-    final collection = _collectionNameFrom(file);
+  /* ────────────────────────────────────────────────────────────────
+ * UI ▸ _showFilePreviewDialog  ▶︎  dialog con paginazione client
+ * ──────────────────────────────────────────────────────────────── */
+/*───────────────────────────────────────────────────────────────────────────
+  UI ▸ dialog di anteprima file con paginazione (freccia ← / →)
+───────────────────────────────────────────────────────────────────────────*/
+void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
+  final collection = _collectionNameFrom(file);
 
-    showDialog(
-      context: context,
-      builder: (_) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding   : const EdgeInsets.fromLTRB(16,16,16,0),
+      contentPadding : const EdgeInsets.fromLTRB(16,8,16,16),
 
-          // ──────────────────────────────────────────────────────
-          // ⬆️  TITOLO + PULSANTE DOWNLOAD JSON A DESTRA
-          // ──────────────────────────────────────────────────────
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  fileName,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Scarica JSON documenti',
-                icon: const Icon(Icons.download),
-                onPressed: () => _downloadDocumentsJson(collection, fileName),
-              ),
-            ],
+      /*──────────────────────── titolo + pulsante download ─────────────────────*/
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              fileName,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
+          IconButton(
+            tooltip: 'Scarica JSON documenti',
+            icon   : const Icon(Icons.download),
+            onPressed: () => _downloadDocumentsJson(collection, fileName),
+          ),
+        ],
+      ),
 
-          // ──────────────────────────────────────────────────────
-          //  Contenuto: lista documenti (scrollabile)
-          // ──────────────────────────────────────────────────────
-          content: FutureBuilder<List<DocumentModel>>(
-            future: _apiSdk.listDocuments(collection, token: widget.token),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const SizedBox(
-                  width: 300,
-                  height: 200,
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snap.hasError) {
-                return Text('Errore caricamento documenti: ${snap.error}');
-              }
+      /*──────────────────────── corpo paginato (Stateful) ──────────────────────*/
+      content: _PaginatedDocViewer(
+        apiSdk     : _apiSdk,
+        token      : widget.token,              // stringa token
+        collection : collection,
+        pageSize   : 1,                         // mostra 1 doc per pagina
+      ),
 
-              final jsonStr = const JsonEncoder.withIndent('  ').convert(
-                snap.data!
-                    .map((d) => {
-                          'page_content': d.pageContent,
-                          'metadata': d.metadata,
-                          'type': d.type,
-                        })
-                    .toList(),
-              );
+      actions: [
+        TextButton(
+          child: const Text('Chiudi'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    ),
+  );
+}
 
-              return Container(
-                width: 400,
-                height: 400,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Scrollbar(
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    child: SelectableText(
-                      jsonStr,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
+// NEW – cache locale per evitare round-trip ripetuti
+Map<String, List<String>>? _extToLoaders;
+Map<String, dynamic>?      _kwargsSchema;
+
+Future<void> _ensureLoaderCatalog() async {
+  if (_extToLoaders != null && _kwargsSchema != null) return;
+  _extToLoaders = await _apiSdk.getLoadersCatalog();
+  _kwargsSchema = await _apiSdk.getLoaderKwargsSchema();
+}// ───────────────────────────────────────────────────────────────────────────
+//  DROPDOWN stile material‑v3 ri‑utilizzabile
+// ───────────────────────────────────────────────────────────────────────────
+Widget _styledDropdown({
+  required String value,
+  required List<String> items,
+  required void Function(String?) onChanged,
+}) {
+  return DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.grey[100],
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.grey[300]!),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton2<String>(
+          isExpanded: true,
+          value: value,
+          items: items
+              .map((it) => DropdownMenuItem(value: it, child: Text(it)))
+              .toList(),
+          onChanged: onChanged,
+          style: const TextStyle(color: Colors.black87),
+          buttonStyleData: const ButtonStyleData(
+            padding: EdgeInsets.zero,
+            height: 48,
+          ),
+          dropdownStyleData: DropdownStyleData(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+// ───────────────────────────────────────────────────────────────────────────
+//  Riquadro grigio che contiene i parametri dinamici del loader
+// ───────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
+//  Riquadro grigio che contiene i parametri dinamici del loader
+// ───────────────────────────────────────────────────────────────────────────
+Widget _kwargsPanel(List<Widget> fields) {
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(top: 12),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.grey[50],
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.grey[300]!),
+    ),
+    child: Column(children: fields),
+  );
+}
+
+
+/// helper per una riga “chiave: valore”
+/// (ritorna SizedBox.shrink se `value` è null / vuoto)
+Widget _kvCell(String key, String? value) {
+  if (value == null || value.isEmpty) return const SizedBox.shrink();
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: RichText(
+      text: TextSpan(
+        style: const TextStyle(color: Colors.black, fontSize: 13),
+        children: [
+          TextSpan(
+            text: '$key: ',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          TextSpan(text: value),
+        ],
+      ),
+    ),
+  );
+}
+
+/// box riassuntivo della stima costo (pre‑processing)
+Widget _buildCostBox(FileCost fc) {
+  /* ──────────────────────────────────────────────────────────
+     Helper: converte [[k,v], …] in righe a 2 colonne           */
+  List<TableRow> _rows2cols(List<List<String?>> kv) {
+    final rows = <TableRow>[];
+    for (var i = 0; i < kv.length; i += 2) {
+      final left  = kv[i];
+      final right = (i + 1 < kv.length) ? kv[i + 1] : ['', null];
+      rows.add(TableRow(children: [
+        _kvCell(left[0]!,  left[1]),
+        _kvCell(right[0]!, right[1]),
+      ]));
+    }
+    return rows;
+  }
+
+  /* 1️⃣  campi principali */
+  final primaryKv = <List<String?>>[
+    ['Filename',    fc.filename],
+    ['Kind',        fc.kind],
+    ['Pages',       fc.pages?.toString()],
+    ['Minutes',     fc.minutes?.toStringAsFixed(2)],
+    ['Strategy',    fc.strategy],
+    ['Size (B)',    fc.sizeBytes.toString()],
+    ['Tokens est.', fc.tokensEst?.toString()],
+  ]..removeWhere((e) => e[1] == null);          // solo valori presenti
+
+  /* 2️⃣  parametri risolti (fc.params) */
+  final paramKv = (fc.params ?? {})
+      .entries
+      .map((e) => [e.key, e.value.toString()])
+      .toList();
+
+  /* 3️⃣  formula + condizioni */
+  final List<Widget> formulaSection = [];
+  if (fc.formula != null || (fc.paramsConditions?.isNotEmpty ?? false)) {
+    formulaSection
+      ..add(const SizedBox(height: 12))
+      ..add(const Divider(height: 1))
+      ..add(const SizedBox(height: 6));
+
+    if (fc.formula != null) {
+      formulaSection.add(_kvCell('Cost', fc.formula!.split('=').last));
+    }
+    fc.paramsConditions?.forEach((k, v) {
+      formulaSection.add(_kvCell(k, v));
+    });
+  }
+
+  /* 4️⃣  UI finale */
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      /* tabella core */
+      Table(
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        columnWidths: const {0: FlexColumnWidth(1), 1: FlexColumnWidth(1)},
+        children: _rows2cols(primaryKv),
+      ),
+
+      /* tabella parametri */
+      if (paramKv.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        const Divider(height: 1),
+        const SizedBox(height: 6),
+        Table(
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          columnWidths: const {0: FlexColumnWidth(1), 1: FlexColumnWidth(1)},
+          children: _rows2cols(paramKv),
+        ),
+      ],
+
+      /* formula & condizioni  */
+      ...formulaSection,
+
+      const SizedBox(height: 8),
+      const Divider(height: 1),
+      const SizedBox(height: 6),
+
+      /* costo finale */
+      Align(
+        alignment: Alignment.centerRight,
+        child: Text(
+          '\$${fc.costUsd!.toStringAsFixed(4)}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+      ),
+    ],
+  );
+}
+
+/// Dialog «Configura loader» con stima costo live e recalcolo immediato
+/// ----------------------------------------------------------------------
+/// Restituisce una mappa `{loaders, loader_kwargs}` pronta da passare
+/// al backend oppure `null` se l’utente annulla.
+Future<Map<String, dynamic>?> _showLoaderConfigDialog(
+  BuildContext ctx,
+  String       fileName,
+  Uint8List    fileBytes,
+) async {
+  /* 1️⃣  Cataloghi & schema */
+  await _ensureLoaderCatalog();
+
+  final ext     = fileName.split('.').last.toLowerCase();
+  final loaders = _extToLoaders![ext] ?? _extToLoaders!['default']!;
+  String selectedLoader = loaders.first;
+
+  /* 2️⃣  Controller dinamici per i kwargs */
+  final Map<String, TextEditingController> ctrls = {};
+
+  Map<String, dynamic> _editableSchema() {
+    final raw = _kwargsSchema![selectedLoader] as Map<String, dynamic>;
+    return Map.fromEntries(
+      raw.entries.where((e) => (e.value['editable'] ?? true) == true),
+    );
+  }
+
+  void _initCtrls() {
+    ctrls.clear();
+    for (final e in _editableSchema().entries) {
+      ctrls[e.key] = TextEditingController(
+        text: jsonEncode(e.value['default']),
+      );
+    }
+  }
+
+  _initCtrls(); // prima inizializzazione
+
+  /* 3️⃣  Stima costo iniziale dal backend */
+  late FileCost _baseCost;
+  final ValueNotifier<FileCost?> costVN = ValueNotifier(null);
+
+  Future<void> _fetchInitialCost() async {
+    final kwargsMap = {
+      ext: ctrls.map((k, v) => MapEntry(k, jsonDecode(v.text))),
+    };
+
+    final estimate = await _apiSdk.estimateFileProcessingCost(
+      [fileBytes],
+      [fileName],
+      loaderKwargs: kwargsMap,
+    );
+
+    _baseCost      = estimate.files.first;
+  }
+
+  await _fetchInitialCost(); // blocca finché non arrivano i dati
+
+  /* 4️⃣  Ricalcolo locale (live) */
+  void _applyChange() {
+    final override = {
+      ext: selectedLoader,
+      ...ctrls.map((k, v) => MapEntry(k, jsonDecode(v.text))),
+    };
+
+    final newCost = _apiSdk.recomputeFileCost(
+      _baseCost,
+      configOverride: override,
+    );
+
+      // forza sempre il rebuild del ValueListenableBuilder
+  costVN
+    ..value = null                       // step 1: valore diverso
+    ..value = newCost;                   // step 2: quello vero
+  }
+
+  // ricalcolo immediato prima di mostrare il dialog
+  _applyChange();
+
+  /* ═════════════════════ Dialog ═════════════════════ */
+  return showDialog<Map<String, dynamic>>(
+    context: ctx,
+    barrierDismissible: false,
+    builder: (_) => StatefulBuilder(
+      builder: (c, setSt) {
+        /* Cambio loader */
+        Future<void> _onLoaderChanged(String? v) async {
+          if (v == null) return;
+          selectedLoader = v;
+          _initCtrls();
+          setSt(() {});      // forza rebuild dei campi
+          _applyChange();    // aggiorna costo
+        }
+
+        /* Costruzione dei campi dinamici */
+        List<Widget> _buildFieldWidgets() {
+          return _editableSchema().entries.map((e) {
+            final fld   = e.value as Map<String, dynamic>;
+            final typ   = fld['type'] as String;
+            final items = fld['items'];
+            final label = fld['name'];
+
+            Widget _label() => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label),
+                if (fld['description'] != null)
+                  Tooltip(
+                    message: fld['description'],
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 4),
+                      child: Icon(Icons.help_outline, size: 16),
                     ),
                   ),
-                ),
+              ],
+            );
+
+            /* ENUM */
+            if (items is List && items.isNotEmpty) {
+              final curr = jsonDecode(ctrls[e.key]!.text) ?? items.first;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 8),
+                  _label(),
+                  _styledDropdown(
+                    value: curr.toString(),
+                    items: items.map((v) => v.toString()).toList(),
+                    onChanged: (v) {
+                      ctrls[e.key]!.text = jsonEncode(v);
+                      _applyChange();
+                      setSt(() {});
+                    },
+                  ),
+                ],
               );
-            },
+            }
+
+            /* BOOL */
+            if (typ == 'boolean' || typ == 'bool') {
+              final curr = jsonDecode(ctrls[e.key]!.text) as bool;
+              return CheckboxListTile(
+                title: _label(),
+                value: curr,
+                onChanged: (v) {
+                  ctrls[e.key]!.text = jsonEncode(v);
+                  _applyChange();
+                  setSt(() {});
+                },
+              );
+            }
+
+            /* TEXT / NUMBER */
+            return TextField(
+              controller: ctrls[e.key],
+              decoration: InputDecoration(label: _label()),
+  onChanged: (_) {
+    _applyChange();
+    setSt(() {});          // 🔹 idem (utile per formattazione live)
+  },
+            );
+          }).toList();
+        }
+
+        /* UI finale */
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Configura loader – $fileName'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 600),
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  // Loader dropdown
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: const Text('Loader', style: TextStyle(color: Colors.black54)),
+                  ),
+                  _styledDropdown(
+                    value: selectedLoader,
+                    items: loaders,
+                    onChanged: _onLoaderChanged,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Campi kwargs dinamici
+                  _kwargsPanel(_buildFieldWidgets()),
+                  const SizedBox(height: 20),
+
+                  // Titolo sezione costo
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: const Text(
+                      'Stima costo preprocessing',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+
+                  // Box costo reattivo
+                  ValueListenableBuilder<FileCost?>(
+                    valueListenable: costVN,
+                    builder: (_, fc, __) {
+                      if (fc == null) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        );
+                      }
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: _buildCostBox(fc),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
           actions: [
             TextButton(
-              child: const Text('Chiudi'),
-              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annulla'),
+              onPressed: () => Navigator.of(c).pop(null),
+            ),
+            ElevatedButton(
+              child: const Text('Procedi'),
+              onPressed: () {
+                final loadersMap = {ext: selectedLoader};
+                final kwargsMap  = {
+                  ext: ctrls.map((k, v) => MapEntry(k, jsonDecode(v.text))),
+                };
+                Navigator.of(c).pop({
+                  'loaders'      : loadersMap,
+                  'loader_kwargs': kwargsMap,
+                });
+              },
             ),
           ],
         );
       },
-    );
-  }
+    ),
+  );
+}
+
+
+
 
 // convenience
   String _displayName(ContextMetadata ctx) =>
@@ -445,23 +990,30 @@ void _filterContexts() {
     }
   }
 
-  /// Restituisce la mappa <context → taskIds> così chi la chiama può avviare il polling
-  Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
-    Uint8List fileBytes,
-    List<String> contexts, {
-    String? description,
-    required String fileName,
-  }) async {
-    final resp = await _apiSdk.uploadFileToContextsAsync(
-      fileBytes,
-      contexts,
-      widget.username,
-      widget.token,
-      description: description,
-      fileName: fileName,
-    );
-    return resp.tasks; // <── RITORNA
-  }
+/// Restituisce la mappa <context → taskIds> così chi la chiama può
+/// avviare il polling.  Ora accetta anche `loaders` e `loaderKwargs`
+/// per passare le configurazioni personalizzate al backend.
+Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
+  Uint8List fileBytes,
+  List<String> contexts, {
+  String? description,
+  required String fileName,
+  Map<String, dynamic>? loaders,        // ⬅️ NEW
+  Map<String, dynamic>? loaderKwargs,   // ⬅️ NEW
+}) async {
+  final resp = await _apiSdk.uploadFileToContextsAsync(
+    fileBytes,
+    contexts,
+    widget.username,
+    widget.token,
+    description: description,
+    fileName: fileName,
+    loaders: loaders,                   // ⬅️ pass-through
+    loaderKwargs: loaderKwargs,         // ⬅️ pass-through
+  );
+
+  return resp.tasks; // 〈context, TaskIdsPerContext〉
+}
 
   /// Polla /tasks_status ogni 3 s finché tutti i task sono DONE/ERROR.
   /// Polla /tasks_status ogni 3 s finché TUTTI i task del job sono DONE/ERROR.
@@ -594,6 +1146,14 @@ void _filterContexts() {
       return;
     }
 
+  // ① apre dialog di configurazione
+  final cfg = await _showLoaderConfigDialog(
+    context,
+    result.files.first.name,
+    result.files.first.bytes!, 
+  );
+  if (cfg == null) return; // utente ha annullato
+
     // 0. Spinner sul KB
     setState(() {
       _isLoadingMap[contextPath] = true;
@@ -609,6 +1169,8 @@ void _filterContexts() {
         result.files.first.bytes!,
         [contextPath],
         fileName: result.files.first.name,
+        loaders: cfg['loaders'],
+        loaderKwargs: cfg['loader_kwargs'],
       );
 
       // 3. Salva in memoria + SharedPreferences (keyed su jobId)

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/user_manager/pages/billing_page.dart';
 
 class SubscriptionSettingsContent extends StatelessWidget {
   const SubscriptionSettingsContent({super.key});
@@ -10,18 +11,18 @@ class SubscriptionSettingsContent extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeaderSection(),
+          _buildHeaderSection(context),
           const SizedBox(height: 24),
           _buildInfoBox(),
           const SizedBox(height: 24),
-          _buildPaymentSection(), // ← nuovo: etichetta e pulsante allineati orizzontalmente
+          _buildPaymentSection(context), // ← nuovo: etichetta e pulsante allineati orizzontalmente
         ],
       ),
     );
   }
 
   // HEADER -------------------------------------------------------------------
-  Widget _buildHeaderSection() {
+  Widget _buildHeaderSection(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -56,7 +57,11 @@ class SubscriptionSettingsContent extends StatelessWidget {
                 ),
               ),
               onPressed: () {
-                // TODO: Azione per gestione abbonamento
+                 Navigator.of(context).push(
+     MaterialPageRoute(
+       builder: (_) => BillingPage(onClose: () => Navigator.of(context).pop()),
+     ),
+   );
               },
               child: const Text('Gestisci'),
             ),
@@ -98,7 +103,7 @@ class SubscriptionSettingsContent extends StatelessWidget {
   }
 
   // PAGAMENTO (etichetta + pulsante) -----------------------------------------
-  Widget _buildPaymentSection() {
+  Widget _buildPaymentSection(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -125,7 +130,11 @@ class SubscriptionSettingsContent extends StatelessWidget {
             ),
           ),
           onPressed: () {
-            // TODO: Gestione pagamento
+  //                           Navigator.of(context).push(
+  //   MaterialPageRoute(
+  //     builder: (_) => BillingPage(onClose: () => Navigator.of(context).pop()),
+  //   ),
+   //);
           },
           child: const Text('Gestisci'),
         ),

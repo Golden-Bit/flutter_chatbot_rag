@@ -462,7 +462,7 @@ class Omnia8Sdk {
   /// Client HTTP sottostante (iniettabile per test).
   final http.Client _http;
 
-  Omnia8Sdk({this.baseUrl = 'http://34.13.153.241:8111', http.Client? httpClient})
+  Omnia8Sdk({this.baseUrl = 'https://www.goldbitweb.com/enac-api', http.Client? httpClient})
       : _http = httpClient ?? http.Client();
 
   /// Chiude il client HTTP.

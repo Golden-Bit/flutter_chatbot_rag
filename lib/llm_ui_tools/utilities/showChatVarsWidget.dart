@@ -1,6 +1,8 @@
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_app/chatbot.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/ChatVarsContentRendered.dart';          // ← Clipboard
 
 /// Restituisce sempre la stessa tonalità per la stessa **chiave**.
@@ -25,6 +27,16 @@ class ShowChatVarsWidgetTool extends StatelessWidget {
 
   final Map<String, dynamic> jsonData;
   final Map<String, dynamic> Function() getVars;
+
+  // ---------- stub callbacks -------------------------------------------------
+  static final _dummyPageCbs = ChatBotPageCallbacks(
+    renameChat: (_, __) async {},
+    sendReply : (_, {sequenceId}) {},
+  );
+  static const _dummyHostCbs = ChatBotHostCallbacks();
+  static const Map<String, ChatWidgetBuilder> _emptyBuilders = {};
+
+  // ---------------------------------------------------------------------------
 
   /*────────── colori deterministici ──────────*/
   Color _colorFromString(String s) {
@@ -91,9 +103,11 @@ final Color headerText  = darker(borderColor);
               crossAxisAlignment: CrossAxisAlignment.start,
               children: renderContent(
                 context,
-                parseContent(pretty),
-                // ShowChatVars non supporta reply, passiamo no-op
-                (_) {},
+                parseContent(pretty),               // onReply: no-op
+                _dummyPageCbs,          // stub callbacks interni
+                _dummyHostCbs, 
+                const {},               // passa la mappa VERA         // stub callbacks host
+                (txt, {meta}) {},          // nessun widget extra
               ),
             ),
           ),

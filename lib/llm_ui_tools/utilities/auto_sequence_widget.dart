@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot.dart'; // dove risiede ChatBotPageState
+import 'package:flutter_app/chatbot.dart';
+import 'package:uuid/uuid.dart'; // dove risiede ChatBotPageState
 
 /// Widget che invia automaticamente una sequenza di messaggi all’assistente
 /// (una volta sola) e permette all’utente di espandere/collassare la card per
@@ -18,13 +19,16 @@ class AutoSequenceWidgetTool extends StatefulWidget {
   const AutoSequenceWidgetTool({super.key, required this.jsonData, required this.onReply});
 
   final Map<String, dynamic> jsonData;
-  final void Function(String) onReply;
+  final void Function(String reply,
+      {Map<String, dynamic>? meta}) onReply;
 
   @override
   State<AutoSequenceWidgetTool> createState() => _AutoSequenceWidgetToolState();
 }
 
 class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
+  
+  late final String _seqId;   // id condiviso
   /*─────────────────── config ──────────────────*/
   late final List<dynamic> _steps;      // lista degli step
   late final bool _isFirstTime;         // flag dal JSON (prima visualizzazione)
@@ -43,7 +47,7 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
   @override
   void initState() {
     super.initState();
-
+ _seqId = const Uuid().v4();    
     _steps       = widget.jsonData['sequence'] ?? [];
     _isFirstTime = widget.jsonData['is_first_time'] ?? true;
 
@@ -64,6 +68,27 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
       }
     };
     ChatBotPageState.cancelSequences.addListener(_cancelListener);
+
+    
+   //───────────────────────────────────────────────────────────────
+   // Fallback: se l’agente ha già completato il turno PRIMA che il
+   // widget sia montato, facciamo partire la sequenza al frame
+   // successivo.
+   //───────────────────────────────────────────────────────────────
+   /* avvio unico, post-frame: */
+   if (_isFirstTime) {
+     WidgetsBinding.instance.addPostFrameCallback((_) async {
+       if (!mounted || _completed) return;
+       // aspetta che l’assistente abbia chiuso il suo messaggio
+       while (mounted &&
+              ChatBotPageState.assistantTurnCompleted.value <= _creationTurn) {
+         await Future.delayed(const Duration(milliseconds: 50));
+       }
+       if (!mounted || _completed) return;
+       _hasStarted = true;             // ⇠ flag una sola volta
+       await _runSequence();           // avvia la sequenza
+     });
+   }
   }
 
   @override
@@ -81,11 +106,11 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
     }
 
     // avvia la sequenza appena l’assistente chiude **dopo** la creazione
-    if (_isFirstTime && !_hasStarted &&
+    /*if (_isFirstTime && !_hasStarted &&
         ChatBotPageState.assistantTurnCompleted.value > _creationTurn) {
       _hasStarted = true;
       _runSequence();
-    }
+    }*/
   }
 
   /*─────────────────── sequenza ────────────────*/
@@ -98,7 +123,10 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
       final String msg = (step['message'] ?? '').toString();
       if (msg.trim().isEmpty) continue;
 
-      widget.onReply(msg);               // 1. invia messaggio
+          widget.onReply(
+      msg,
+      meta: {'sequenceId': _seqId},               // <── NEW
+    );         // 1. invia messaggio
 
       // 2. aspetta che l’assistente risponda
       _waitForAssistant = Completer<void>();
@@ -123,6 +151,7 @@ class _AutoSequenceWidgetToolState extends State<AutoSequenceWidgetTool> {
   /*─────────────────── UI ──────────────────────*/
   @override
   Widget build(BuildContext context) {
+    
     return Container(
       width: double.infinity,            // occupa tutta la larghezza disponibile
       margin: const EdgeInsets.symmetric(vertical: 8),

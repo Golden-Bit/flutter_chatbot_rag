@@ -186,7 +186,7 @@ class _BillingPageState extends State<BillingPage> {
 
                       // Griglia piani responsive
                       LayoutBuilder(builder: (ctx, constraints) {
-                        final isNarrow = constraints.maxWidth < 600;
+                        final isNarrow = constraints.maxWidth < 1000;
                         final cardWidth = (constraints.maxWidth - 64) / 3;
                         if (isNarrow) {
                           return SingleChildScrollView(
@@ -262,7 +262,7 @@ class _PlanCard extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: Colors.black, width: 1.5)),
       elevation: 2,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 500),
+        constraints: const BoxConstraints(maxHeight: 500, minWidth: 300, maxWidth: 500),
         child: Container(
           width: width,
           padding: const EdgeInsets.all(16),

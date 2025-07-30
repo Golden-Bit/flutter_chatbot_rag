@@ -1748,6 +1748,43 @@ String get edit_knowledge_box {
     default:                return 'Edit Knowledge Box';
   }
 }
+ String get write_here {
+    switch (language) {
+      case Language.italian:
+        return 'Scrivi qui…';
+      case Language.spanish:
+        return 'Escribe aquí…';
+      case Language.english:
+      default:
+        return 'Write here…';
+    }
+  }
+
+  /// Tooltip per disattivare il microfono
+  String get disable_mic {
+    switch (language) {
+      case Language.italian:
+        return 'Disabilita microfono';
+      case Language.spanish:
+        return 'Desactivar micrófono';
+      case Language.english:
+      default:
+        return 'Disable mic';
+    }
+  }
+
+  /// Tooltip per stoppare lo streaming della risposta
+  String get stop_streaming {
+    switch (language) {
+      case Language.italian:
+        return 'Interrompi risposta';
+      case Language.spanish:
+        return 'Detener respuesta';
+      case Language.english:
+      default:
+        return 'Stop response';
+    }
+  }
 }
 
 

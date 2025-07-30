@@ -58,10 +58,13 @@ List<Segment> parseContent(String fullText) {
 List<Widget> renderContent(
   BuildContext context,
   List<Segment> segments,
-  void Function(String) onReply,
+    ChatBotPageCallbacks  pageCbs,     // ��� nuovo
+  ChatBotHostCallbacks  hostCbs, 
+  Map<String, ChatWidgetBuilder>     widgetBuilders,   // <-- di nuovo qui
+  
+  void Function(String reply, {Map<String, dynamic>? meta}) onReply,
 ) {
-  final state = ChatBotPageState(); // per accedere a widgetMap
-  final widgetBuilders = state.widgetMap;
+
   final List<Widget> out = [];
 
   for (final seg in segments) {
@@ -86,7 +89,7 @@ List<Widget> renderContent(
     if (seg.widgetId != null) {
       final builder = widgetBuilders[seg.widgetId!];
       if (builder != null) {
-        out.add(builder(seg.widgetData ?? {}, onReply));
+        out.add(builder(seg.widgetData ?? {}, (txt, {meta}) => onReply(txt, meta: meta), pageCbs, hostCbs));
       } else {
         out.add(Text("[Widget sconosciuto: ${seg.widgetId}]"));
       }
@@ -95,3 +98,4 @@ List<Widget> renderContent(
 
   return out;
 }
+

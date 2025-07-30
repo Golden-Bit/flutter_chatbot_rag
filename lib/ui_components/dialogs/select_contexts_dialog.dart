@@ -83,38 +83,57 @@ class _SelectContextDialogContentState
 // ───────── helpers letti SEMPRE da localStorage ─────────
 String _chatNameById(String chatId) {
   try {
+    // PROVA prima nella mappa passata dal costruttore (più fresca)
+    final n = _chatInfo[chatId]?['name'] ?? '';
+    if (n.isNotEmpty) return n;
+
+    // fallback: localStorage
     final raw = html.window.localStorage['chatHistory'];
     if (raw == null) return '';
     final List list = jsonDecode(raw)['chatHistory'];
     final chat = list.firstWhere((c) => c['id'] == chatId, orElse: () => null);
     return chat != null ? (chat['name'] ?? '') : '';
-  } catch (_) { return ''; }
+  } catch (_) {
+    return '';
+  }
 }
 
 DateTime? _chatLastMsgDate(String chatId) {
   try {
-    final raw = html.window.localStorage['chatHistory'];
-    if (raw == null) return null;
-    final List list = jsonDecode(raw)['chatHistory'];
+    // prima _chatInfo
+    final raw = _chatInfo[chatId]?['updatedAt'] ?? '';
+    if (raw.isNotEmpty) return DateTime.tryParse(raw);
+
+    // fallback: localStorage
+    final store = html.window.localStorage['chatHistory'];
+    if (store == null) return null;
+    final List list = jsonDecode(store)['chatHistory'];
     final chat = list.firstWhere((c) => c['id'] == chatId, orElse: () => null);
     if (chat == null) return null;
     final List msgs = chat['messages'] ?? const [];
     if (msgs.isEmpty) return null;
     final last = msgs.last;
     return DateTime.tryParse(last['createdAt'] ?? '');
-  } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  }
 }
 
-String _displayName(ContextMetadata ctx) {
+/// Ritorna il nome da mostrare. Se è una chat-KB ma la chat non esiste più,
+/// restituisce null → la KBox verrà esclusa dalla lista.
+String? _displayName(ContextMetadata ctx) {
   if (_isChatContext(ctx)) {
-    final chatId = ctx.customMetadata?['chat_id'] ?? '';
-    final chatName = _chatNameById(chatId);
-    if (chatName.isNotEmpty) return 'CHAT $chatName';
+    final chatId = ctx.customMetadata?['chat_id']?.toString() ?? '';
+    if (chatId.isEmpty) return null;
 
-    // fallback se il chatHistory non contiene più la chat
-    final disp = ctx.customMetadata?['display_name']?.toString().trim();
-    if (disp?.isNotEmpty ?? false) return 'CHAT $disp';
-    return 'CHAT $chatId';
+    final chatName = _chatNameById(chatId).trim();
+    if (chatName.isEmpty) return null; // chat non trovata → drop
+
+    // nome base della KB
+    //final kbBase = ctx.customMetadata?['display_name']?.toString().trim();
+    //final base = (kbBase?.isNotEmpty ?? false) ? kbBase! : ctx.path;
+
+    return 'Chat ($chatName)';
   }
 
   // KB “normale”
@@ -160,21 +179,37 @@ String _displayName(ContextMetadata ctx) {
   // ════════════════════════════════════════════════════════════════════════
   //  FILTER
   // ════════════════════════════════════════════════════════════════════════
-  void _applyFilters() {
-    final q = _searchController.text.toLowerCase();
-    setState(() {
-      _filteredContexts = widget.availableContexts.where((ctx) {
-        final keep = (_viewMode == 'kb')
-            ? !_isChatContext(ctx)
-            :  _isChatContext(ctx);
-        if (!keep) return false;
+void _applyFilters() {
+  final q = _searchController.text.toLowerCase();
 
-        final name = ctx.path.toLowerCase();
-        final disp = _displayName(ctx).toLowerCase();
-        return name.contains(q) || disp.contains(q);
-      }).toList();
+  setState(() {
+    _filteredContexts = widget.availableContexts.where((ctx) {
+      // Filtra per tipo (kb/chat)
+      final keepType = (_viewMode == 'kb') ? !_isChatContext(ctx) : _isChatContext(ctx);
+      if (!keepType) return false;
+
+      // Calcola displayName (può essere null ⇒ drop)
+      final dispName = _displayName(ctx);
+      if (dispName == null) return false;
+
+      final name = ctx.path.toLowerCase();
+      final disp = dispName.toLowerCase();
+
+      return name.contains(q) || disp.contains(q);
+    }).toList();
+
+    // Se un contesto selezionato è stato rimosso (chat cancellata), toglilo
+    _selectedContexts.removeWhere((p) {
+      final ctx = widget.availableContexts.firstWhere(
+        (c) => c.path == p,
+        orElse: () => ContextMetadata(path: '', customMetadata: const {}),
+      );
+      if (ctx.path.isEmpty) return true;
+      return _isChatContext(ctx) && _displayName(ctx) == null;
     });
-  }
+  });
+}
+
 
   // ════════════════════════════════════════════════════════════════════════
   //  CALLBACK
@@ -292,41 +327,43 @@ String _displayName(ContextMetadata ctx) {
     : ListView.builder(
                     itemCount: _filteredContexts.length,
                     itemBuilder: (_, i) {
-                      final ctx = _filteredContexts[i];
-                      final sel = _selectedContexts.contains(ctx.path);
-                      final lastMsg = _lastMessageDate(ctx);
+  final ctx = _filteredContexts[i];
+  final sel = _selectedContexts.contains(ctx.path);
+  final dispName = _displayName(ctx); // nuovo
 
-                      return CheckboxListTile(
-  dense: true,
-  title: Text(
-    _displayName(ctx),
-    style: TextStyle(
-      fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+  // Se null, non renderizzare (scartata perché chat non trovata)
+  if (dispName == null) return const SizedBox.shrink();
+
+  final dt = _isChatContext(ctx)
+      ? _chatLastMsgDate(ctx.customMetadata?['chat_id'] ?? '')
+      : null;
+
+  return CheckboxListTile(
+    dense: true,
+    title: Text(
+      dispName,
+      style: TextStyle(
+        fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+      ),
     ),
-  ),
-  subtitle: _isChatContext(ctx)
-      ? (() {
-          final dt = _chatLastMsgDate(ctx.customMetadata?['chat_id'] ?? '');
-          return dt != null
-              ? Text(DateFormat('dd/MM/yyyy  HH:mm').format(dt))
-              : null;
-        })()
-      : null,
-  value: sel,
-  onChanged: (v) {
-    setState(() {
-      if (v == true) {
-        _selectedContexts.add(ctx.path);
-      } else {
-        _selectedContexts.remove(ctx.path);
-      }
-    });
-  },
-  activeColor: Colors.blue,
-  checkColor: Colors.white,
-);
+    subtitle: (dt != null)
+        ? Text(DateFormat('dd/MM/yyyy  HH:mm').format(dt))
+        : null,
+    value: sel,
+    onChanged: (v) {
+      setState(() {
+        if (v == true) {
+          _selectedContexts.add(ctx.path);
+        } else {
+          _selectedContexts.remove(ctx.path);
+        }
+      });
+    },
+    activeColor: Colors.blue,
+    checkColor: Colors.white,
+  );
+},
 
-                    },
                   ),
                 ),
               ),

@@ -4,6 +4,7 @@ import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_app/ui_components/dialogs/loader_config_dialog.dart';
 import 'package:flutter_app/ui_components/icons/cube.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:universal_html/html.dart' as html;
@@ -364,7 +365,7 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
   );
 }
 
-// NEW – cache locale per evitare round-trip ripetuti
+/*// NEW – cache locale per evitare round-trip ripetuti
 Map<String, List<String>>? _extToLoaders;
 Map<String, dynamic>?      _kwargsSchema;
 
@@ -795,7 +796,7 @@ Future<Map<String, dynamic>?> _showLoaderConfigDialog(
     ),
   );
 }
-
+*/
 
 
 
@@ -1147,7 +1148,7 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
     }
 
   // ① apre dialog di configurazione
-  final cfg = await _showLoaderConfigDialog(
+  final cfg = await showLoaderConfigDialog(
     context,
     result.files.first.name,
     result.files.first.bytes!, 
@@ -1205,128 +1206,6 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
     }
   }
 
-  // Mostra il dialog per caricare file in contesti multipli
-  /*void _showUploadFileToMultipleContextsDialog() {
-    final localizations = LocalizationProvider.of(context);
-    TextEditingController descriptionController = TextEditingController();
-    List<String> selectedContexts = [];
-    FilePickerResult? fileResult;
-    String? selectedFileName;
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            return AlertDialog(
-              title: Text(localizations.upload_file_in_multiple_knowledge_boxes),
-              backgroundColor: Colors.white, // Sfondo del popup
-              elevation: 6, // Intensità dell'ombra
-              shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(4), // Arrotondamento degli angoli
-                //side: BorderSide(
-                //  color: Colors.blue, // Colore del bordo
-                //  width: 2, // Spessore del bordo
-                //),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ElevatedButton(
-                    onPressed: () async {
-                      fileResult = await FilePicker.platform.pickFiles();
-                      if (fileResult != null) {
-                        setState(() {
-                          selectedFileName = fileResult!.files.first.name;
-                        });
-                      }
-                    },
-                    child: Text(selectedFileName != null
-                        ? '${localizations.selected_file}: $selectedFileName'
-                        : localizations.select_file ),
-                  ),
-                  SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    decoration:
-                        InputDecoration(labelText: 'Seleziona le Knowledge Boxes'),
-                    items: _contexts.map((context) {
-                      return DropdownMenuItem<String>(
-                        value: context.path,
-                        child: Text(context.path),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null && !selectedContexts.contains(value)) {
-                        setState(() {
-                          selectedContexts.add(value);
-                        });
-                      }
-                    },
-                  ),
-                  SizedBox(height: 10),
-                  Wrap(
-                    spacing: 6.0,
-                    children: selectedContexts.map((context) {
-                      return Chip(
-                        label: Text(context),
-                        onDeleted: () {
-                          setState(() {
-                            selectedContexts.remove(context);
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  SizedBox(height: 10),
-                  TextField(
-                    controller: descriptionController,
-                    decoration:
-                        InputDecoration(labelText: 'Descrizione del File'),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    if (fileResult != null && selectedContexts.isNotEmpty) {
-                      // Chiudi il dialog prima di iniziare il caricamento
-                      Navigator.of(context).pop();
-                      setState(() {
-                        _isLoading = true;
-                        _loadingContext = selectedContexts.join(", ");
-                        _loadingFileName = fileResult!.files.first.name;
-                      });
-
-                      // Caricamento file
-                      _uploadFile(
-                        fileResult!.files.first.bytes!,
-                        selectedContexts,
-                        description: descriptionController.text,
-                        fileName: fileResult!.files.first.name,
-                      ).then((_) {
-                        if (mounted) {
-                          setState(() {
-                            _isLoading = false;
-                            _loadingContext = null;
-                            _loadingFileName = null;
-                          });
-                        }
-                      });
-                    } else {
-                      print('Errore: seleziona almeno un contesto e un file.');
-                    }
-                  },
-                  child: Text(localizations.upload_file),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }*/
 
   Widget _buildSearchAreaWithTitle() {
     final localizations = LocalizationProvider.of(context);

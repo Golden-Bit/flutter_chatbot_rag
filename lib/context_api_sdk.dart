@@ -9,6 +9,154 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 //import 'package:http/http.dart' as http;
 import 'dart:html' as html;
 
+
+class ImageBase64ResponseDto {
+  final String url;
+  final String contentType;
+  final int sizeBytes;
+  final int? width;
+  final int? height;
+  final String sha256;
+  final String base64Raw;
+  final String dataUri;
+
+  ImageBase64ResponseDto({
+    required this.url,
+    required this.contentType,
+    required this.sizeBytes,
+    this.width,
+    this.height,
+    required this.sha256,
+    required this.base64Raw,
+    required this.dataUri,
+  });
+
+  factory ImageBase64ResponseDto.fromJson(Map<String, dynamic> j) {
+    return ImageBase64ResponseDto(
+      url         : j['url'],
+      contentType : j['content_type'],
+      sizeBytes   : j['size_bytes'],
+      width       : j['width'],
+      height      : j['height'],
+      sha256      : j['sha256'],
+      base64Raw   : j['base64_raw'],
+      dataUri     : j['data_uri'],
+    );
+  }
+
+  /// Comodo se vuoi passare direttamente i bytes a Image.memory
+  Uint8List get bytes => base64Decode(base64Raw);
+}
+
+
+// ── enum allineato al backend ────────────────────────────────────────────
+enum ParamType { string, integer, number, boolean, array, object }
+
+// ── Parametri (ricorsivi) ────────────────────────────────────────────────
+class ToolParamSpec {
+  final String       name;
+  final ParamType    paramType;
+  final ParamType?   itemsType;
+  final ParamType?   keyType;
+  final ParamType?   valueType;
+  final String       description;
+  final dynamic      example;
+  final dynamic      defaultValue;
+  final List<dynamic>? allowedValues;
+  final double?      minValue, maxValue;
+  final int?         minLength, maxLength;
+  final List<ToolParamSpec>? properties;
+
+  const ToolParamSpec({
+    required this.name,
+    required this.paramType,
+    this.itemsType,
+    this.keyType,
+    this.valueType,
+    required this.description,
+    this.example,
+    this.defaultValue,
+    this.allowedValues,
+    this.minValue,
+    this.maxValue,
+    this.minLength,
+    this.maxLength,
+    this.properties,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name'        : name,
+        'param_type'  : _enum2str(paramType),
+        if (itemsType != null) 'items_type' : _enum2str(itemsType!),
+        if (keyType   != null) 'key_type'   : _enum2str(keyType!),
+        if (valueType != null) 'value_type' : _enum2str(valueType!),
+        'description' : description,
+        if (example        != null) 'example'        : example,
+        if (defaultValue   != null) 'default'        : defaultValue,
+        if (allowedValues  != null) 'allowed_values' : allowedValues,
+        if (minValue       != null) 'min_value'      : minValue,
+        if (maxValue       != null) 'max_value'      : maxValue,
+        if (minLength      != null) 'min_length'     : minLength,
+        if (maxLength      != null) 'max_length'     : maxLength,
+        if (properties     != null)
+          'properties' : properties!.map((p) => p.toJson()).toList(),
+      };
+
+  /* helper enum→string */
+  static String _enum2str(ParamType t) =>
+      t.toString().split('.').last;            // ParamType.string → "string"
+}
+
+// ── ToolSpec  (solo i campi richiesti dal backend) ────────────────────────
+class ToolSpec {
+  final String toolName;
+  final String description;
+  final List<ToolParamSpec> params;
+
+  const ToolSpec({
+    required this.toolName,
+    required this.description,
+    this.params = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'tool_name'  : toolName,
+        'description': description,
+        'params'     : params.map((p) => p.toJson()).toList(),
+      };
+}
+
+// vicino agli altri model/sdk
+class ChainConfiguration {
+  final String chainId;
+  final String configId;
+  final String? llmId;
+  final List<dynamic>? tools;
+  final Map<String, dynamic>? extraMetadata;
+  final List<dynamic>? contexts;
+
+  ChainConfiguration({
+    required this.chainId,
+    required this.configId,
+    this.llmId,
+    this.tools,
+    this.extraMetadata,
+    this.contexts,
+  });
+
+  factory ChainConfiguration.fromJson(Map<String, dynamic> j) {
+    return ChainConfiguration(
+      chainId: j['chain_id'] ?? '',
+      configId: j['config_id'] ?? '',
+      llmId: j['llm_id'] as String?,
+      tools: j['tools'] as List<dynamic>?,
+      extraMetadata: j['extra_metadata'] as Map<String, dynamic>?,
+      contexts: (j['contexts'] as List?)?.cast<dynamic>(),
+    );
+  }
+}
+
+
 /// Documento restituito da GET /documents/{collection_name}/
 class DocumentModel {
   final String pageContent;
@@ -434,8 +582,8 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    //"chatbot_nlp_api": "http://127.0.0.1:8777"
+    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    "chatbot_nlp_api": "http://127.0.0.1:8777"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
@@ -744,8 +892,15 @@ Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
 
 
 /// Metodo aggiornato per supportare la nuova versione dell'endpoint con autenticazione
-Future<Map<String, dynamic>> configureAndLoadChain(
-    String username, String token, List<String> contexts, String model) async {
+ Future<Map<String, dynamic>> configureAndLoadChain(
+   String username,
+   String token,
+   List<String> contexts,
+   String model, {
+   String? systemMessageContent,                      // ← nuovo
+   List<Map<String, dynamic>>? customServerTools,           // ← nuovo
+   List<ToolSpec> toolSpecs = const [],      // ⬅️  nuovo parametro opzionale
+ }) async {
   if (baseUrl == null) await loadConfig();
 
   // Aggiunge il prefisso 'username-' ai nomi dei contesti
@@ -760,6 +915,15 @@ Future<Map<String, dynamic>> configureAndLoadChain(
     'token': token,            // Passiamo il token per autenticazione
     'contexts': formattedContexts, // Contesti aggiornati con prefisso
     'model_name': model,
+        // Se è stato fornito un system message extra, lo includo
+    if (systemMessageContent != null && systemMessageContent.isNotEmpty)
+      'system_message_content': systemMessageContent,
+    // Se ci sono tool custom da sovrascrivere o aggiungere
+    if (customServerTools != null && customServerTools.isNotEmpty)
+      'custom_tools': customServerTools,
+    // Se vogliamo anche inviare widget-instructions dei tool per documentazione
+    if (toolSpecs.isNotEmpty)
+    'client_tool_specs': toolSpecs.map((t) => t.toJson()).toList(),
   };
 
   try {
@@ -1289,5 +1453,103 @@ InteractionCost recomputeInteractionCost(
     params         : cleaned,
   );
 }
+
+  /// Recupera la configurazione di una chain.
+  ///
+  /// Puoi passare:
+  ///   - [chainId] (senza _config) oppure direttamente l'id config con suffisso
+  ///   - [chainConfigId] (se già noto)
+  /// Uno dei due è obbligatorio. Se entrambi presenti ha priorità `chainId`.
+  ///
+  /// Restituisce un oggetto [ChainConfiguration] (o lancia ApiException).
+  Future<ChainConfiguration> getChainConfiguration({
+    String? chainId,
+    String? chainConfigId,
+    String? token,
+  }) async {
+    if (baseUrl == null) await loadConfig();
+
+    if ((chainId == null || chainId.isEmpty) &&
+        (chainConfigId == null || chainConfigId.isEmpty)) {
+      throw ApiException(
+          'Devi fornire chainId oppure chainConfigId per recuperare la configurazione.');
+    }
+
+    // determina il config_id finale
+    String configId;
+    if (chainId != null && chainId.isNotEmpty) {
+      configId = chainId.endsWith('_config') ? chainId : '${chainId}_config';
+    } else {
+      configId = chainConfigId!.endsWith('_config')
+          ? chainConfigId
+          : '${chainConfigId}_config';
+    }
+
+    final uri = Uri.parse('$baseUrl/get_chain_configuration');
+
+    final body = <String, dynamic>{
+      if (chainId != null) 'chain_id': chainId,
+      if (chainConfigId != null) 'chain_config_id': chainConfigId,
+      if (token != null) 'token': token,
+    };
+
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    if (res.statusCode == 200) {
+      final jsonMap = jsonDecode(res.body) as Map<String, dynamic>;
+      return ChainConfiguration.fromJson(jsonMap);
+    } else {
+      throw ApiException(
+          'Errore get_chain_configuration: ${res.body}');
+    }
+  }
+
+
+Future<ImageBase64ResponseDto> fetchImageAsBase64(
+  String imageUrl, {
+  bool includeDimensions = true,
+  int maxBytes = 10 * 1024 * 1024,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/image/base64').replace(queryParameters: {
+    'url': imageUrl,
+    'include_dimensions': includeDimensions.toString(),
+    'max_bytes': maxBytes.toString(),
+  });
+
+  final res = await http.get(uri);
+
+  if (res.statusCode == 200) {
+    final jsonMap = jsonDecode(res.body) as Map<String, dynamic>;
+    return ImageBase64ResponseDto.fromJson(jsonMap);
+  } else {
+    throw ApiException('Errore /image/base64: ${res.body}');
+  }
+}
+
+
+// context_api_sdk.dart  (aggiungi dopo downloadFile)
+Future<Uint8List> fetchFileBytes(String fileId, {String? token}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/download').replace(queryParameters: {
+    'file_id': fileId,
+    if (token != null) 'token': token,
+  });
+
+  final response = await http.get(uri);
+  if (response.statusCode == 200) {
+    return response.bodyBytes;                // 👈 restituiamo i bytes
+  } else {
+    throw ApiException(
+        'Errore durante il download del file: ${response.body}');
+  }
+}
+
 
 }

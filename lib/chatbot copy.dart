@@ -9,9 +9,13 @@ import 'package:flutter_app/llm_ui_tools/utilities/chatVarsWidget.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/js_runner_widget.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/showChatVarsWidget.dart';
 import 'package:flutter_app/llm_ui_tools/utilities/toolEventWidget.dart';
+import 'package:flutter_app/ui_components/chat/chat_input_widget.dart';
+import 'package:flutter_app/ui_components/chat/chat_media_widgets.dart';
 import 'package:flutter_app/ui_components/chat/empty_chat_content.dart';
+import 'package:flutter_app/ui_components/chat/utilities_functions/kb_utilities.dart';
 import 'package:flutter_app/ui_components/chat/utilities_functions/rename_chat_instructions.dart';
 import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
+import 'package:flutter_app/ui_components/dialogs/loader_config_dialog.dart';
 import 'package:flutter_app/ui_components/message/codeblock_md_builder.dart';
 import 'package:flutter_app/llm_ui_tools/tools.dart';
 import 'package:flutter_app/ui_components/buttons/blue_button.dart';
@@ -51,6 +55,129 @@ import 'dart:html' as html; // download CSV
 import 'package:collection/collection.dart';
 import 'dart:async';
 
+
+/// ➊  Chiave che descrive come il messaggio deve apparire nella UI
+///     'normal'      → si vede subito (default)
+///     'invisible'   → non si vede mai in chat
+///     'placeholder' → l’utente vede solo displayContent
+const String kMsgVisibility   = 'visibility';
+const String kVisNormal       = 'normal';
+const String kVisInvisible    = 'invisible';
+const String kVisPlaceholder  = 'placeholder';
+
+/// ➋  Se visibility == 'placeholder' questo è il testo che
+///     l’utente visualizza al posto di `content`.
+const String kMsgDisplayText  = 'displayContent';
+
+/// Proprietà del separatore subito sotto la Top-Bar.
+class TopBarSeparatorStyle {
+  const TopBarSeparatorStyle({
+    this.visible = true,
+    this.thickness = 1.0,
+    this.color = Colors.grey,
+    this.topOffset = 0.0, // distanza dal bordo superiore
+  });
+
+  /// Se `false` il separatore non viene renderizzato.
+  final bool visible;
+
+  /// Altezza (px) del separatore.
+  final double thickness;
+
+  /// Colore del separatore.
+  final Color color;
+
+  /// Spazio verticale *sopra* il separatore.
+  /// Imposta 50.0 per avere sempre 50 px dal bordo superiore anche con Top-Bar vuota.
+  final double topOffset;
+
+  /// Stile di default identico al comportamento attuale.
+  static const def = TopBarSeparatorStyle();
+}
+
+/// Impostazioni dello sfondo (colore piatto oppure gradiente radiale).
+class ChatBackgroundStyle {
+  const ChatBackgroundStyle({
+    this.useGradient = true,
+    this.baseColor = const Color(0xFFFFFFFF),
+    this.gradientCenter = const Alignment(0.5, 0.25),
+    this.gradientRadius = 1.2,
+    this.gradientInner = const Color(0xFFC7E6FF), // azzurro “soft”
+    this.gradientOuter = const Color(0xFFFFFFFF),
+  });
+
+  /// `false` = colore piatto `baseColor`
+  final bool useGradient;
+
+  /// Colore usato **sempre** come fallback e come outer-color se
+  /// `useGradient == false`.
+  final Color baseColor;
+
+  /// Parametri solo se `useGradient == true`
+  final Alignment gradientCenter;
+  final double gradientRadius;
+  final Color gradientInner;
+  final Color gradientOuter;
+}
+
+class ChatBorderStyle {
+  final bool visible;
+  final double thickness;
+  final Color color;
+  final double radius;
+  final EdgeInsets margin;
+
+  const ChatBorderStyle({
+    this.visible = true,
+    this.thickness = 1.0,
+    this.color = Colors.grey,
+    this.radius = 16.0,
+    this.margin = const EdgeInsets.all(16), // 〈── default ex-container
+  });
+
+  /// Stile “nessun bordo”
+  static const none = ChatBorderStyle(visible: false);
+
+  /// Stile di default usato da ChatBotPage se l’host non specifica nulla
+  static const def = ChatBorderStyle(); // visibile + parametri sopra
+}
+
+// ─── callbacks.dart (o in cima a ChatBotPage.dart) ───────────────
+class ChatBotHostCallbacks {
+  const ChatBotHostCallbacks({
+    this.renameChat,
+    this.showSnackBar,
+    this.navigate,
+  });
+
+  /// Funzioni che il *genitore* (host) vuole esporre.
+  final Future<void> Function(String chatId, String newName)? renameChat;
+  final void Function(String message)? showSnackBar;
+  final void Function(String routeName)? navigate;
+}
+
+class ChatBotPageCallbacks {
+  const ChatBotPageCallbacks({
+    required this.renameChat,
+    required this.sendReply,
+  });
+
+  final Future<void> Function(String chatId, String newName) renameChat;
+
+  // 🔸 AGGIUNGI il named-parameter facoltativo
+  final void Function(
+    String reply, {
+    String? sequenceId, // <── NEW
+  }) sendReply;
+}
+
+typedef ChatWidgetBuilder = Widget Function(
+  Map<String, dynamic> data,
+  void Function(String reply, {Map<String, dynamic>? meta}) onReply, // <── NEW
+  ChatBotPageCallbacks pageCbs,
+  ChatBotHostCallbacks hostCbs,
+);
+
 class FileUploadInfo {
   String jobId;
   String ctxPath; // path KB
@@ -78,12 +205,36 @@ class FileUploadInfo {
         stage: TaskStage.values
             .firstWhere((e) => e.name == (j['stage'] ?? 'pending')),
       );
+      
 }
+
+/*─────────────────────────────────────────────────────────────*/
+/* EXTENSION: FileUploadInfo ← PendingUploadJob                */
+/*─────────────────────────────────────────────────────────────*/
+extension FileUploadInfoX on FileUploadInfo {
+  /// Costruisce un [FileUploadInfo] a partire da un [PendingUploadJob]
+  static FileUploadInfo fromPending(PendingUploadJob job) {
+    // lo stato lo deduciamo dal primo task ancora “vivo”, se esiste
+    final TaskStage stage = job.tasksPerCtx.values.any(
+            (t) => t.loaderTaskId != null || t.vectorTaskId != null)
+        ? TaskStage.running
+        : TaskStage.pending;
+
+    return FileUploadInfo(
+      jobId: job.jobId,
+      ctxPath: job.contextPath,
+      fileName: job.fileName,
+      stage: stage,
+    );
+  }
+}
+
+
 class _PaginatedDocViewer extends StatefulWidget {
   final ContextApiSdk apiSdk;
-  final String        token;
-  final String        collection;
-  final int           pageSize;
+  final String token;
+  final String collection;
+  final int pageSize;
 
   const _PaginatedDocViewer({
     Key? key,
@@ -99,22 +250,22 @@ class _PaginatedDocViewer extends StatefulWidget {
 
 class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
   late Future<List<DocumentModel>> _future;
-  int  _page  = 0;        // 0‑based
+  int _page = 0; // 0‑based
   int? _total;
 
   @override
   void initState() {
     super.initState();
-    _future = _fetch();           // ► prima pagina
+    _future = _fetch(); // ► prima pagina
   }
 
   /*──────── helper API (skip / limit fissi) ────────*/
   Future<List<DocumentModel>> _fetch() async {
     return widget.apiSdk.listDocuments(
       widget.collection,
-      token : widget.token,
-      skip  : _page * widget.pageSize,
-      limit : widget.pageSize,        // sempre = pageSize
+      token: widget.token,
+      skip: _page * widget.pageSize,
+      limit: widget.pageSize, // sempre = pageSize
       onTotal: (t) => _total = t,
     );
   }
@@ -122,11 +273,12 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
   /*──────── cambio pagina (con guard‑rail) ────────*/
   void _go(int delta) {
     final next = _page + delta;
-    if (next < 0) return;                                   // < 0
-    if (_total != null && next * widget.pageSize >= _total!) return; // oltre fine
+    if (next < 0) return; // < 0
+    if (_total != null && next * widget.pageSize >= _total!)
+      return; // oltre fine
 
     setState(() {
-      _page   = next;
+      _page = next;
       _future = _fetch();
     });
   }
@@ -134,9 +286,9 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width : 400,
+      width: 400,
       height: 400,
-      child : FutureBuilder<List<DocumentModel>>(
+      child: FutureBuilder<List<DocumentModel>>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
@@ -146,17 +298,19 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
             return Text('Errore caricamento documenti: ${snap.error}');
           }
 
-          final docs    = snap.data!;
+          final docs = snap.data!;
           final isEmpty = docs.isEmpty;
 
           final jsonStr = isEmpty
               ? ''
               : const JsonEncoder.withIndent('  ').convert(
-                  docs.map((d) => {
-                    'page_content': d.pageContent,
-                    'metadata'    : d.metadata,
-                    'type'        : d.type,
-                  }).toList(),
+                  docs
+                      .map((d) => {
+                            'page_content': d.pageContent,
+                            'metadata': d.metadata,
+                            'type': d.type,
+                          })
+                      .toList(),
                 );
 
           /*───────── UI completa ─────────*/
@@ -167,22 +321,22 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   IconButton(
-                    tooltip : 'Pagina precedente',
-                    icon    : const Icon(Icons.arrow_back_ios_new, size: 16),
+                    tooltip: 'Pagina precedente',
+                    icon: const Icon(Icons.arrow_back_ios_new, size: 16),
                     onPressed: _page == 0 ? null : () => _go(-1),
                   ),
                   Text(
                     _total == null
-                      ? 'Pagina ${_page + 1}'
-                      : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
+                        ? 'Pagina ${_page + 1}'
+                        : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
                     style: const TextStyle(fontSize: 13),
                   ),
                   IconButton(
-                    tooltip : 'Pagina successiva',
-                    icon    : const Icon(Icons.arrow_forward_ios, size: 16),
+                    tooltip: 'Pagina successiva',
+                    icon: const Icon(Icons.arrow_forward_ios, size: 16),
                     onPressed: (isEmpty || docs.length < widget.pageSize)
-                      ? null
-                      : () => _go(1),
+                        ? null
+                        : () => _go(1),
                   ),
                 ],
               ),
@@ -191,7 +345,7 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
               /*───── riquadro scroll / placeholder ─────*/
               Expanded(
                 child: Container(
-                  width : double.infinity,
+                  width: double.infinity,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade100,
@@ -215,7 +369,7 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
                               jsonStr,
                               style: const TextStyle(
                                 fontFamily: 'monospace',
-                                fontSize : 12,
+                                fontSize: 12,
                               ),
                             ),
                           ),
@@ -404,14 +558,92 @@ class _Segment {
 class ChatBotPage extends StatefulWidget {
   final User user;
   final Token token;
+  final bool startVisible;
+  final String? initialChatId; // ✅ NEW: chat da aprire subito (opzionale)
+  final String? defaultChainId; // es: "abc123"
+  final String? defaultChainConfigId; // es: "abc123_config"
+  final Map<String, dynamic>?
+      defaultChainConfig; // es. {'model': 'gpt‑4o', 'contexts': ['sales_db']}
+  final bool hasSidebar; // true = sidebar presente
+  final double sidebarStartMinWidth; // larghezza iniziale se presente
+  final double sidebarStartMaxWidth; // larghezza iniziale se presente
+  final bool showUserMenu; // mostra avatar + menu in top-bar
+  final bool showTopBarLogo; // logo nella top-bar
+  final bool showSidebarLogo; // logo nella sidebar (se esiste)
+  final bool showSearchButton;
+  final bool showConversationButton;
+  final bool showKnowledgeBoxButton;
+  final bool showNewChatButton;
+  final bool showChatList;
+  final ChatBorderStyle borderStyle;
+  final ChatBackgroundStyle backgroundStyle;
+  final TopBarSeparatorStyle separatorStyle;
+  final double topBarMinHeight;
+  final Map<String, ChatWidgetBuilder> externalWidgetBuilders;
+  final ChatBotHostCallbacks hostCallbacks;
 
-  ChatBotPage({required this.user, required this.token});
+  /// (opzionale) elenco dei tool che il backend deve conoscere
+  final List<ToolSpec> toolSpecs;
+
+  ChatBotPage({
+    Key? key,
+    required this.user,
+    required this.token,
+    this.startVisible = true,
+    this.initialChatId, // = '0e332ebb-2e24-4722-baab-b024342b1f9c',
+    this.defaultChainId, // = '28d28fdff',
+    this.defaultChainConfigId, // = '28d28fdff_config',
+    this.defaultChainConfig,
+    this.hasSidebar = true, // ⇦ DEFAULT
+    this.sidebarStartMinWidth = 300.0, // ⇦ DEFAULT
+    this.sidebarStartMaxWidth = 300.0, // ⇦ DEFAULT
+    this.showUserMenu = true, // ⇦ DEFAULT
+    this.showTopBarLogo = true, // ⇦ DEFAULT
+    this.showSidebarLogo = true, // ⇦ DEFAULT
+    this.showSearchButton = true,
+    this.showConversationButton = true,
+    this.showKnowledgeBoxButton = true,
+    this.showNewChatButton = true,
+    this.showChatList = true,
+    this.borderStyle = ChatBorderStyle.def,
+    this.backgroundStyle = const ChatBackgroundStyle(),
+    this.separatorStyle = TopBarSeparatorStyle.def,
+    this.topBarMinHeight = 75.0,
+    this.externalWidgetBuilders = const {},
+    this.hostCallbacks = const ChatBotHostCallbacks(),
+    this.toolSpecs = const [],
+  }) : super(key: key);
 
   @override
   ChatBotPageState createState() => ChatBotPageState();
 }
 
 class ChatBotPageState extends State<ChatBotPage> {
+  Map<String, dynamic>? _defaultChainConfig;
+
+  // ───────────────────────────────────────────────────────────
+//  NEW STATE – lista di immagini da allegare prima dell'invio
+// ───────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _pendingInputImages = [];
+
+  void _addInputImage(Map<String, dynamic> img) {
+    setState(() => _pendingInputImages.add(img));
+  }
+
+  void _removeInputImageAt(int idx) {
+    setState(() => _pendingInputImages.removeAt(idx));
+  }
+
+  bool _isSending = false; // spinner sull’icona SEND
+  static const int _maxSendRetries = 5;
+  late final List<ToolSpec> _toolSpecs;
+  late final ChatBotPageCallbacks _pageCbs;
+  String? _forcedDefaultChainId;
+  String? _forcedDefaultChainConfigId;
+  bool _forceInitialChatLoading = false;
+  bool _openedWithInitialChat = false; //
+  late final bool _mustForceInitialChat = // deciso subito
+      (widget.initialChatId?.isNotEmpty ?? false);
   final ContextApiSdk _apiSdk = ContextApiSdk();
   // DOPO
   final Map<String /*jobId*/, PendingUploadJob> _pendingJobs = {};
@@ -427,25 +659,56 @@ class ChatBotPageState extends State<ChatBotPage> {
 // Nuova flag per mostrare/nascondere il FloatingActionButton
   bool _showScrollToBottomButton = false;
   bool isLoggingOut = false;
-
+// ──────────────────────────────────────────────
+//  Retry sulla risposta dell’agente
+// ──────────────────────────────────────────────
+  static const int _maxRetries = 5; // tentativi massimi
+  final Map<String, int> _retryCounts = {}; // msgId → tentativi fatti
   /// ---------------------------------------------------------------------------
   ///  Restituisce la stessa struttura che metti nei messaggi “normali”
   ///  (aggiungi qui dentro ogni metadato aggiuntivo che ti serve)             ↓↓
   Map<String, dynamic> _buildCurrentAgentConfig() {
     return {
       'model': _selectedModel,
-      'contexts': _formattedContextsForAgent(),
+      'contexts': buildFormattedContextsForAgent(
+        widget.user.username,
+        _selectedContexts,
+        chatKbPath: _chatKbPath,
+        chatKbHasDocs: chatKbHasIndexedDocs(
+          chatKbPath: _chatKbPath,
+          messages: messages,
+        ),
+      ),
       'chain_id': _latestChainId,
       'config_id': _latestConfigId,
     };
   }
 
   bool _appReady = false;
-// Restituisce una stringa CSV escapando le virgolette
-  String _toCsv(List<List<String>> rows) {
-    return rows
-        .map((r) => r.map((c) => '"${c.replaceAll('"', '""')}"').join(','))
-        .join('\r\n');
+
+/*─────────────────────────────────────────────────────────────────────
+  Helper generico: esegue fn() al massimo [retries] volte con back-off
+─────────────────────────────────────────────────────────────────────*/
+  Future<T> _withRetry<T>(
+    Future<T> Function() fn, {
+    int retries = 5,
+    Duration baseDelay = const Duration(milliseconds: 400),
+  }) async {
+    int attempt = 0;
+    while (true) {
+      try {
+        return await fn(); // 🟢 OK
+      } catch (e) {
+        attempt += 1;
+        if (attempt >= retries) rethrow; // 🔴 esauriti i tentativi
+        // solo se è effettivamente un 5xx
+        if (e.toString().contains('500')) {
+          await Future.delayed(baseDelay * attempt); // back-off lineare
+          continue;
+        }
+        rethrow; // altri errori: propagali
+      }
+    }
   }
 
   void _downloadCsv(List<List<String>> rows) {
@@ -464,97 +727,238 @@ class ChatBotPageState extends State<ChatBotPage> {
     html.Url.revokeObjectUrl(url);
   }
 
+  void _safeSetActiveIdx(int idx) {
+    if (idx == 99 && !widget.showSearchButton) return;
+    if (idx == 0 && !widget.showConversationButton) return;
+    if (idx == 1 && !widget.showKnowledgeBoxButton) return;
+    _activeButtonIndex = idx;
+  }
+
+  void sendSequenceMessage(String text, String sequenceId) {
+    _handleUserInput(text, sequenceId: sequenceId);
+  }
+
+/// PUBLIC – chiamabile dallo State‐ful host:
+///
+/// • `visibility`    = kVisNormal | kVisInvisible | kVisPlaceholder
+/// • `displayText`   = facoltativo, usato solo se visibility == 'placeholder'
+Future<void> sendHostMessage(String text,
+    { String visibility = kVisNormal, String? displayText }) async {
+
+  await _handleUserInput(
+    text,
+    visibility: visibility,
+    displayText: displayText,
+  );
+}
+
+/*─────────────────────────────────────────────────────────────*/
+/* PUBLIC API  ➜  elenco file presenti nella chat corrente    */
+/*─────────────────────────────────────────────────────────────*/
+List<FileUploadInfo> getChatFiles({
+  bool includePending = true,
+  bool includeRunning = true,
+  bool includeDone    = true,
+  bool includeError   = true,
+}) {
+  final List<FileUploadInfo> out = [];
+
+  // ❶  file “materializzati” dentro i messaggi
+  for (final m in messages) {
+    final dyn = m['fileUpload'];
+    if (dyn is Map) {
+      final info = FileUploadInfo.fromJson(Map<String, dynamic>.from(dyn));
+
+      switch (info.stage) {
+        case TaskStage.pending:
+          if (includePending) out.add(info);
+          break;
+        case TaskStage.running:
+          if (includeRunning) out.add(info);
+          break;
+        case TaskStage.done:
+          if (includeDone) out.add(info);
+          break;
+        case TaskStage.error:
+          if (includeError) out.add(info);
+          break;
+      }
+    }
+  }
+
+  // ❷  job ancora in polling ma che non hanno (ancora) prodotto il messaggio
+  for (final job in _pendingJobs.values) {
+    if (out.any((e) => e.jobId == job.jobId)) continue; // già presente
+    final info = FileUploadInfoX.fromPending(job);
+
+    switch (info.stage) {
+      case TaskStage.pending:
+        if (includePending) out.add(info);
+        break;
+      case TaskStage.running:
+        if (includeRunning) out.add(info);
+        break;
+      default:
+        break; // DONE / ERROR saranno sincronizzati dal poller
+    }
+  }
+
+  return out;
+}
+
+final TextEditingController _dlNameCtrl = TextEditingController();
+
+
+/// PUBLIC – caricamento file dall’host.
+/// • `bytes` / `fileName` = file effettivo
+/// • `loaderConfig`      = mappa "loaders"/"loader_kwargs"
+///   – se null mostri il dialogo di scelta
+Future<void> uploadFileFromHost(
+  Uint8List bytes,
+  String fileName, {
+  Map<String, String>?   loaders,
+  Map<String, Map<String, dynamic>>? loaderKwargs,
+}) async {
+
+  final Map<String, dynamic>? cfg =
+      (loaders != null && loaderKwargs != null)
+          ? {'loaders': loaders, 'loader_kwargs': loaderKwargs}
+          : null;                                   // forza dialogo
+
+  await _uploadFileForChatAsync(                  // funzione già esistente
+      isMedia: false,
+      externalBytes: bytes,
+      externalFileName: fileName,
+      externalLoaderConfig: cfg,
+  );
+}
+
+/// Scarica un file presente nella chat *corrente* partendo dal suo nome.
+/// Ritorna i bytes (Uint8List) se il file esiste, altrimenti `null`.
+Future<Uint8List?> downloadFileBytesByName(String fileName) async {
+  // ❶ cerchiamo il FileUploadInfo corrispondente
+  final info = getChatFiles().firstWhereOrNull(
+      (f) => f.fileName.toLowerCase() == fileName.toLowerCase());
+
+  if (info == null) return null; // nessun file con quel nome
+
+  // ❷ costruiamo il file_id nello stesso formato usato da downloadFile()
+  final String fileId =
+      "${widget.user.username}-${info.ctxPath}/${info.fileName}";
+
+  // ❸ scarichiamo i bytes dalla SDK
+  return await _apiSdk.fetchFileBytes(
+    fileId,
+    token: widget.token.accessToken,
+  );
+}
+
+/// Variante “convenience” che apre direttamente la finestra di download
+Future<void> downloadFileByName(String fileName) async {
+  final bytes = await downloadFileBytesByName(fileName);
+  if (bytes == null) return; // file non trovato
+
+  // Solo Web: creiamo il blob e lanciamo il download
+  final blob = html.Blob([bytes]);
+  final url = html.Url.createObjectUrlFromBlob(blob);
+  final anchor = html.AnchorElement(href: url)
+    ..setAttribute('download', fileName)
+    ..click();
+  html.Url.revokeObjectUrl(url);
+}
+
+
 // Streaming in corso?
   bool _isStreaming = false;
 // ─────────────────────────────────────────────────────────────
 //  cost‑estimate  (widget ChatBotPageState)
 // ─────────────────────────────────────────────────────────────
-InteractionCost? _baseCost;     // baseline ufficiale (arriva UNA volta)
-double           _liveCost   = 0;
-bool             _isCostLoading = false;
+  InteractionCost? _baseCost; // baseline ufficiale (arriva UNA volta)
+  double _liveCost = 0;
+  bool _isCostLoading = false;
 
 // ─────────────────────────────────────────────────────────────
 //  util: stima rapida token → #char / 4
 // ─────────────────────────────────────────────────────────────
-int _estimateTokens(String txt) => (txt.length / 4).ceil();
+  int _estimateTokens(String txt) => (txt.length / 4).ceil();
 // ─────────────────────────────────────────────────────────────
 //  helper: converte messages ➔ chat_history per il backend
 // ─────────────────────────────────────────────────────────────
-List<List<String>> _transformChatHistory(List<Map<String, dynamic>> msgs) {
-  // tieni solo user / assistant, in ordine cronologico
-  return msgs
-      .where((m) => m['role'] == 'user' || m['role'] == 'assistant')
-      .map((m) {
-        final role = m['role'] as String? ?? 'assistant';
-        var txt    = m['content'] as String? ?? '';
+  List<List<String>> _transformChatHistory(List<Map<String, dynamic>> msgs) {
+    // tieni solo user / assistant, in ordine cronologico
+    return msgs
+        .where((m) => m['role'] == 'user' || m['role'] == 'assistant')
+        .map((m) {
+      final role = m['role'] as String? ?? 'assistant';
+      var txt = m['content'] as String? ?? '';
 
-        // rimuovi eventuali spinner / placeholder di caret
-        txt = txt.replaceAll("[WIDGET_SPINNER]", "").replaceAll("▌", "");
+      // rimuovi eventuali spinner / placeholder di caret
+      txt = txt.replaceAll("[WIDGET_SPINNER]", "").replaceAll("▌", "");
 
-        return [role, txt];
-      })
-      .toList();
-}
-
-/// ❶  backend – una sola volta per configurazione
-Future<void> _fetchInitialCost() async {
-  if (_latestChainId?.isEmpty ?? true) return;
-
-  setState(() => _isCostLoading = true);
-  try {
-    _baseCost = await _apiSdk.estimateChainInteractionCost(
-      chainId:     _latestChainId!,
-      message:     "",
-      chatHistory: _transformChatHistory(messages),
-    );
-    _liveCost = _baseCost!.costTotalUsd;
-  } catch (e) {
-    debugPrint('[cost] errore: $e');
-  } finally {
-    if (mounted) setState(() {
-      _isCostLoading = false;
-    });                             // F‑6
+      return [role, txt];
+    }).toList();
   }
-}
 
-/// ❷  live‑preview mentre l’utente digita
-void _updateLiveCost(String draft) {
-  if (_baseCost == null) return;
+  /// ❶  backend – una sola volta per configurazione
+  Future<void> _fetchInitialCost() async {
+    if (_latestChainId?.isEmpty ?? true) return;
 
-  final newTokensUser = _estimateTokens(draft);
+    setState(() => _isCostLoading = true);
+    try {
+      _baseCost = await _apiSdk.estimateChainInteractionCost(
+        chainId: _latestChainId!,
+        message: "",
+        chatHistory: _transformChatHistory(messages),
+      );
+      _liveCost = _baseCost!.costTotalUsd;
+    } catch (e) {
+      debugPrint('[cost] errore: $e');
+    } finally {
+      if (mounted)
+        setState(() {
+          _isCostLoading = false;
+        }); // F‑6
+    }
+  }
 
-  final est = _apiSdk.recomputeInteractionCost(
-    _baseCost!,
-    configOverride: {
-      'tokens_user'   : newTokensUser,
-      'tokens_history': _baseCost!.params['tokens_history'],  // int safe
-    },
-  );
+  /// ❷  live‑preview mentre l’utente digita
+  void _updateLiveCost(String draft) {
+    if (_baseCost == null) return;
 
-  setState(() => _liveCost = est.costTotalUsd);
-}
+    final newTokensUser = _estimateTokens(draft);
 
-/// ❸  roll‑forward: nuova baseline in locale
-///
-///  sentTxt  → contenuto appena inviato dall’utente  
-///  outTok   → token di output dell’assistente (reali o stimati)
-void _advanceBaseline(String sentTxt, int outTok) {
-  if (_baseCost == null) return;
+    final est = _apiSdk.recomputeInteractionCost(
+      _baseCost!,
+      configOverride: {
+        'tokens_user': newTokensUser,
+        'tokens_history': _baseCost!.params['tokens_history'], // int safe
+      },
+    );
 
-  final sentTok = _estimateTokens(sentTxt);
-  final oldHist = (_baseCost!.params['tokens_history'] as int?) ?? 0;  // F‑3
+    setState(() => _liveCost = est.costTotalUsd);
+  }
 
-  _baseCost = _apiSdk.recomputeInteractionCost(
-    _baseCost!,
-    configOverride: {
-      'tokens_history': oldHist + sentTok + outTok,
-      'tokens_user'   : 0,                           // reset per il turno dopo
-    },
-  );
+  /// ❸  roll‑forward: nuova baseline in locale
+  ///
+  ///  sentTxt  → contenuto appena inviato dall’utente
+  ///  outTok   → token di output dell’assistente (reali o stimati)
+  void _advanceBaseline(String sentTxt, int outTok) {
+    if (_baseCost == null) return;
 
-  _liveCost = _baseCost!.costTotalUsd;
-  setState(() {});                                   // refresh UI
-}
+    final sentTok = _estimateTokens(sentTxt);
+    final oldHist = (_baseCost!.params['tokens_history'] as int?) ?? 0; // F‑3
+
+    _baseCost = _apiSdk.recomputeInteractionCost(
+      _baseCost!,
+      configOverride: {
+        'tokens_history': oldHist + sentTok + outTok,
+        'tokens_user': 0, // reset per il turno dopo
+      },
+    );
+
+    _liveCost = _baseCost!.costTotalUsd;
+    setState(() {}); // refresh UI
+  }
 
 
 // Riferimenti per cancellare lo stream
@@ -562,122 +966,14 @@ void _advanceBaseline(String sentTxt, int outTok) {
   dynamic _abortController; // AbortController
   final FocusNode _inputFocus = FocusNode();
 // ──────────────────────────────────────────────────────────────────
-// crea una KB per la chat (se non esiste) e ne restituisce il path
-  Future<String> _ensureChatKb(String chatId, String chatName) async {
-    if (_chatKbPath != null) return _chatKbPath!; // già fatta
 
-    final uuid = const Uuid().v4().substring(0, 9); // path breve
-    final displayName = 'Chat-$chatName';
-    await _contextApiSdk.createContext(
-      uuid,
-      'Archivio messaggi chat $chatName',
-      displayName,
-      widget.user.username,
-      widget.token.accessToken,
-      extraMetadata: {'chat_id': chatId}, // ★ associazione
-    );
-    _chatKbPath = uuid;
-    return uuid;
-  }
-
-  /// Se la chat ha documenti indicizzati ma l’ultima chain non include la sua KB,
-  /// riconfigura la chain includendo (solo) quella KB.
-  Future<void> _ensureChainIncludesChatKb(String chatId) async {
-    // ── recupera la chat
-    final chat = _chatHistory.firstWhere(
-      (c) => c['id'] == chatId,
-      orElse: () => null,
-    );
-    if (chat == null) return;
-
-    // ── path KB associata
-    final String? kbPath = chat['kb_path'] as String?;
-    if (kbPath == null || kbPath.isEmpty) return;
-
-    // ── verifica che esista ≥1 upload completato
-    final bool hasIndexedDocs = (chat['messages'] as List).any((m) {
-      final fu = m['fileUpload'] as Map<String, dynamic>?;
-      return fu != null &&
-          fu['ctxPath'] == kbPath &&
-          fu['stage'] == TaskStage.done.name;
-    });
-    if (!hasIndexedDocs) return; // nessun doc indicizzato
-
-    // ── estrai model + contesti dell’ultima agent-config
-    String model = _defaultModel;
-    List<String> ctx = [];
-    if ((chat['messages'] as List).isNotEmpty) {
-      final cfg = (chat['messages'].last['agentConfig'] ?? const {})
-          as Map<String, dynamic>;
-      model = (cfg['model'] ?? _defaultModel) as String;
-      ctx = List<String>.from(cfg['contexts'] ?? const []);
-    }
-
-    // ── i contesti salvati sono con prefisso "<user>-…" ⇒ toglilo
-    final List<String> rawCtx = ctx.map((c) => _stripUserPrefix(c)).toList();
-
-    // ── se la KB è già presente non serve fare nulla
-    if (rawCtx.contains(kbPath)) return;
-
-    // ── prepara la nuova lista contesti
-    final List<String> newCtx = [...rawCtx, kbPath];
-
-    // ── chiama il backend
-    final resp = await _contextApiSdk.configureAndLoadChain(
-      widget.user.username,
-      widget.token.accessToken,
-      newCtx,
-      model,
-    );
-
-    final String? newChainId = resp['load_result']?['chain_id'];
-    final String? newConfigId = resp['config_result']?['config_id'];
-
-    // ── salva nella chat (così resta persistente)
-    chat['latestChainId'] = newChainId;
-    chat['latestConfigId'] = newConfigId;
-
-    // aggiorna anche l’ultima agentConfig presente
-    if ((chat['messages'] as List).isNotEmpty) {
-      final cfg = (chat['messages'].last['agentConfig'] ?? <String, dynamic>{})
-          as Map<String, dynamic>;
-      cfg['chain_id'] = newChainId;
-      cfg['config_id'] = newConfigId;
-      cfg['contexts'] =
-          newCtx.map((c) => "${widget.user.username}-$c").toList();
-      chat['messages'].last['agentConfig'] = cfg;
-    }
-
-    // ── se è la chat visibile, aggiorna lo stato globale
-    if (_activeChatIndex != null &&
-        _chatHistory[_activeChatIndex!]['id'] == chatId) {
-      setState(() {
-        _latestChainId = newChainId;
-        _latestConfigId = newConfigId;
-      });
-    }
-
-    // ── persistenza localStorage (il blocco DB verrà gestito dal tuo save/auto-save)
-    html.window.localStorage['chatHistory'] =
-        jsonEncode({'chatHistory': _chatHistory});
-  }
-
-  static final ValueNotifier<bool> cancelSequences = ValueNotifier(false); // NEW
+  static final ValueNotifier<bool> cancelSequences =
+      ValueNotifier(false); // NEW
 
 // ────────────────────────────────────────────────────────────────
 //  CONFIG DI DEFAULT (usata quando apri una chat “vergine”)
 // ────────────────────────────────────────────────────────────────
   static const String _defaultModel = 'gpt-4o'; // cambia se ti serve
-
-  /// Rimuove il prefisso "<username>-" dai context formattati
-  String _stripUserPrefix(String ctx) {
-    final prefix = "${widget.user.username}-";
-    return ctx.startsWith(prefix) ? ctx.substring(prefix.length) : ctx;
-  }
-
-  /// Ritorna true se `ctxPath` esiste tra le KB note all’app
-  bool _contextIsKnown(String ctxPath) =>
-      _availableContexts.any((c) => c.path == ctxPath);
 
   static const _prefsKeyPending = 'kb_pending_jobs';
 // ──────────────────────────────────────────────────────────────────
@@ -688,7 +984,10 @@ void _advanceBaseline(String sentTxt, int outTok) {
 //      1. assicura la KB della chat               (_chatKbPath)
 //      2. crea una chain nuova con SOLO quella KB
 // ──────────────────────────────────────────────────────────────────
-  Future<void> _prepareChainForCurrentChat() async {
+  Future<void> _prepareChainForCurrentChat({bool allowCreateKb = true}) async {
+    if (_latestChainId != null && _latestChainId!.isNotEmpty) return;
+
+    await _applyForcedDefaultChainIfNeeded();
     if (_latestChainId != null && _latestChainId!.isNotEmpty) return;
 
     // 1‧ assicura KB
@@ -698,13 +997,34 @@ void _advanceBaseline(String sentTxt, int outTok) {
         ? _chatHistory[_activeChatIndex!]['name']
         : 'New Chat';
 
-    if (_chatKbPath == null) {
-      _chatKbPath = await _ensureChatKb(chatId, chatName);
+    // <-- BLOCCO CAMBIATO
+    final needKb = _chatKbPath == null &&
+        allowCreateKb &&
+        messages.isNotEmpty; // crea solo se c'è almeno 1 msg
+
+    if (needKb) {
+      _chatKbPath = await ensureChatKb(
+        api: _contextApiSdk,
+        userName: widget.user.username,
+        accessToken: widget.token.accessToken,
+        chatId: chatId,
+        chatName: chatName,
+        currentKbPath: _chatKbPath, // passa quello attuale (può essere null)
+      );
     }
 
     // 2‧ chain con SOLO la KB-chat
-    await set_context(_rawContextsForChain(), _selectedModel);
-    await _fetchInitialCost();          // unica call al backend
+    await set_context(
+        buildRawContexts(
+          _selectedContexts,
+          chatKbPath: _chatKbPath,
+          chatKbHasDocs: chatKbHasIndexedDocs(
+            chatKbPath: _chatKbPath,
+            messages: messages,
+          ),
+        ),
+        _selectedModel);
+    await _fetchInitialCost(); // unica call al backend
   }
 
   Future<void> _savePendingJobs(Map<String, PendingUploadJob> jobs) async {
@@ -751,47 +1071,36 @@ void _advanceBaseline(String sentTxt, int outTok) {
 // all’interno di ChatBotPageState
   bool _isChainLoading = false; // ← spinner / disabilita invio
 
-  /// Attende finché la chain non è pronta.
-  /// Se mancano gli ID li richiede e li salva in stato.
-  Future<void> _ensureChainReady() async {
-    // già configurata?
-    final bool ready = (_latestChainId?.isNotEmpty ?? false) &&
-        (_latestConfigId?.isNotEmpty ?? false);
-    if (ready) return;
-
-    // evita doppie inizializzazioni concorrenti
-    if (_isChainLoading) {
-      while (_isChainLoading) {
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-      return;
+  /// All’interno di ChatBotPageState:
+  Future<void> _uploadFileForChatAsync({
+    required bool isMedia,
+   Uint8List? externalBytes,
+   String?    externalFileName,
+   Map<String,dynamic>? externalLoaderConfig,
+}) async {
+    if (_chatKbPath == null) {
+      await _prepareChainForCurrentChat(allowCreateKb: true);
     }
 
-    setState(() => _isChainLoading = true);
-    try {
-      // 1. KB della chat e chain “vuota”
-      await _prepareChainForCurrentChat();
-
-      // 2. configura davvero la chain con i contesti correnti
-      await set_context(_rawContextsForChain(), _selectedModel);
-      await _fetchInitialCost();          // unica call al backend
-    } finally {
-      setState(() => _isChainLoading = false);
-    }
-  }
-
-// ⇠ dentro ChatBotPage (stesso livello di _uploadFileForContextAsync nel Dashboard)
-  Future<void> _uploadFileForChatAsync({required bool isMedia}) async {
     // 1. scelta file -----------------------------------------------------------
+  final Uint8List bytes;
+  final String    fName;
+
+  if (externalBytes != null && externalFileName != null) {
+    // ► upload invocato dall’host
+    bytes = externalBytes;
+    fName = externalFileName;
+  } else {
+    // ► upload avviato dall’utente → apri file‑picker
     final result = await FilePicker.platform.pickFiles(
-      type: isMedia ? FileType.media : FileType.any,
+     type: isMedia ? FileType.media : FileType.any,
       allowMultiple: false,
       withData: true,
     );
     if (result == null || result.files.first.bytes == null) return;
-
-    final Uint8List bytes = result.files.first.bytes!;
-    final String fName = result.files.first.name;
+    bytes = result.files.first.bytes!;
+    fName = result.files.first.name;
+  }
 
     // 2. assicura che la KB della chat esista -------------------------------
     final String chatId =
@@ -801,21 +1110,38 @@ void _advanceBaseline(String sentTxt, int outTok) {
         : 'New Chat';
 
     if (_chatKbPath == null) {
-      _chatKbPath = await _ensureChatKb(chatId, chatName);
+      _chatKbPath = await ensureChatKb(
+        api: _contextApiSdk,
+        userName: widget.user.username,
+        accessToken: widget.token.accessToken,
+        chatId: chatId,
+        chatName: chatName,
+        currentKbPath: _chatKbPath, // passa quello attuale (può essere null)
+      );
     }
 
-    // 3. chiamata POST /upload_async ----------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. apri dialog per configurare il loader + stima costo live ------------
+    // Se l’utente annulla, esci senza fare nulla
+    final loaderConfig = externalLoaderConfig ??
+     await showLoaderConfigDialog(context, fName, bytes);
+  if (loaderConfig == null) return;              // utente ha annullato
+
+    // 4. chiamata POST /upload_async con i parametri scelti nell’UI ---------
     final resp = await _contextApiSdk.uploadFileToContextsAsync(
       bytes,
-      [_chatKbPath!], // una sola KB: quella della chat
+      [_chatKbPath!], // contesti (solo la KB chat)
       widget.user.username,
       widget.token.accessToken,
       fileName: fName,
+      loaders: loaderConfig['loaders'] as Map<String, String>,
+      loaderKwargs:
+          loaderConfig['loader_kwargs'] as Map<String, Map<String, dynamic>>,
     );
 
     final Map<String, TaskIdsPerContext> tasksPerCtx = resp.tasks;
 
-    // 4. registra job + notifica overlay ------------------------------------
+    // 5. registra job + notifica overlay ------------------------------------
     final String jobId = const Uuid().v4();
     _onNewPendingJob(jobId, chatId, _chatKbPath!, fName, tasksPerCtx);
 
@@ -828,11 +1154,12 @@ void _advanceBaseline(String sentTxt, int outTok) {
     );
     await _savePendingJobs(_pendingJobs); // persistenza
 
+    // 6. aggiungi il messaggio in chat con badge di upload ------------------
     setState(() {
       messages.add({
         'id': uuid.v4(),
         'role': 'user',
-        'content': 'File "$fName" caricato', // testo visibile
+        'content': 'File "$fName" caricato',
         'createdAt': DateTime.now().toIso8601String(),
         'fileUpload': FileUploadInfo(
           jobId: jobId,
@@ -840,88 +1167,12 @@ void _advanceBaseline(String sentTxt, int outTok) {
           fileName: fName,
           stage: TaskStage.pending,
         ).toJson(),
-        'agentConfig': _buildCurrentAgentConfig(), //  <— aggiungi questo
+        'agentConfig': _buildCurrentAgentConfig(),
       });
 
       _saveConversation(messages);
     });
   }
-
-// ──────────────────────────────────────────────────────────────────
-// carica nella KB tutti i messaggi non ancora presenti (uno .txt per msg)
-  Future<void> _syncMessagesToKb(String kbPath) async {
-    // lista dei file già presenti nella KB
-    final existing = await _contextApiSdk.listFiles(
-      widget.user.username,
-      widget.token.accessToken,
-      contexts: [kbPath],
-    );
-    final already = existing
-        .map((f) => f['custom_metadata']?['msg_id'] as String?)
-        .whereType<String>()
-        .toSet();
-
-    for (final m in messages) {
-      final id = m['id'] as String;
-      if (already.contains(id) || _syncedMsgIds.contains(id)) continue;
-
-      // JSON "pulito" del singolo messaggio
-      final msgJson = jsonEncode({
-        'id': m['id'],
-        'role': m['role'],
-        'content': m['content'],
-        'createdAt': m['createdAt'],
-      });
-      final bytes = utf8.encode(msgJson);
-
-      await _contextApiSdk.uploadFileToContexts(
-        Uint8List.fromList(bytes),
-        [kbPath],
-        widget.user.username,
-        widget.token.accessToken,
-        description: 'msg ${m['id']}',
-        fileName: '${m['id']}.txt',
-        extraMetadata: {
-          // <-- traccia l’ID msg
-          'msg_id': id,
-        },
-      );
-      _syncedMsgIds.add(id); // evita doppioni futuri
-    }
-  }
-
-  /// Ritorna `true` se esiste almeno un messaggio “fileUpload”
-  /// la cui `stage` è **DONE** (quindi il documento è stato indicizzato
-  /// e il vector-store esiste).
-  bool _chatKbHasIndexedDocs() {
-    if (_chatKbPath == null || _chatKbPath!.isEmpty) return false;
-
-    return messages.any((m) {
-      final fu = m['fileUpload'] as Map<String, dynamic>?;
-      return fu != null &&
-          fu['ctxPath'] == _chatKbPath! &&
-          fu['stage'] == TaskStage.done.name;
-    });
-  }
-
-// ─────────────────────────────────────────────────────────────────────────
-//  Raccoglie i CONTEXT PATH “grezzi” da passare al backend
-//  • contesti scelti manualmente dall’utente
-//  • KB associata alla chat **solo se** ha almeno un doc indicizzato
-// ─────────────────────────────────────────────────────────────────────────
-  List<String> _rawContextsForChain() {
-    final set = <String>{..._selectedContexts};
-
-    // include la KB-chat SOLO se ha documenti indicizzati
-    if (_chatKbHasIndexedDocs()) {
-      set.add(_chatKbPath!);
-    }
-    return set.toList();
-  }
-
-// Versione “formattata” (username-prefix) usata nei metadati visibili
-  List<String> _formattedContextsForAgent() =>
-      _rawContextsForChain().map((c) => "${widget.user.username}-$c").toList();
 
   void _onNewPendingJob(
     String jobId,
@@ -969,9 +1220,21 @@ void _advanceBaseline(String sentTxt, int outTok) {
         _chatHistory[_activeChatIndex!]['id'] != chatId) return;
 
     // Se la KB-chat ora ha documenti indicizzati rifai la set_context
-    if (_chatKbHasIndexedDocs()) {
-      await set_context(_rawContextsForChain(), _selectedModel);
-      await _fetchInitialCost();          // unica call al backend
+    if (chatKbHasIndexedDocs(
+      chatKbPath: _chatKbPath,
+      messages: messages,
+    )) {
+      await set_context(
+          buildRawContexts(
+            _selectedContexts,
+            chatKbPath: _chatKbPath,
+            chatKbHasDocs: chatKbHasIndexedDocs(
+              chatKbPath: _chatKbPath,
+              messages: messages,
+            ),
+          ),
+          _selectedModel);
+      await _fetchInitialCost(); // unica call al backend
     }
   }
 
@@ -984,7 +1247,7 @@ void _advanceBaseline(String sentTxt, int outTok) {
   void _refreshNotifOverlay() {
     // ① se non c’è alcuna card visibile esci subito
     final hasVisible = _taskNotifications.values.any(
-      (n) => n.isVisible && _contextIsKnown(n.contextPath),
+      (n) => n.isVisible && contextIsKnown(n.contextPath, _availableContexts),
     );
     if (!hasVisible) {
       // …ma tieniti pronto ad inserirlo alla prossima card “visibile”
@@ -1022,6 +1285,369 @@ void _advanceBaseline(String sentTxt, int outTok) {
 
     // 3‧ salva la conversazione nella **chat corrente**
     _saveConversation(messages);
+  }
+
+// ─────────────────────────────────────────────
+//  METODI PUBBLICI INVOCABILI DALL'HOST
+// ─────────────────────────────────────────────
+
+/// ID della chat attualmente aperta.
+/// Ritorna `null` se l’utente non ha ancora selezionato/creato alcuna chat.
+String? getCurrentChatId() =>
+    (_activeChatIndex != null && _chatHistory.isNotEmpty)
+        ? _chatHistory[_activeChatIndex!]['id'] as String
+        : null;
+
+/// Ritorna la **lista delle chat** SENZA il campo `messages`,
+/// così il payload rimane leggero.
+/// Ritorna la lista delle chat con *solo* i campi essenziali
+/// (id, name, createdAt, updatedAt, kb_path).
+List<Map<String, dynamic>> getChatList() {
+  const allowed = <String>{
+    'id',
+    'name',
+    'createdAt',
+    'updatedAt',
+    'kb_path',
+  };
+
+  return _chatHistory.map<Map<String, dynamic>>((orig) {
+    final filtered = <String, dynamic>{};
+    for (final k in allowed) {
+      if (orig.containsKey(k)) filtered[k] = orig[k];
+    }
+    return filtered;
+  }).toList();
+}
+
+
+/// Ritorna la *copia profonda* della chat corrispondente all’ID dato,
+/// `null` se non esiste.  Include **tutti** i campi, quindi anche `messages`.
+Map<String, dynamic>? getChatById(String chatId) {
+  final chat = _chatHistory.firstWhereOrNull((c) => c['id'] == chatId);
+  return chat != null
+      ? jsonDecode(jsonEncode(chat)) as Map<String, dynamic>
+      : null;
+}
+
+/// Carica la chat con l’ID indicato.  
+/// Ritorna `true` se la chat esiste e viene aperta, `false` altrimenti.
+Future<bool> openChatById(String chatId) async {
+  final exists = _chatHistory.any((c) => c['id'] == chatId);
+  if (!exists) return false;
+  await _loadMessagesForChat(chatId);
+  return true;
+}
+
+/// Crea e seleziona immediatamente una nuova chat.
+Future<void> newChat() async => _startNewChat();
+
+// ─────────────────────────────────────────────
+//  CONFIGURAZIONI DELLE CHAIN
+// ─────────────────────────────────────────────
+
+/// Scarica dal backend la configurazione completa (JSON) di una chain.
+/// Puoi indicare `chainId`, `configId` o entrambi.
+/// Ritorna `null` se la configurazione non esiste o in caso di errore.
+Future<Map<String, dynamic>?> fetchChainConfig({
+  String? chainId,
+  String? configId,
+}) async {
+  if ((chainId == null || chainId.isEmpty) &&
+      (configId == null || configId.isEmpty)) return null;
+
+  try {
+    final cfg = await _contextApiSdk.getChainConfiguration(
+      chainId: chainId,
+      chainConfigId: configId,
+      token: widget.token.accessToken,
+    );
+
+    // Cast “sicuro” a Map<String,dynamic>
+    return cfg.extraMetadata;//Map<String, dynamic>.from(jsonDecode(jsonEncode(cfg)));
+  } catch (e) {
+    debugPrint('[fetchChainConfig] errore: $e');
+    return null;
+  }
+}
+
+/// Imposta la *chain di default* che ChatBotPage tenterà di usare
+/// all’avvio o quando crea una nuova chat.
+/// – se passi `config` (mappa JSON) questa ha la precedenza assoluta  
+/// – altrimenti usa `chainId` e/o `configId` (come prima)  
+void setDefaultChain({
+  String? chainId,
+  String? configId,
+  Map<String, dynamic>? config,
+}) {
+  if (config != null) {
+    // forziamo un override completo con il JSON fornito
+    _defaultChainConfig = Map<String, dynamic>.from(config);
+    _forcedDefaultChainId = null;
+    _forcedDefaultChainConfigId = null;
+  } else {
+    // override tramite identificativi
+    _forcedDefaultChainId = chainId;
+    _forcedDefaultChainConfigId = configId;
+    _defaultChainConfig = null;
+  }
+}
+
+
+  Future<void> _restoreChainForCurrentChat(
+      {bool skipInheritance = false}) async {
+    String? chainIdCandidate = _latestChainId;
+
+    // 1) prova dall'ultimo messaggio (solo se NON vuoi saltare l’eredità)
+    if (!skipInheritance && messages.isNotEmpty) {
+      final cfg = messages.last['agentConfig'] as Map<String, dynamic>?;
+      final cand = cfg?['chain_id'] as String?;
+      if (cand != null && cand.isNotEmpty) chainIdCandidate = cand;
+    }
+
+    // 2) fallback localStorage (solo se NON vuoi saltare l’eredità)
+    if (!skipInheritance &&
+        (chainIdCandidate == null || chainIdCandidate.isEmpty)) {
+      final ls = html.window.localStorage['latestChainId'];
+      if (ls != null && ls.isNotEmpty) chainIdCandidate = ls;
+    }
+
+    // 3) chat nuova / nessun chainId -> usa prima la forced default
+    if (chainIdCandidate == null || chainIdCandidate.isEmpty) {
+      // tenta la chain forzata
+      await _applyForcedDefaultChainIfNeeded();
+      if (_latestChainId?.isNotEmpty == true) {
+        await _fetchInitialCost();
+        return;
+      }
+
+      // fallback vecchio comportamento (crea KB ecc.)
+      await _prepareChainForCurrentChat();
+      _selectedModel =
+          _selectedModel.isNotEmpty ? _selectedModel : _defaultModel;
+
+      final effectiveRaw = _stripUserPrefixList(
+        buildRawContexts(
+          _selectedContexts,
+          chatKbPath: _chatKbPath,
+          chatKbHasDocs: chatKbHasIndexedDocs(
+            chatKbPath: _chatKbPath,
+            messages: messages,
+          ),
+        ),
+      );
+
+
+      final resp = await _contextApiSdk.configureAndLoadChain(
+        widget.user.username,
+        widget.token.accessToken,
+        effectiveRaw,
+        _defaultChainConfig?["model_name"],
+        systemMessageContent: _defaultChainConfig?["system_message_content"],
+        customServerTools: _defaultChainConfig?["custom_server_tools"],
+        toolSpecs: _toolSpecs,
+      );
+
+      _latestChainId = resp['load_result']?['chain_id'] as String?;
+      _latestConfigId = resp['config_result']?['config_id'] as String?;
+
+      html.window.localStorage['latestChainId'] = _latestChainId ?? '';
+      html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+
+      await _fetchInitialCost();
+      return;
+    }
+
+    // 4) recupera config dal backend e riconfigura
+    try {
+      final cfg = await _contextApiSdk.getChainConfiguration(
+        chainId: chainIdCandidate,
+        token: widget.token.accessToken,
+      );
+      await _reconfigureFromChainConfig(cfg);
+    } catch (e) {
+      debugPrint('getChainConfiguration fallita: $e');
+      // fallback: prova forced default, poi default locale
+      await _applyForcedDefaultChainIfNeeded();
+      if (_latestChainId?.isNotEmpty != true) {
+        await _prepareChainForCurrentChat();
+      }
+      await _fetchInitialCost();
+    }
+  }
+
+  List<String> _extractContextsFromConfig(ChainConfiguration cfg) {
+    final extra = cfg.extraMetadata ?? const <String, dynamic>{};
+    final ctx = extra['contexts'];
+    if (ctx is List) {
+      return ctx.cast<String>();
+    }
+    return const <String>[];
+  }
+
+  String _extractModelFromConfig(ChainConfiguration cfg) {
+    final extra = cfg.extraMetadata ?? const <String, dynamic>{};
+    final model = extra['model_name'];
+
+    return model;
+  }
+
+  List<Map<String, dynamic>> _extractCusotmServerToolsFromConfig(
+      ChainConfiguration cfg) {
+    final extra = cfg.extraMetadata ?? const <String, dynamic>{};
+    final model = extra['custom_server_tools'];
+
+    return model;
+  }
+
+  String _extractSystemMessageContentFromConfig(ChainConfiguration cfg) {
+    final extra = cfg.extraMetadata ?? const <String, dynamic>{};
+    final model = extra['system_message_content'];
+
+    return model;
+  }
+
+  Future<void> _reconfigureFromChainConfig(ChainConfiguration cfg) async {
+    // contexts dal backend (ripulisci doppione KB-chat)
+    final extracted = _extractContextsFromConfig(cfg);
+    _selectedContexts = extracted
+        .where((c) => c != _chatKbPath) // evita duplicare la KB della chat
+        .toList();
+
+    // modello
+    _selectedModel = _extractModelFromConfig(cfg);
+
+    // contesti effettivi = scelti + KB-chat (se ha docs)
+    final effectiveRaw = _stripUserPrefixList(
+      buildRawContexts(
+        _selectedContexts,
+        chatKbPath: _chatKbPath,
+        chatKbHasDocs: chatKbHasIndexedDocs(
+          chatKbPath: _chatKbPath,
+          messages: messages,
+        ),
+      ),
+    );
+
+    final resp = await _contextApiSdk.configureAndLoadChain(
+      widget.user.username,
+      widget.token.accessToken,
+      effectiveRaw,
+      _selectedModel,
+      systemMessageContent: _extractSystemMessageContentFromConfig(cfg),
+      customServerTools: _extractCusotmServerToolsFromConfig(cfg),
+      toolSpecs: _toolSpecs,
+    );
+
+    setState(() {
+      _latestChainId = resp['load_result']?['chain_id'] as String?;
+      _latestConfigId = resp['config_result']?['config_id'] as String?;
+    });
+
+    html.window.localStorage['latestChainId'] = _latestChainId ?? '';
+    html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+
+    //_syncLastMessageAgentConfig();
+    await _fetchInitialCost();
+  }
+
+  /// Rimuove il prefisso "<username>-" se presente.
+  String _stripUserPrefix(String ctx) {
+    final prefix = "${widget.user.username}-";
+    return ctx.startsWith(prefix) ? ctx.substring(prefix.length) : ctx;
+  }
+
+  /// Applica lo strip a tutta la lista e de-duplica.
+  List<String> _stripUserPrefixList(Iterable<String> ctxs) {
+    final prefix = "${widget.user.username}-";
+    final set = <String>{};
+    for (final c in ctxs) {
+      set.add(c.startsWith(prefix) ? c.substring(prefix.length) : c);
+    }
+    return set.toList();
+  }
+
+  /// Restituisce una lista dove coppie USER/AI con stesso sequenceId
+  /// Fusiona in un unico “super-messaggio” tutte le coppie user+assistant
+  /// che condividono lo stesso sequenceId.
+  ///
+  /// Il risultato è una lista di Map pronta per _buildMessagesList:
+  /// - messaggi “normali” rimangono invariati
+  /// - per ogni gruppo di coppie (user, assistant) emesso un singolo:
+  ///   {
+  ///     'role'      : 'sequence',
+  ///     'sequenceId': <sid>,
+  ///     'createdAt' : <timestamp più vecchio del gruppo>,
+  ///     'steps'     : [
+  ///       { 'instruction': <Map user>, 'response': <Map assistant> },
+  ///       …
+  ///     ],
+  ///   }
+  /// Scansione lineare di `src`: mantiene l’ordine e
+  /// inserisce la super-sequenza esattamente dove è nata.
+  List<Map<String, dynamic>> _mergeSequences(List<Map<String, dynamic>> src) {
+    final out = <Map<String, dynamic>>[]; // output finale
+    final seen = <String>{}; // sequenceId già emessi
+
+    int i = 0;
+    while (i < src.length) {
+      final msg = src[i];
+      final sid = msg['sequenceId'] as String?;
+
+      // 1) messaggio “normale”
+      if (sid == null) {
+        out.add(msg);
+        i += 1;
+        continue;
+      }
+
+      // 2) se questo sequenceId è già stato raggruppato, salto
+      if (seen.contains(sid)) {
+        out.add(msg); // o puoi anche saltare del tutto, a seconda del fallback
+        i += 1;
+        continue;
+      }
+
+      // 3) nuovo blocco di sequenza → raccolgo tutte le coppie user+assistant
+      final steps = <Map<String, Map<String, dynamic>>>[];
+      DateTime? earliest;
+
+      while (i + 1 < src.length &&
+          src[i]['sequenceId'] == sid &&
+          src[i]['role'] == 'user' &&
+          src[i + 1]['role'] == 'assistant' &&
+          src[i + 1]['sequenceId'] == sid) {
+        final instr = Map<String, dynamic>.from(src[i]);
+        final resp = Map<String, dynamic>.from(src[i + 1]);
+
+        steps.add({
+          'instruction': instr,
+          'response': resp,
+        });
+
+        final t = DateTime.tryParse(instr['createdAt'] ?? '') ?? DateTime.now();
+        earliest = earliest == null || t.isBefore(earliest) ? t : earliest;
+
+        i += 2; // salto la coppia
+      }
+
+      // 4) emetto la “super-sequenza” subito qui
+      if (steps.isNotEmpty) {
+        out.add({
+          'role': 'sequence',
+          'sequenceId': sid,
+          'createdAt': (earliest ?? DateTime.now()).toIso8601String(),
+          'steps': steps,
+        });
+        seen.add(sid);
+      } else {
+        // fallback: nessuna coppia valida → ricaduta sul singolo
+        out.add(msg);
+        i += 1;
+      }
+    }
+
+    return out;
   }
 
   String _finalizeWidgetBlock(String widgetBlock) {
@@ -1094,9 +1720,9 @@ void _advanceBaseline(String sentTxt, int outTok) {
       // Richiama la funzione già esistente per aggiornare il nome della chat
       await _editChatName(index, newName);
       // Facoltativo: mostra un messaggio di conferma
-      ScaffoldMessenger.of(context).showSnackBar(
+      /*ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Chat renamed to "$newName"')),
-      );
+      );*/
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Chat with ID "$chatId" not found.')),
@@ -1139,17 +1765,6 @@ void _advanceBaseline(String sentTxt, int outTok) {
   double _speechRate = 0.5; // Velocità di lettura
   double _pitch = 1.0; // Pitch (intonazione)
   double _volume = 0.5; // Volume
-  double _pauseBetweenSentences = 0.5; // Pausa tra le frasi
-
-  // Variabili di customizzazione grafica
-  Color _userMessageColor = Colors.blue[100]!;
-  double _userMessageOpacity = 1.0;
-
-  Color _assistantMessageColor = Colors.grey[200]!;
-  double _assistantMessageOpacity = 1.0;
-
-  Color _chatBackgroundColor = Colors.white;
-  double _chatBackgroundOpacity = 1.0;
 
   Color _avatarBackgroundColor = Colors.grey[600]!;
   double _avatarBackgroundOpacity = 1.0;
@@ -1253,126 +1868,6 @@ void _advanceBaseline(String sentTxt, int outTok) {
     }
   }
 
-  ParsedWidgetResult _parsePotentialWidgets(String fullText) {
-    String updatedText = fullText;
-    final List<Map<String, dynamic>> widgetList = [];
-    int widgetCounter = 0;
-
-    while (true) {
-      // 1) Trova l'indice di inizio del pattern "< TYPE='WIDGET'"
-      final startIndex = updatedText.indexOf("< TYPE='WIDGET'");
-      if (startIndex == -1) break;
-
-      // 2) Trova il marker di chiusura "| TYPE='WIDGET'" **dopo** startIndex
-      const String endMarker = "| TYPE='WIDGET'";
-      final markerIndex = updatedText.indexOf(endMarker, startIndex);
-      if (markerIndex == -1) break;
-
-      // 3) Trova il carattere '>' **dopo** il marker
-      final endIndex = updatedText.indexOf(">", markerIndex + endMarker.length);
-      if (endIndex == -1) break;
-
-      // 4) Estrarre il sottoblocco completo
-      final widgetBlock = updatedText.substring(startIndex, endIndex + 1);
-
-      // 5) Cerchiamo la prima e la seconda barra verticale "|"
-      final firstBar = widgetBlock.indexOf("|");
-      final secondBar = widgetBlock.indexOf("|", firstBar + 1);
-      if (firstBar == -1 || secondBar == -1) {
-        // Pattern non valido, rimuoviamo e proseguiamo
-        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-        continue;
-      }
-
-      // 6) Estrarre la parte JSON
-      final jsonString = widgetBlock.substring(firstBar + 1, secondBar).trim();
-
-      // 7) Estrarre widgetId (dopo WIDGET_ID=' ... ')
-      const String widgetIdSearch = "WIDGET_ID='";
-      final widgetIdStart = widgetBlock.indexOf(widgetIdSearch);
-      if (widgetIdStart == -1) {
-        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-        continue;
-      }
-      final widgetIdStartAdjusted = widgetIdStart + widgetIdSearch.length;
-      final widgetIdEnd = widgetBlock.indexOf("'", widgetIdStartAdjusted);
-      if (widgetIdEnd == -1 || widgetIdEnd <= widgetIdStartAdjusted) {
-        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-        continue;
-      }
-      final widgetId =
-          widgetBlock.substring(widgetIdStartAdjusted, widgetIdEnd);
-
-      // 8) Decodifica del JSON
-      Map<String, dynamic>? widgetJson;
-      try {
-        widgetJson = jsonDecode(jsonString) as Map<String, dynamic>;
-      } catch (e) {
-        print("Errore parse JSON widget: $e");
-        widgetJson = null;
-      }
-      if (widgetJson == null) {
-        updatedText = updatedText.replaceRange(startIndex, endIndex + 1, "");
-        continue;
-      }
-
-      // 9) Integrazione logica is_first_time
-      if (!widgetJson.containsKey('is_first_time')) {
-        widgetJson['is_first_time'] = true;
-      } else if (widgetJson['is_first_time'] == true) {
-        widgetJson['is_first_time'] = false;
-      }
-
-      // 10) Genera un _id univoco e placeholder
-      final widgetUniqueId = uuid.v4();
-      final placeholder = "[WIDGET_PLACEHOLDER_$widgetCounter]";
-
-      // 11) Aggiunge alla lista
-      widgetList.add({
-        "_id": widgetUniqueId,
-        "widgetId": widgetId,
-        "jsonData": widgetJson,
-        "placeholder": placeholder,
-      });
-
-      // 12) Sostituisce il blocco nel testo
-      updatedText = updatedText.replaceRange(
-        startIndex,
-        endIndex + 1,
-        placeholder,
-      );
-
-      widgetCounter++;
-    }
-
-    return ParsedWidgetResult(updatedText, widgetList);
-  }
-
-// 🔹 Helper: configura una chain di default se ne manca una
-  Future<void> _ensureDefaultChainConfigured() async {
-    // se c’è già una chain attiva usciamo subito
-    print('$_latestChainId - $_latestChainId');
-    if (_latestChainId != null && _latestChainId!.isNotEmpty) return;
-
-    // modello di default
-    const String _defaultModel = 'gpt-4o';
-
-    try {
-      // nessun contesto = []   →   chiama già la tua API
-      set_context([], _defaultModel);
-
-      // Aggiorna lo stato locale per coerenza UI
-      setState(() {
-        _selectedContexts = [];
-        _selectedModel = _defaultModel;
-      });
-
-      debugPrint('[init] Default chain creata con modello $_defaultModel');
-    } catch (e) {
-      debugPrint('[init] Errore creazione default-chain: $e');
-    }
-  }
-
   String _getCurrentChatId() {
     if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
       return _chatHistory[_activeChatIndex!]['id'] as String;
@@ -1380,76 +1875,104 @@ void _advanceBaseline(String sentTxt, int outTok) {
     return "";
   }
 
-// Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
-  Map<
-          String,
-          Widget Function(
-              Map<String, dynamic> data, void Function(String) onReply)>
-      get widgetMap {
-    return {
-      "ShowChatVarsWidget": (data, onReply) => ShowChatVarsWidgetTool(
-      jsonData: data,
-      getVars: () => _chatVars,           // ← mappa che contiene tutte le chatVars
-    ),
-      "ChatVarsWidget": (data, onReply) => ChatVarsWidgetTool(
-  jsonData: data,
-  applyPatch: _applyChatVars,        // callback definita al § 1.4
-),
-      "FileUploadWidget": (data, onReply) => FileUploadWidget(
-            info: FileUploadInfo.fromJson(data),
-            onDownload: () {
-              final fPath = "${data['ctxPath']}/${data['fileName']}";
-              _apiSdk.downloadFile(fPath, token: widget.token.accessToken);
-            },
-          ),
-      "ToolEventWidget": (data, onReply) =>
-          ToolEventCard(data: data), // non serve onReply qui
-      "JSRunnerWidget": (data, onReply) => JSRunnerWidgetTool(jsonData: data),
-      "AutoSequenceWidget": (data, onReply) =>
-          AutoSequenceWidgetTool(jsonData: data, onReply: onReply),
-      "NButtonWidget": (data, onReply) =>
-          NButtonWidget(data: data, onReply: onReply),
-      "RadarChart": (data, onReply) =>
-          RadarChartWidgetTool(jsonData: data, onReply: onReply),
-      "TradingViewAdvancedChart": (data, onReply) =>
-          TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply),
-      "TradingViewMarketOverview": (data, onReply) =>
-          TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply),
-      "CustomChartWidget": (data, onReply) =>
-          CustomChartWidgetTool(jsonData: data, onReply: onReply),
-      "ChangeChatNameWidget": (data, onReply) => ChangeChatNameWidgetTool(
-            jsonData: data,
-            // Modifica qui il callback onRenameChat per usare _getCurrentChatId se chatId risulta vuoto
-            onRenameChat: (chatId, newName) async {
-              // Se il chatId passato è vuoto, usiamo il metodo _getCurrentChatId
-              final effectiveChatId =
-                  chatId.isEmpty ? await _getCurrentChatId() : chatId;
-
-              if (effectiveChatId.isNotEmpty) {
-                await _renameChat(effectiveChatId, newName);
-                // Puoi eventualmente chiamare onReply per dare feedback all'utente
-                print('Chat renamed to "$newName"');
-              } else {
-                // Gestione dell'errore: nessuna chat selezionata
-                print('Errore: nessuna chat selezionata');
-              }
-            },
-            getCurrentChatId: () async => _getCurrentChatId(),
-          ),
-      "SpinnerPlaceholder": (data, onReply) => const Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text("Caricamento in corso..."),
-                SizedBox(width: 8),
-                CircularProgressIndicator(),
-              ],
-            ),
-          ),
-    };
+// adatta builder con 2 argomenti  →  ChatWidgetBuilder
+// adattatore per i widget legacy che vogliono 2 parametri
+  ChatWidgetBuilder _wrap2(
+    Widget Function(
+      Map<String, dynamic>,
+      void Function(String reply, {Map<String, dynamic>? meta}),
+    ) builder, // <─ firma aggiornata
+  ) {
+    return (data, onReply, pageCbs, hostCbs) => builder(
+          data,
+          // inoltra anche il named-parameter `meta`
+          (txt, {meta}) => onReply(txt, meta: meta),
+        );
   }
+
+// Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
+  Map<String, ChatWidgetBuilder> get _internalWidgetMap => {
+        "ShowChatVarsWidget": _wrap2((data, onReply) => ShowChatVarsWidgetTool(
+              jsonData: data,
+              getVars: () =>
+                  _chatVars, // ← mappa che contiene tutte le chatVars
+            )),
+        "ChatVarsWidget": _wrap2((data, onReply) => ChatVarsWidgetTool(
+              jsonData: data,
+              applyPatch: _applyChatVars, // callback definita al § 1.4
+            )),
+        "FileUploadWidget": _wrap2((data, onReply) => FileUploadWidget(
+              info: FileUploadInfo.fromJson(data),
+              onDownload: () {
+                final fPath = "${data['ctxPath']}/${data['fileName']}";
+                _apiSdk.downloadFile(fPath, token: widget.token.accessToken);
+              },
+            )),
+        "ToolEventWidget": _wrap2((data, onReply) =>
+            ToolEventCard(data: data)), // non serve onReply qui
+        "JSRunnerWidget":
+            _wrap2((data, onReply) => JSRunnerWidgetTool(jsonData: data)),
+        "AutoSequenceWidget": (data, onReply, pageCbs, hostCbs) =>
+            AutoSequenceWidgetTool(
+              jsonData: data,
+              onReply: (txt, {meta}) {
+                // firma estesa
+                final seq = meta?['sequenceId'] as String?;
+                if (seq != null) {
+                  pageCbs.sendReply(txt,
+                      sequenceId: seq); // passa l’id a ChatBot
+                } else {
+                  pageCbs.sendReply(txt); // messaggio normale
+                }
+              },
+            ),
+        "NButtonWidget": _wrap2(
+            (data, onReply) => NButtonWidget(data: data, onReply: onReply)),
+        "RadarChart": _wrap2((data, onReply) =>
+            RadarChartWidgetTool(jsonData: data, onReply: onReply)),
+        "TradingViewAdvancedChart": _wrap2((data, onReply) =>
+            TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply)),
+        "TradingViewMarketOverview": _wrap2((data, onReply) =>
+            TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply)),
+        "CustomChartWidget": _wrap2((data, onReply) =>
+            CustomChartWidgetTool(jsonData: data, onReply: onReply)),
+        "ChangeChatNameWidget":
+            _wrap2((data, onReply) => ChangeChatNameWidgetTool(
+                  jsonData: data,
+                  // Modifica qui il callback onRenameChat per usare _getCurrentChatId se chatId risulta vuoto
+                  onRenameChat: (chatId, newName) async {
+                    // Se il chatId passato è vuoto, usiamo il metodo _getCurrentChatId
+                    final effectiveChatId =
+                        chatId.isEmpty ? await _getCurrentChatId() : chatId;
+
+                    if (effectiveChatId.isNotEmpty) {
+                      await _renameChat(effectiveChatId, newName);
+                      // Puoi eventualmente chiamare onReply per dare feedback all'utente
+                      print('Chat renamed to "$newName"');
+                    } else {
+                      // Gestione dell'errore: nessuna chat selezionata
+                      print('Errore: nessuna chat selezionata');
+                    }
+                  },
+                  getCurrentChatId: () async => _getCurrentChatId(),
+                )),
+        "SpinnerPlaceholder": _wrap2((data, onReply) => const Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Text("Caricamento in corso..."),
+                  SizedBox(width: 8),
+                  CircularProgressIndicator(),
+                ],
+              ),
+            )),
+      };
+
+  Map<String, ChatWidgetBuilder> get widgetMap =>
+      {..._internalWidgetMap, ...widget.externalWidgetBuilders};
+
 // ─── stato “variabili di chat” ──────────────────────────────────────────
-Map<String, dynamic> _chatVars = {};   // <── NEW
+  Map<String, dynamic> _chatVars = {}; // <── NEW
 
   Future<void> _downloadDocumentsJson(
       String collection, String baseFileName) async {
@@ -1491,55 +2014,53 @@ Map<String, dynamic> _chatVars = {};   // <── NEW
     return raw.replaceAll('/', '') + '_collection';
   }
 
+  void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
+    final collection = _collectionNameFrom(file);
 
-void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
-  final collection = _collectionNameFrom(file);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
 
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      titlePadding   : const EdgeInsets.fromLTRB(16,16,16,0),
-      contentPadding : const EdgeInsets.fromLTRB(16,8,16,16),
-
-      /*──────────────────────── titolo + pulsante download ─────────────────────*/
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              fileName,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
+        /*──────────────────────── titolo + pulsante download ─────────────────────*/
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                fileName,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          IconButton(
-            tooltip: 'Scarica JSON documenti',
-            icon   : const Icon(Icons.download),
-            onPressed: () => _downloadDocumentsJson(collection, fileName),
+            IconButton(
+              tooltip: 'Scarica JSON documenti',
+              icon: const Icon(Icons.download),
+              onPressed: () => _downloadDocumentsJson(collection, fileName),
+            ),
+          ],
+        ),
+
+        /*──────────────────────── corpo paginato (Stateful) ──────────────────────*/
+        content: _PaginatedDocViewer(
+          apiSdk: _apiSdk,
+          token: widget.token.accessToken, // stringa token
+          collection: collection,
+          pageSize: 1, // mostra 1 doc per pagina
+        ),
+        actions: [
+          TextButton(
+            child: const Text('Chiudi'),
+            onPressed: () => Navigator.of(context).pop(),
           ),
         ],
       ),
-
-      /*──────────────────────── corpo paginato (Stateful) ──────────────────────*/
-      content: _PaginatedDocViewer(
-        apiSdk     : _apiSdk,
-        token      : widget.token.accessToken,              // stringa token
-        collection : collection,
-        pageSize   : 1,                         // mostra 1 doc per pagina
-      ),
-
-      actions: [
-        TextButton(
-          child: const Text('Chiudi'),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ],
-    ),
-  );
-}
-
+    );
+  }
 
 
   Widget _buildMixedContent(Map<String, dynamic> message) {
@@ -1572,15 +2093,56 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
       );
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // 1) NEW: prendi le immagini allegate al messaggio
+    // ─────────────────────────────────────────────────────────────
+    final List<Map<String, dynamic>> attachedImages = (message['input_images']
+                as List?) // <<< cambia qui se il tuo campo ha un altro nome
+            ?.cast<Map<String, dynamic>>() ??
+        const [];
+
     final widgetDataList = message['widgetDataList'] as List<dynamic>?;
     if (widgetDataList == null || widgetDataList.isEmpty) {
       final isUser = (message['role'] == 'user');
-      return _buildMessageContent(
+      final widgets = <Widget>[];
+
+ // ▼▼ nuovo: applica correttamente la visibilità
+  final String textContent =
+      message[kMsgVisibility] == kVisPlaceholder
+          ? (message[kMsgDisplayText] ?? '')
+          : (message['content'] ?? '');
+
+      // NEW: galleria in alto se ci sono immagini
+      if (attachedImages.isNotEmpty) {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: ImagesGallery(
+              images: attachedImages,
+              apiSdk: _apiSdk, // NEW
+              onTapImage: (index) {
+                openFullScreenGallery(
+                    context, attachedImages, index, _apiSdk); // NEW
+              },
+            ),
+          ),
+        );
+      }
+      // Testo
+      if (textContent.isNotEmpty)  
+      widgets.add(
+        _buildMessageContent(
         context,
-        message['content'] ?? '',
-        isUser,
-        userMessageColor: Colors.white,
-        assistantMessageColor: Colors.white,
+        textContent,                  //  ← usa la logica sopra
+          isUser,
+          userMessageColor: Colors.white,
+          assistantMessageColor: Colors.white,
+        ),
+      );
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: widgets,
       );
     }
 
@@ -1588,7 +2150,10 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
     const spinnerPlaceholder = "[WIDGET_SPINNER]";
 
     // Otteniamo il testo completo “pulito” (con i placeholder) dal messaggio
-    final textContent = message['content'] ?? '';
+    final textContent =
+      message[kMsgVisibility] == kVisPlaceholder
+          ? (message[kMsgDisplayText] ?? '')
+          : (message['content'] ?? '');
 
     // Ordiniamo i widgetData in base al nome/numero del placeholder
     widgetDataList.sort((a, b) {
@@ -1637,7 +2202,22 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
 
     // Ora costruiamo i widget finali
     final contentWidgets = <Widget>[];
-
+    // NEW: galleria in alto
+    if (attachedImages.isNotEmpty) {
+      contentWidgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8.0),
+          child: ImagesGallery(
+            images: attachedImages,
+            apiSdk: _apiSdk, // NEW
+            onTapImage: (index) {
+              openFullScreenGallery(
+                  context, attachedImages, index, _apiSdk); // NEW
+            },
+          ),
+        ),
+      );
+    }
     for (final seg in segments) {
       // Se non è un placeholder (testo normale)
       if (seg.placeholder == null) {
@@ -1687,10 +2267,20 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
           Widget? embeddedWidget = _widgetCache[widgetUniqueId];
           if (embeddedWidget == null) {
             // Creiamo il widget adesso
-            final widgetBuilder = widgetMap[widgetId];
-            if (widgetBuilder != null) {
-              embeddedWidget =
-                  widgetBuilder(jsonData, (reply) => _handleUserInput(reply));
+            final ChatWidgetBuilder? builder = widgetMap[widgetId];
+            if (builder != null) {
+              embeddedWidget = builder(
+                jsonData,
+
+                /*  LAMBDA CORRETTA  */
+                (reply, {meta}) {
+                  final seq = meta?['sequenceId'] as String?;
+                  _handleUserInput(reply,
+                      sequenceId: seq); // seq può essere null
+                },
+                _pageCbs,
+                widget.hostCallbacks,
+              );
             } else {
               embeddedWidget = Text("Widget sconosciuto: $widgetId");
             }
@@ -1858,41 +2448,161 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
     }
   }
 
+  Future<void> _applyForcedDefaultChainIfNeeded() async {
+    // 0) se l’host ha passato un dict di configurazione usalo subito
+    if (_defaultChainConfig != null &&
+        (_latestChainId == null || _latestChainId!.isEmpty)) {
+      final List<String> ctxs =
+          List<String>.from(_defaultChainConfig!['contexts'] ?? const []);
+      final String mdl = _defaultChainConfig?['model_name'] ?? _defaultModel;
+      final String sysMsg = _defaultChainConfig?["system_message"];
+      final List<Map<String, dynamic>> srvrTls =
+          _defaultChainConfig?["custom_server_tools"];
+
+      final resp = await _contextApiSdk.configureAndLoadChain(
+        widget.user.username,
+        widget.token.accessToken,
+        _stripUserPrefixList(ctxs), // rimuove eventuale "<user>-"
+        mdl,
+        systemMessageContent: sysMsg,
+        customServerTools: srvrTls,
+        toolSpecs: _toolSpecs,
+      );
+
+      _latestChainId = resp['load_result']?['chain_id'] as String?;
+      _latestConfigId = resp['config_result']?['config_id'] as String?;
+
+      html.window.localStorage['latestChainId'] = _latestChainId ?? '';
+      html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+      await _fetchInitialCost(); // baseline costi
+
+      return; // termina qui: forced‑chain non serve
+    }
+
+    // se NON ho forced o ho già una chain -> niente
+    if ((_forcedDefaultChainId == null || _forcedDefaultChainId!.isEmpty) &&
+        (_forcedDefaultChainConfigId == null ||
+            _forcedDefaultChainConfigId!.isEmpty)) {
+      return;
+    }
+    if (_latestChainId != null && _latestChainId!.isNotEmpty) return;
+
+    try {
+      // 1) prendo la config (serve per conoscere model/contexts)
+      final cfg = await _contextApiSdk.getChainConfiguration(
+        chainId: _forcedDefaultChainId,
+        chainConfigId: _forcedDefaultChainConfigId,
+        token: widget.token.accessToken,
+      );
+
+      // 2) re-installa la chain localmente (come fai già in _reconfigureFromChainConfig)
+      await _reconfigureFromChainConfig(cfg);
+
+      // 3) salviamo subito in localStorage
+      html.window.localStorage['latestChainId'] = _latestChainId ?? '';
+      html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+
+      // 4) baseline costi
+      await _fetchInitialCost();
+    } catch (e, st) {
+      debugPrint('[forcedChain] errore: $e\n$st');
+      // fallback: crea come prima
+      await _prepareChainForCurrentChat(allowCreateKb: false);
+      await _fetchInitialCost();
+    }
+  }
+
   late Future<void> _chatHistoryFuture;
+
+  late bool _uiVisible;
+
+  /// Rende la UI visibile / invisibile. Può essere invocato dall’host.
+  void setUiVisibility(bool visible) {
+    if (visible == _uiVisible) return;
+    setState(() => _uiVisible = visible);
+  }
+
+  /// Shortcut comodo per il caller.
+  void toggleUiVisibility() => setUiVisibility(!_uiVisible);
+
+  /// Per sapere dallo host lo stato corrente.
+  bool get isUiVisible => _uiVisible;
+
   @override
   void initState() {
     super.initState();
+
+    _defaultChainConfig = widget.defaultChainConfig;
+    _forceInitialChatLoading = _mustForceInitialChat; // 🔹 evita il flash
+
+    _forcedDefaultChainId = widget.defaultChainId;
+    _forcedDefaultChainConfigId = widget.defaultChainConfigId;
+
+    _pageCbs = ChatBotPageCallbacks(
+      renameChat: _renameChat,
+      sendReply: (txt, {sequenceId}) =>
+          _handleUserInput(txt, sequenceId: sequenceId),
+    );
+
+    _toolSpecs = widget.toolSpecs;
+
+    _initStateAsync(); // parte subito ma resta fuori dal build
+
+    _uiVisible = widget.startVisible; // ⬅ inizializza
+    
     _initStateAsync(); // parte subito ma resta fuori dal build
   }
 
-// helper “completo” (può usare await senza problemi)
+  /// helper “completo” (può usare await senza problemi)
   Future<void> _initStateAsync() async {
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // ① bootstrap: config + contesti
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     await _bootstrap();
 
-    // ────────────────────────────────────────────────────────────────────
-    // ② prepara una chain “vuota” legata alla chat corrente
-    // ────────────────────────────────────────────────────────────────────
-    await _prepareChainForCurrentChat();
+    // ────────────────────────────────────────────────────────────────
+    // ② carica *e aspetta* la chat-history (così sappiamo se esistono chat/messaggi)
+    // ────────────────────────────────────────────────────────────────
+    _chatHistoryFuture = _loadChatHistory();
+    await _chatHistoryFuture; // ← attesa effettiva
 
-    // ────────────────────────────────────────────────────────────────────
-    // ③ notifiche & inizializzazioni varie
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+    // ③ se ci è stato passato un chatId, prova ad aprirlo SUBITO
+    // ────────────────────────────────────────────────────────────────
+    if (_mustForceInitialChat) {
+      // lo spinner è già true da initState
+      final exists = _chatHistory.any((c) => c['id'] == widget.initialChatId);
+      if (exists) {
+        await _loadMessagesForChat(widget.initialChatId!);
+        _openedWithInitialChat = true;
+      }
+      _forceInitialChatLoading = false; // chiudi spinner
+      if (mounted) setState(() {}); // refresh finale
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // ④ prepara la chain SOLO se non abbiamo già aperto una chat iniziale
+    //     (niente KB se chat vuota)
+    // ────────────────────────────────────────────────────────────────
+    if (!_openedWithInitialChat) {
+      // prima prova a usare la chain forzata
+      await _applyForcedDefaultChainIfNeeded();
+
+      // se ancora non ho una chain, fai come prima
+      if (_latestChainId == null || _latestChainId!.isEmpty) {
+        await _prepareChainForCurrentChat(allowCreateKb: false);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────
+    // ④ notifiche & inizializzazioni varie
+    // ────────────────────────────────────────────────────────────────
     _initTaskNotifications();
     _speech = stt.SpeechToText();
     _flutterTts = FlutterTts();
 
-    // ────────────────────────────────────────────────────────────────────
-    // ④ carica *e aspetta* la chat-history
-    // ────────────────────────────────────────────────────────────────────
-    _chatHistoryFuture = _loadChatHistory();
-    await _chatHistoryFuture; // ← attesa effettiva
-
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // ⑤ listener & scroll
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     _controller.addListener(() => setState(() {}));
 
     _messagesScrollController.addListener(() {
@@ -1907,20 +2617,28 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
       }
     });
 
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // ⑥ crea (o verifica) il DB – **attendi** prima di sbloccare la UI
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     await _databaseService.createDatabase('database', widget.token.accessToken);
 
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // ⑦ ripristina eventuali ID di chain salvati in precedenza
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     _latestChainId = html.window.localStorage['latestChainId'];
     _latestConfigId = html.window.localStorage['latestConfigId'];
 
-    // ────────────────────────────────────────────────────────────────────
-    // ⑧ tutto pronto → alza il flag (solo se il widget è ancora montato)
-    // ────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+    // ⑧ se abbiamo già una chat attiva o messaggi caricati,
+    //    ripristina la chain (senza forzare la creazione della KB)
+    // ────────────────────────────────────────────────────────────────
+    if (_activeChatIndex != null || messages.isNotEmpty) {
+      await _restoreChainForCurrentChat(); // assicurati che dentro non crei KB
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // ⑨ tutto pronto → alza il flag (solo se il widget è ancora montato)
+    // ────────────────────────────────────────────────────────────────
     if (mounted) setState(() => _appReady = true);
   }
 
@@ -1950,78 +2668,33 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
   bool _isCtxLoading = false; // evita fetch concorrenti
 
   Future<void> _loadAvailableContexts() async {
-    if (_isCtxLoading) return; // già in corso
-    _isCtxLoading = true;
+    if (_isCtxLoading) return; // già in fetch
+    setState(() => _isCtxLoading = true); // spinner on
 
     try {
-      final ctx = await _contextApiSdk.listContexts(
-        widget.user.username,
-        widget.token.accessToken,
+      final ctx = await fetchAvailableContexts(
+        _contextApiSdk,
+        username: widget.user.username,
+        accessToken: widget.token.accessToken,
       );
 
-      // aggiorniamo dentro `setState`, MA senza sostituire la lista
+      // ri-utilizziamo la *stessa* lista per non perdere i riferimenti
       setState(() {
-        _availableContexts // stessa List, nuovi elementi
+        _availableContexts
           ..clear()
           ..addAll(ctx);
       });
-    } catch (e, st) {
-      debugPrint('[contexts] errore: $e\n$st');
     } finally {
-      _isCtxLoading = false;
+      setState(() => _isCtxLoading = false); // spinner off
     }
   }
 
-  // Funzione per aprire il dialog con il ColorPicker
-  void _showColorPickerDialog(
-      Color currentColor, Function(Color) onColorChanged) {
-    final localizations = LocalizationProvider.of(context);
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Seleziona il colore'),
-          backgroundColor: Colors.white, // Sfondo del popup
-          elevation: 6, // Intensità dell'ombra
-          shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(8), // Arrotondamento degli angoli
-            //side: BorderSide(
-            //  color: Colors.blue, // Colore del bordo
-            //  width: 2, // Spessore del bordo
-            //),
-          ),
-          content: SingleChildScrollView(
-            child: ColorPicker(
-              pickerColor: currentColor,
-              onColorChanged: (color) {
-                setState(() {
-                  onColorChanged(color);
-                });
-              },
-              showLabel: false,
-              pickerAreaHeightPercent: 0.8,
-            ),
-          ),
-          actions: [
-            ElevatedButton(
-              child: Text(localizations.close),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
 // Inserisci in ChatBotPageState
-void _applyChatVars(Map<String, dynamic> patch) {
-  _chatVars.addAll(patch);
-  _saveConversation(messages);        // persiste subito
-  setState(() {});                    // force-refresh eventuali widget
-}
+  void _applyChatVars(Map<String, dynamic> patch) {
+    _chatVars.addAll(patch);
+    _saveConversation(messages); // persiste subito
+    setState(() {}); // force-refresh eventuali widget
+  }
 
 // Funzione che restituisce il widget per il messaggio Markdown, con formattazione avanzata
   Widget _buildMessageContent(
@@ -2194,19 +2867,32 @@ void _applyChatVars(Map<String, dynamic> patch) {
     }
   }
 
+// ────────────────────────────────────────────────────────────────────
+// 3. FUNZIONE RISCRITTA: usa il merge ↑ e gestisce il nuovo tipo
+// ────────────────────────────────────────────────────────────────────
   List<Widget> _buildMessagesList(double containerWidth) {
-    final localizations = LocalizationProvider.of(context);
-    List<Widget> widgets = [];
-    for (int i = 0; i < messages.length; i++) {
-      final message = messages[i];
-      final bool isUser = (message['role'] == 'user');
+    final loc = LocalizationProvider.of(context);
+
+
+  final displayMsgs = _mergeSequences(
+  messages.where((m) => m[kMsgVisibility] != kVisInvisible).toList());
+
+
+    final widgets = <Widget>[];
+
+    for (int i = 0; i < displayMsgs.length; i++) {
+      final message = displayMsgs[i];
+      final role = message['role'] as String? ?? 'assistant';
+
+      // ───── date-separator identico a prima ───────────────
       final DateTime parsedTime =
           DateTime.tryParse(message['createdAt'] ?? '') ?? DateTime.now();
-      final String formattedTime = DateFormat('h:mm a').format(parsedTime);
-
-      // Se è il primo messaggio o se la data del messaggio corrente è diversa da quella del precedente,
-      // aggiungi un separatore.
-      if (i == 0) {
+      if (i == 0 ||
+          !_isSameDay(
+            parsedTime,
+            DateTime.tryParse(displayMsgs[i - 1]['createdAt'] ?? '') ??
+                parsedTime,
+          )) {
         widgets.add(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -2222,29 +2908,25 @@ void _applyChatVars(Map<String, dynamic> patch) {
             ),
           ),
         );
-      } else {
-        final DateTime previousTime =
-            DateTime.tryParse(messages[i - 1]['createdAt'] ?? '') ?? parsedTime;
-        if (!_isSameDay(parsedTime, previousTime)) {
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Center(
-                child: Text(
-                  _getDateSeparator(parsedTime),
-                  style: const TextStyle(
-                    fontSize: 12.0,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
       }
 
-      // Aggiungi il widget del messaggio (codice originale invariato)
+      // ───── CASE 1: messaggio “sequence” raggruppato ───────
+      if (role == 'sequence') {
+        widgets.add(
+          _SequenceCard(
+            key: ValueKey('${_getCurrentChatId()}_${message['sequenceId']}'),
+            seqMsg: message,
+            containerWidth: containerWidth,
+            buildMixedContent: (msg) => _buildMixedContent(msg),
+          ),
+        );
+        continue;
+      }
+
+      // ───── CASE 2: messaggi normali (stesso layout di prima) ─────
+      final bool isUser = (role == 'user');
+      final String formattedTime = DateFormat('h:mm a').format(parsedTime);
+
       widgets.add(
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -2253,10 +2935,8 @@ void _applyChatVars(Map<String, dynamic> patch) {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: containerWidth,
-                  minWidth: 200,
-                ),
+                constraints:
+                    BoxConstraints(maxWidth: containerWidth, minWidth: 200),
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12.0),
@@ -2312,51 +2992,42 @@ void _applyChatVars(Map<String, dynamic> patch) {
                         ],
                       ),
                       const SizedBox(height: 8.0),
-                      // RIGA 2: Contenuto del messaggio (Markdown)
+                      // RIGA 2: Contenuto del messaggio (Markdown + widget)
                       _buildMixedContent(message),
                       const SizedBox(height: 8.0),
-                      // RIGA 3: Icone (copia, feedback, TTS, info)
+                      // RIGA 3: Icone azione
                       Row(
                         mainAxisAlignment: MainAxisAlignment.start,
                         children: [
                           IconButton(
                             icon: const Icon(Icons.copy, size: 14),
-                            tooltip: localizations.copy,
-                            onPressed: () {
-                              _copyToClipboard(message['content'] ?? '');
-                            },
+                            tooltip: loc.copy,
+                            onPressed: () =>
+                                _copyToClipboard(message['content'] ?? ''),
                           ),
                           if (!isUser) ...[
                             IconButton(
                               icon: const Icon(Icons.thumb_up, size: 14),
-                              tooltip: localizations.positive_feedback,
-                              onPressed: () {
-                                print(
-                                    "Feedback positivo per il messaggio: ${message['content']}");
-                              },
+                              tooltip: loc.positive_feedback,
+                              onPressed: () => print(
+                                  "Feedback positivo: ${message['content']}"),
                             ),
                             IconButton(
                               icon: const Icon(Icons.thumb_down, size: 14),
-                              tooltip: localizations.negative_feedback,
-                              onPressed: () {
-                                print(
-                                    "Feedback negativo per il messaggio: ${message['content']}");
-                              },
+                              tooltip: loc.negative_feedback,
+                              onPressed: () => print(
+                                  "Feedback negativo: ${message['content']}"),
                             ),
                           ],
                           IconButton(
                             icon: const Icon(Icons.volume_up, size: 14),
-                            tooltip: localizations.volume,
-                            onPressed: () {
-                              _speak(message['content'] ?? '');
-                            },
+                            tooltip: loc.volume,
+                            onPressed: () => _speak(message['content'] ?? ''),
                           ),
                           IconButton(
                             icon: const Icon(Icons.info_outline, size: 14),
-                            tooltip: localizations.messageInfoTitle,
-                            onPressed: () {
-                              _showMessageInfoDialog(message);
-                            },
+                            tooltip: loc.messageInfoTitle,
+                            onPressed: () => _showMessageInfoDialog(message),
                           ),
                         ],
                       ),
@@ -2681,9 +3352,6 @@ void _applyChatVars(Map<String, dynamic> patch) {
     }
   }
 
-  bool _noCardIsVisible() =>
-      _taskNotifications.values.every((n) => !n.isVisible);
-
   void _removeOverlay() {
     _notifOverlay?.remove();
     _notifOverlay = null;
@@ -2716,7 +3384,9 @@ void _applyChatVars(Map<String, dynamic> patch) {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: _taskNotifications.values
-                    .where((n) => n.isVisible && _contextIsKnown(n.contextPath))
+                    .where((n) =>
+                        n.isVisible &&
+                        contextIsKnown(n.contextPath, _availableContexts))
                     .map(_buildNotifCard)
                     .toList(),
               ),
@@ -2741,8 +3411,8 @@ void _applyChatVars(Map<String, dynamic> patch) {
     // 3) reset stato UI
     setState(() => _isStreaming = false);
 
-        // 3️⃣ avvisa tutte le Auto-Sequence di interrompersi
-    cancelSequences.value = true;          // emette il segnale
+    // 3️⃣ avvisa tutte le Auto-Sequence di interrompersi
+    cancelSequences.value = true; // emette il segnale
     // subito dopo lo rimettiamo a false, così un secondo STOP
     // invierà un nuovo fronte di discesa
     Future.microtask(() => cancelSequences.value = false);
@@ -2812,876 +3482,956 @@ void _applyChatVars(Map<String, dynamic> patch) {
   @override
   Widget build(BuildContext context) {
     final localizations = LocalizationProvider.of(context);
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Row(
-        children: [
-          // Barra laterale con possibilità di ridimensionamento
-          GestureDetector(
-            onHorizontalDragUpdate: (details) {
-              if (isExpanded) {
-                setState(() {
-                  sidebarWidth +=
-                      details.delta.dx; // Ridimensiona la barra laterale
-                  if (sidebarWidth < 200)
-                    sidebarWidth = 200; // Larghezza minima
-                  if (sidebarWidth > 900)
-                    sidebarWidth = 900; // Larghezza massima
-                });
-              }
-            },
-            child: AnimatedContainer(
-              margin: EdgeInsets.fromLTRB(isExpanded ? 16.0 : 0.0, 0, 0, 0),
-              duration: Duration(
-                  milliseconds:
-                      300), // Animazione per l'espansione e il collasso
-              width:
-                  sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
-              decoration: BoxDecoration(
-                color:
-                    Colors.white, // Colonna laterale con colore personalizzato
-                /*boxShadow: [
+    final bs = widget.borderStyle;
+    final bg = widget.backgroundStyle;
+    return Offstage(
+        offstage: !_uiVisible, // true ⇒ invisibile
+        child: Scaffold(
+          backgroundColor: Colors.white,
+          body: Row(
+            children: [
+              // Barra laterale con possibilità di ridimensionamento
+              if (widget.hasSidebar)
+                GestureDetector(
+                  onHorizontalDragUpdate: (details) {
+                    if (isExpanded) {
+                      setState(() {
+                        sidebarWidth +=
+                            details.delta.dx; // Ridimensiona la barra laterale
+                        if (sidebarWidth < widget.sidebarStartMinWidth)
+                          sidebarWidth =
+                              widget.sidebarStartMinWidth; // Larghezza minima
+                        if (sidebarWidth > widget.sidebarStartMaxWidth)
+                          sidebarWidth =
+                              widget.sidebarStartMaxWidth; // Larghezza massima
+                      });
+                    }
+                  },
+                  child: AnimatedContainer(
+                    // ➊ Padding condizionale: 16 px solo se la sidebar è aperta
+                    padding: EdgeInsets.only(left: isExpanded ? 16.0 : 0.0),
+                    // lo spostamento orizzontale viene ora gestito dal padding
+                    margin: EdgeInsets.zero,
+                    duration: Duration(
+                        milliseconds:
+                            300), // Animazione per l'espansione e il collasso
+                    width:
+                        sidebarWidth, // Usa la larghezza calcolata (può essere 0 se collassato)
+                    decoration: BoxDecoration(
+                      color: Colors
+                          .white, // Colonna laterale con colore personalizzato
+                      /*boxShadow: [
       BoxShadow(
         color: Colors.black.withOpacity(0.5), // Colore dell'ombra con trasparenza
         blurRadius: 8.0, // Sfocatura dell'ombra
         offset: Offset(2, 0), // Posizione dell'ombra (x, y)
       ),
     ],*/
-              ),
-              child: MediaQuery.of(context).size.width < 600 || sidebarWidth > 0
-                  ? Column(
-                      children: [
-                        // Linea di separazione bianca tra AppBar e sidebar
-                        Container(
-                          width: double.infinity,
-                          height: 2.0, // Altezza della linea
-                          color: Colors.white, // Colore bianco per la linea
-                        ),
-                        // Padding verticale tra l'AppBar e le voci del menu
-                        SizedBox(
-                            height:
-                                8.0), // Spazio verticale tra la linea e le voci del menu
+                    ),
+                    child:
+                        MediaQuery.of(context).size.width < 600 ||
+                                sidebarWidth > 0
+                            ? Column(
+                                children: [
+                                  // Linea di separazione bianca tra AppBar e sidebar
+                                  Container(
+                                    width: double.infinity,
+                                    height: 2.0, // Altezza della linea
+                                    color: Colors
+                                        .white, // Colore bianco per la linea
+                                  ),
+                                  // Padding verticale tra l'AppBar e le voci del menu
+                                  SizedBox(
+                                      height:
+                                          8.0), // Spazio verticale tra la linea e le voci del menu
 
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16.0, vertical: 12.0),
-                          color: Colors
-                              .white, // oppure usa lo stesso colore del menu laterale
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              // Titolo a sinistra
-                              fullLogo,
-                              // Icona di espansione/contrazione a destra
-                              IconButton(
-                                icon: _appReady
-                                    ? SvgPicture.network(
-                                        'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
-                                        width: 24,
-                                        height: 24,
-                                        color: Colors.grey)
-                                    : const SizedBox(
-                                        width: 24,
-                                        height: 24,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2)),
-                                onPressed: _appReady
-                                    ? () {
-                                        setState(() {
-                                          isExpanded = !isExpanded;
-                                          if (isExpanded) {
-                                            sidebarWidth =
-                                                MediaQuery.of(context)
-                                                            .size
-                                                            .width <
-                                                        600
-                                                    ? MediaQuery.of(context)
-                                                        .size
-                                                        .width
-                                                    : 300.0;
-                                          } else {
-                                            sidebarWidth = 0.0;
-                                          }
-                                        });
-                                      }
-                                    : () {},
-                              ),
-                            ],
-                          ),
-                        ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16.0, vertical: 12.0),
+                                    color: Colors
+                                        .white, // oppure usa lo stesso colore del menu laterale
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        // Titolo a sinistra
+                                        if (widget.showSidebarLogo)
+                                          fullLogo
+                                        else
+                                          const SizedBox(
+                                              width:
+                                                  1), // occupa appena 1 px e non si vede
+
+                                        // ❷ spinge SEMPRE l’icona del menu all’estrema destra
+                                        const Spacer(),
+                                        // Icona di espansione/contrazione a destra
+                                        IconButton(
+                                          icon: _appReady
+                                              ? SvgPicture.network(
+                                                  'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+                                                  width: 24,
+                                                  height: 24,
+                                                  color: Colors.grey)
+                                              : const SizedBox(
+                                                  width: 24,
+                                                  height: 24,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                          strokeWidth: 2)),
+                                          onPressed: _appReady
+                                              ? () {
+                                                  setState(() {
+                                                    isExpanded = !isExpanded;
+                                                    if (isExpanded) {
+                                                      sidebarWidth =
+                                                          MediaQuery.of(context)
+                                                                      .size
+                                                                      .width <
+                                                                  600
+                                                              ? MediaQuery.of(
+                                                                      context)
+                                                                  .size
+                                                                  .width
+                                                              : 300.0;
+                                                    } else {
+                                                      sidebarWidth = 0.0;
+                                                    }
+                                                  });
+                                                }
+                                              : () {},
+                                        ),
+                                      ],
+                                    ),
+                                  ),
 
 // Sezione fissa con le voci principali
 
 // Pulsante "Cerca"
-                        MouseRegion(
-                          onEnter: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  99; // un indice qualsiasi per l'hover
-                            });
-                          },
-                          onExit: (_) {
-                            setState(() {
-                              _buttonHoveredIndex = null;
-                            });
-                          },
-                          child: GestureDetector(
-                            onTap: () {
-                              // Quando clicco, apro il dialog di ricerca
-                              showSearchDialog(
-                                context: context,
-                                chatHistory: _chatHistory,
-                                onNavigateToMessage:
-                                    (String chatId, String messageId) {
-                                  // Carica la chat corrispondente
-                                  _loadMessagesForChat(chatId);
-                                  // Se vuoi scrollare al messaggio specifico, puoi salvare
-                                  // un "targetMessageId" e poi gestire lo scroll/spostamento
-                                  // dopo che i messaggi sono stati caricati.
-                                },
-                              );
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.all(4.0),
-                              decoration: BoxDecoration(
-                                color: _buttonHoveredIndex == 99
-                                    ? const Color.fromARGB(255, 224, 224, 224)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 12.0, horizontal: 16.0),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.search,
-                                      size: 24.0, color: Colors.black),
-                                  const SizedBox(width: 8.0),
-                                  Text(
-                                    localizations.searchButton,
-                                    style: TextStyle(color: Colors.black),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-
-// Pulsante "Conversazione"
-                        MouseRegion(
-                          onEnter: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  0; // Identifica "Conversazione" come in hover
-                            });
-                          },
-                          onExit: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  null; // Rimuove lo stato di hover
-                            });
-                          },
-                          child: GestureDetector(
-                            onTap: () {
-                              _cancelActiveStreamAndPersist(); // 🔹 NEW
-                              setState(() {
-                                _activeButtonIndex =
-                                    0; // Imposta "Conversazione" come attivo
-                                showKnowledgeBase =
-                                    false; // Deseleziona "Basi di conoscenza"
-                                showSettings =
-                                    false; // Deseleziona "Impostazioni"
-                                _activeChatIndex =
-                                    null; // Deseleziona qualsiasi chat
-                              });
-                              _loadChatHistory(); // Carica la cronologia delle chat
-                              if (MediaQuery.of(context).size.width < 600) {
-                                setState(() {
-                                  sidebarWidth =
-                                      0.0; // Collassa la barra laterale
-                                });
-                              }
-                            },
-                            child: Container(
-                              margin:
-                                  const EdgeInsets.all(4.0), // Margini laterali
-                              decoration: BoxDecoration(
-                                color: _buttonHoveredIndex == 0 ||
-                                        _activeButtonIndex == 0
-                                    ? const Color.fromARGB(255, 224, 224,
-                                        224) // Colore scuro durante hover o selezione
-                                    : Colors
-                                        .transparent, // Sfondo trasparente quando non è attivo
-                                borderRadius: BorderRadius.circular(
-                                    4.0), // Arrotonda gli angoli
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 12.0, horizontal: 16.0),
-                              child: Row(
-                                children: [
-                                  //Icon(Icons.chat_bubble_outline_outlined,
-                                  //    color: Colors.black),
-                                  SvgPicture.network(
-                                      'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element.svg',
-                                      width: 24,
-                                      height: 24,
-                                      color: Colors.black),
-                                  const SizedBox(width: 8.0),
-                                  Text(
-                                    localizations.conversation,
-                                    style: TextStyle(
-                                        color: Colors
-                                            .black), // Cambia colore in nero
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-
-// Pulsante "Basi di conoscenza"
-                        MouseRegion(
-                          onEnter: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  1; // Identifica "Basi di conoscenza" come in hover
-                            });
-                          },
-                          onExit: (_) {
-                            setState(() {
-                              _buttonHoveredIndex =
-                                  null; // Rimuove lo stato di hover
-                            });
-                          },
-                          child: GestureDetector(
-                            onTap: () {
-                              _cancelActiveStreamAndPersist(); // 🔹 NEW
-                              setState(() {
-                                _activeButtonIndex =
-                                    1; // Imposta "Basi di conoscenza" come attivo
-                                showKnowledgeBase =
-                                    true; // Mostra "Basi di conoscenza"
-                                showSettings =
-                                    false; // Deseleziona "Impostazioni"
-                                _activeChatIndex =
-                                    null; // Deseleziona qualsiasi chat
-                              });
-                              if (MediaQuery.of(context).size.width < 600) {
-                                setState(() {
-                                  sidebarWidth =
-                                      0.0; // Collassa la barra laterale
-                                });
-                              }
-                            },
-                            child: Container(
-                              margin:
-                                  const EdgeInsets.all(4.0), // Margini laterali
-                              decoration: BoxDecoration(
-                                color: _buttonHoveredIndex == 1 ||
-                                        _activeButtonIndex == 1
-                                    ? const Color.fromARGB(255, 224, 224,
-                                        224) // Colore scuro durante hover o selezione
-                                    : Colors
-                                        .transparent, // Sfondo trasparente quando non è attivo
-                                borderRadius: BorderRadius.circular(
-                                    4.0), // Arrotonda gli angoli
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 12.0, horizontal: 16.0),
-                              child: Row(
-                                children: [
-                                  SvgPicture.network(
-                                      'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
-                                      width: 24,
-                                      height: 24,
-                                      color: Colors.black),
-                                  const SizedBox(width: 8.0),
-                                  Text(
-                                    localizations.knowledgeBoxes,
-                                    style: TextStyle(
-                                        color: Colors
-                                            .black), // Cambia colore in nero
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-
-// Lista delle chat salvate
-                        Expanded(
-                          child: FutureBuilder(
-                            future:
-                                _chatHistoryFuture, // Assicurati che le chat siano caricate
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return Center(
-                                    child: CircularProgressIndicator());
-                              }
-
-                              // Raggruppa le chat in base alla data di aggiornamento
-                              final groupedChats =
-                                  _groupChatsByDate(_chatHistory);
-
-                              // Filtra le sezioni per rimuovere quelle vuote
-                              final nonEmptySections = groupedChats.entries
-                                  .where((entry) => entry.value.isNotEmpty)
-                                  .toList();
-
-                              if (nonEmptySections.isEmpty) {
-                                return Center(
-                                  child: Text(
-                                    localizations.noChatAvailable,
-                                    style: TextStyle(color: Colors.white70),
-                                  ),
-                                );
-                              }
-
-                              return ShaderMask(
-                                  shaderCallback: (Rect bounds) {
-                                    return const LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Colors.transparent, // Mantiene opaco
-                                        Colors.transparent, // Ancora opaco
-                                        Colors
-                                            .white, // A partire da qui diventa trasparente
-                                      ],
-                                      stops: [0.0, 0.75, 1.0],
-                                    ).createShader(bounds);
-                                  },
-                                  // Con dstOut, le parti del gradiente che sono bianche (o trasparenti) "tagliano" via il contenuto
-                                  blendMode: BlendMode.dstOut,
-                                  child: ListView.builder(
-                                    padding: const EdgeInsets.only(
-                                        bottom: 32.0), // Spazio extra in fondo
-                                    itemCount: nonEmptySections
-                                        .length, // Numero delle sezioni non vuote
-                                    itemBuilder: (context, sectionIndex) {
-                                      final section =
-                                          nonEmptySections[sectionIndex];
-                                      final sectionTitle = section
-                                          .key; // Ottieni il titolo della sezione
-                                      final chatsInSection = section
-                                          .value; // Ottieni le chat di quella sezione
-
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          // Intestazione della sezione
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 8.0, vertical: 4.0),
-                                            child: Text(
-                                              sectionTitle, // Titolo della sezione
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.black,
-                                              ),
-                                            ),
+                                  if (widget.showSearchButton)
+                                    MouseRegion(
+                                      onEnter: (_) {
+                                        setState(() {
+                                          _buttonHoveredIndex =
+                                              99; // un indice qualsiasi per l'hover
+                                        });
+                                      },
+                                      onExit: (_) {
+                                        setState(() {
+                                          _buttonHoveredIndex = null;
+                                        });
+                                      },
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          // Quando clicco, apro il dialog di ricerca
+                                          showSearchDialog(
+                                            context: context,
+                                            chatHistory: _chatHistory,
+                                            onNavigateToMessage: (String chatId,
+                                                String messageId) {
+                                              // Carica la chat corrispondente
+                                              _loadMessagesForChat(chatId);
+                                              // Se vuoi scrollare al messaggio specifico, puoi salvare
+                                              // un "targetMessageId" e poi gestire lo scroll/spostamento
+                                              // dopo che i messaggi sono stati caricati.
+                                            },
+                                          );
+                                        },
+                                        child: Container(
+                                          margin: const EdgeInsets.all(4.0),
+                                          decoration: BoxDecoration(
+                                            color: _buttonHoveredIndex == 99
+                                                ? const Color.fromARGB(
+                                                    255, 224, 224, 224)
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                           ),
-                                          // Lista delle chat di questa sezione
-                                          ...chatsInSection.map((chat) {
-                                            final chatName = chat['name'] ??
-                                                'Chat senza nome'; // Nome della chat
-                                            final chatId =
-                                                chat['id']; // ID della chat
-                                            final isActive = _activeChatIndex ==
-                                                _chatHistory.indexOf(
-                                                    chat); // Chat attiva
-                                            final isHovered = hoveredIndex ==
-                                                _chatHistory.indexOf(
-                                                    chat); // Chat in hover
-
-                                            return MouseRegion(
-                                              onEnter: (_) {
-                                                setState(() {
-                                                  hoveredIndex =
-                                                      _chatHistory.indexOf(
-                                                          chat); // Aggiorna hover
-                                                });
-                                              },
-                                              onExit: (_) {
-                                                setState(() {
-                                                  hoveredIndex =
-                                                      null; // Rimuovi hover
-                                                });
-                                              },
-                                              child: GestureDetector(
-                                                onTap: () {
-                                                  _loadMessagesForChat(
-                                                      chatId); // Carica messaggi della chat
-                                                  setState(() {
-                                                    _activeChatIndex =
-                                                        _chatHistory.indexOf(
-                                                            chat); // Imposta la chat attiva
-                                                    _activeButtonIndex =
-                                                        null; // Deseleziona i pulsanti principali
-                                                    showKnowledgeBase =
-                                                        false; // Deseleziona "Basi di conoscenza"
-                                                    showSettings =
-                                                        false; // Deseleziona "Impostazioni"
-                                                  });
-                                                  if (MediaQuery.of(context)
-                                                          .size
-                                                          .width <
-                                                      600) {
-                                                    sidebarWidth =
-                                                        0.0; // Collassa barra laterale
-                                                  }
-                                                },
-                                                child: Container(
-                                                  height: 40,
-                                                  margin: const EdgeInsets
-                                                      .symmetric(
-                                                      horizontal: 4,
-                                                      vertical:
-                                                          2), // Margini laterali
-                                                  decoration: BoxDecoration(
-                                                    color: isHovered || isActive
-                                                        ? const Color.fromARGB(
-                                                            255,
-                                                            224,
-                                                            224,
-                                                            224) // Colore scuro per hover o selezione
-                                                        : Colors
-                                                            .transparent, // Sfondo trasparente quando non attivo
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            4.0), // Arrotonda gli angoli
-                                                  ),
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                      vertical: 4.0,
-                                                      horizontal: 16.0),
-                                                  child: Row(
-                                                    children: [
-                                                      Expanded(
-                                                        child: Text(
-                                                          chatName,
-                                                          maxLines:
-                                                              1, // 👉 mai andare a capo
-                                                          overflow: TextOverflow
-                                                              .ellipsis, // 👉 “…”
-                                                          softWrap:
-                                                              false, // 👉 disabilita il wrap
-                                                          style: TextStyle(
-                                                            color: Colors.black,
-                                                            fontWeight: isActive
-                                                                ? FontWeight
-                                                                    .bold
-                                                                : FontWeight
-                                                                    .normal,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      Theme(
-                                                          data:
-                                                              Theme.of(context)
-                                                                  .copyWith(
-                                                            popupMenuTheme:
-                                                                PopupMenuThemeData(
-                                                              shape:
-                                                                  RoundedRectangleBorder(
-                                                                borderRadius:
-                                                                    BorderRadius
-                                                                        .circular(
-                                                                            16),
-                                                              ),
-                                                              color:
-                                                                  Colors.white,
-                                                            ),
-                                                          ),
-                                                          child:
-                                                              PopupMenuButton<
-                                                                  String>(
-                                                            offset:
-                                                                const Offset(
-                                                                    0, 32),
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        16), // Imposta un raggio di 8
-                                                            color: Colors.white,
-                                                            icon: Icon(
-                                                              Icons.more_horiz,
-                                                              color: (isHovered ||
-                                                                      isActive)
-                                                                  ? Colors
-                                                                      .black // Colore bianco per l'icona in hover o selezione
-                                                                  : Colors
-                                                                      .transparent, // Nascondi icona se non attivo o in hover
-                                                            ),
-                                                            padding:
-                                                                EdgeInsets.only(
-                                                                    right:
-                                                                        4.0), // Riduci margine destro
-                                                            onSelected:
-                                                                (String value) {
-                                                              if (value ==
-                                                                  'delete') {
-                                                                _deleteChat(
-                                                                    _chatHistory
-                                                                        .indexOf(
-                                                                            chat)); // Elimina la chat
-                                                              } else if (value ==
-                                                                  'edit') {
-                                                                _showEditChatDialog(
-                                                                    _chatHistory
-                                                                        .indexOf(
-                                                                            chat)); // Modifica la chat
-                                                              } else if (value ==
-                                                                  'archive') {
-                                                                _archiveChat(
-                                                                    _chatHistory
-                                                                        .indexOf(
-                                                                            chat));
-                                                              }
-                                                            },
-                                                            itemBuilder:
-                                                                (BuildContext
-                                                                    context) {
-                                                              return [
-                                                                PopupMenuItem(
-                                                                  value: 'edit',
-                                                                  child: Text(
-                                                                      localizations
-                                                                          .edit),
-                                                                ),
-                                                                PopupMenuItem(
-                                                                    value:
-                                                                        'archive',
-                                                                    child: Text(
-                                                                        localizations
-                                                                            .archive)),
-                                                                PopupMenuItem(
-                                                                  value:
-                                                                      'delete',
-                                                                  child: Text(
-                                                                      localizations
-                                                                          .delete),
-                                                                ),
-                                                              ];
-                                                            },
-                                                          )),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          }).toList(),
-                                          const SizedBox(
-                                              height:
-                                                  24), // Spaziatura tra le sezioni
-                                        ],
-                                      );
-                                    },
-                                  ));
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-// Pulsante "Nuova Chat"
-                        HoverableNewChatButton(
-                            label: localizations.newChat,
-                            onPressed: () {
-                              _startNewChat();
-                              setState(() {
-                                _activeButtonIndex = 3;
-                                showKnowledgeBase = false;
-                                showSettings = false;
-                                _activeChatIndex = null;
-                              });
-                            }),
-                        const SizedBox(height: 56),
-                      ],
-                    )
-                  : SizedBox.shrink(),
-            ),
-          ),
-          // Area principale
-
-          Expanded(
-            child: Container(
-                clipBehavior: Clip.hardEdge,
-                margin: const EdgeInsets.all(16.0),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey, width: 1.0),
-                  borderRadius: BorderRadius.circular(16.0),
-                  gradient: const RadialGradient(
-                    center: Alignment(0.5, 0.25),
-                    radius:
-                        1.2, // aumenta o diminuisci per rendere più o meno ampio il cerchio
-                    colors: [
-                      Color.fromARGB(
-                          255, 199, 230, 255), // Azzurro pieno al centro
-                      Colors.white, // Bianco verso i bordi
-                    ],
-                    stops: [0.0, 1.0],
-                  ),
-                ),
-                child: Column(children: [
-                  // Nuova top bar per info e pulsante utente
-                  Container(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                    padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
-                    decoration: const BoxDecoration(
-                      color: Colors.transparent,
-                    ),
-                    child: Row(
-                      children: [
-                        // Lato sinistro: un Expanded per allineare a sinistra
-                        Expanded(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.start,
-                            children: [
-                              if (sidebarWidth == 0.0) ...[
-                                IconButton(
-                                  icon: _appReady
-                                      ? SvgPicture.network(
-                                          'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
-                                          width: 24,
-                                          height: 24,
-                                          color: Colors.grey)
-                                      : const SizedBox(
-                                          width: 24,
-                                          height: 24,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth:
-                                                  2)), //const Icon(Icons.menu,
-                                  //color: Colors.black),
-                                  onPressed: _appReady
-                                      ? () {
-                                          setState(() {
-                                            isExpanded = true;
-                                            sidebarWidth =
-                                                MediaQuery.of(context)
-                                                            .size
-                                                            .width <
-                                                        600
-                                                    ? MediaQuery.of(context)
-                                                        .size
-                                                        .width
-                                                    : 300.0;
-                                          });
-                                        }
-                                      : () {},
-                                ),
-                                const SizedBox(width: 8),
-                                fullLogo,
-                              ],
-                            ],
-                          ),
-                        ),
-                        Theme(
-                            data: Theme.of(context).copyWith(
-                              popupMenuTheme: PopupMenuThemeData(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                color: Colors.white,
-                              ),
-                            ),
-                            child: PopupMenuButton<String>(
-                              offset: const Offset(0, 50),
-                              borderRadius: BorderRadius.circular(
-                                  16), // Imposta un raggio di 8
-                              color: Colors.white,
-                              icon: Builder(
-                                builder: (context) {
-                                  // Recupera la larghezza disponibile usando MediaQuery
-                                  final availableWidth =
-                                      MediaQuery.of(context).size.width;
-                                  return Row(
-                                    mainAxisSize: MainAxisSize
-                                        .min, // Occupa solo lo spazio necessario
-                                    children: [
-                                      CircleAvatar(
-                                        backgroundColor: Colors.black,
-                                        child: Text(
-                                          widget.user.email
-                                              .substring(0, 2)
-                                              .toUpperCase(),
-                                          style: const TextStyle(
-                                              color: Colors.white),
-                                        ),
-                                      ),
-                                      // Mostra nome ed email solo se la larghezza è almeno 450
-                                      if (availableWidth >= 450)
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(left: 8.0),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12.0, horizontal: 16.0),
+                                          child: Row(
                                             children: [
+                                              const Icon(Icons.search,
+                                                  size: 24.0,
+                                                  color: Colors.black),
+                                              const SizedBox(width: 8.0),
                                               Text(
-                                                widget.user.username,
-                                                style: const TextStyle(
-                                                  color: Colors.black,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                              Text(
-                                                widget.user.email,
-                                                style: const TextStyle(
-                                                  color: Colors.black,
-                                                  fontSize: 12,
-                                                ),
+                                                localizations.searchButton,
+                                                style: TextStyle(
+                                                    color: Colors.black),
                                               ),
                                             ],
                                           ),
                                         ),
-                                      // Aggiungi icona della lingua
-                                      //const SizedBox(width: 8.0),
-                                      //Icon(Icons.language, color: Colors.blue),
-                                    ],
-                                  );
-                                },
-                              ),
-                              onSelected: (value) {
-                                if (value == 'language') {
-                                  // Mostra un dialogo per selezionare la lingua
-                                  showDialog(
-                                    context: context,
-                                    builder: (context) {
-                                      final selectedLanguage =
-                                          LocalizationProviderWrapper.of(
-                                                  context)
-                                              .currentLanguage;
+                                      ),
+                                    ),
 
-                                      Widget languageOption({
-                                        required String label,
-                                        required Language language,
-                                        required String
-                                            countryCode, // es: "it", "us", "es"
-                                      }) {
-                                        final isSelected =
-                                            selectedLanguage == language;
-                                        return SimpleDialogOption(
-                                          onPressed: () {
-                                            LocalizationProviderWrapper.of(
-                                                    context)
-                                                .setLanguage(language);
-                                            Navigator.pop(context);
-                                          },
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              color: isSelected
-                                                  ? Colors.grey.shade200
-                                                  : Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
+// Pulsante "Conversazione"
+                                  if (widget.showConversationButton)
+                                    MouseRegion(
+                                      onEnter: (_) {
+                                        setState(() {
+                                          _buttonHoveredIndex =
+                                              0; // Identifica "Conversazione" come in hover
+                                        });
+                                      },
+                                      onExit: (_) {
+                                        setState(() {
+                                          _buttonHoveredIndex =
+                                              null; // Rimuove lo stato di hover
+                                        });
+                                      },
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _cancelActiveStreamAndPersist(); // 🔹 NEW
+                                          setState(() {
+                                            _activeButtonIndex =
+                                                0; // Imposta "Conversazione" come attivo
+                                            showKnowledgeBase =
+                                                false; // Deseleziona "Basi di conoscenza"
+                                            showSettings =
+                                                false; // Deseleziona "Impostazioni"
+                                            _activeChatIndex =
+                                                null; // Deseleziona qualsiasi chat
+                                          });
+                                          _loadChatHistory(); // Carica la cronologia delle chat
+                                          if (MediaQuery.of(context)
+                                                  .size
+                                                  .width <
+                                              600) {
+                                            setState(() {
+                                              sidebarWidth =
+                                                  0.0; // Collassa la barra laterale
+                                            });
+                                          }
+                                        },
+                                        child: Container(
+                                          margin: const EdgeInsets.all(
+                                              4.0), // Margini laterali
+                                          decoration: BoxDecoration(
+                                            color: _buttonHoveredIndex == 0 ||
+                                                    _activeButtonIndex == 0
+                                                ? const Color.fromARGB(
+                                                    255,
+                                                    224,
+                                                    224,
+                                                    224) // Colore scuro durante hover o selezione
+                                                : Colors
+                                                    .transparent, // Sfondo trasparente quando non è attivo
+                                            borderRadius: BorderRadius.circular(
+                                                4.0), // Arrotonda gli angoli
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12.0, horizontal: 16.0),
+                                          child: Row(
+                                            children: [
+                                              //Icon(Icons.chat_bubble_outline_outlined,
+                                              //    color: Colors.black),
+                                              SvgPicture.network(
+                                                  'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element.svg',
+                                                  width: 24,
+                                                  height: 24,
+                                                  color: Colors.black),
+                                              const SizedBox(width: 8.0),
+                                              Text(
+                                                localizations.conversation,
+                                                style: TextStyle(
+                                                    color: Colors
+                                                        .black), // Cambia colore in nero
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+
+// Pulsante "Basi di conoscenza"
+                                  if (widget.showKnowledgeBoxButton)
+                                    MouseRegion(
+                                      onEnter: (_) {
+                                        setState(() {
+                                          _buttonHoveredIndex =
+                                              1; // Identifica "Basi di conoscenza" come in hover
+                                        });
+                                      },
+                                      onExit: (_) {
+                                        setState(() {
+                                          _buttonHoveredIndex =
+                                              null; // Rimuove lo stato di hover
+                                        });
+                                      },
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _cancelActiveStreamAndPersist(); // 🔹 NEW
+                                          setState(() {
+                                            _activeButtonIndex =
+                                                1; // Imposta "Basi di conoscenza" come attivo
+                                            showKnowledgeBase =
+                                                true; // Mostra "Basi di conoscenza"
+                                            showSettings =
+                                                false; // Deseleziona "Impostazioni"
+                                            _activeChatIndex =
+                                                null; // Deseleziona qualsiasi chat
+                                          });
+                                          if (MediaQuery.of(context)
+                                                  .size
+                                                  .width <
+                                              600) {
+                                            setState(() {
+                                              sidebarWidth =
+                                                  0.0; // Collassa la barra laterale
+                                            });
+                                          }
+                                        },
+                                        child: Container(
+                                          margin: const EdgeInsets.all(
+                                              4.0), // Margini laterali
+                                          decoration: BoxDecoration(
+                                            color: _buttonHoveredIndex == 1 ||
+                                                    _activeButtonIndex == 1
+                                                ? const Color.fromARGB(
+                                                    255,
+                                                    224,
+                                                    224,
+                                                    224) // Colore scuro durante hover o selezione
+                                                : Colors
+                                                    .transparent, // Sfondo trasparente quando non è attivo
+                                            borderRadius: BorderRadius.circular(
+                                                4.0), // Arrotonda gli angoli
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12.0, horizontal: 16.0),
+                                          child: Row(
+                                            children: [
+                                              SvgPicture.network(
+                                                  'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
+                                                  width: 24,
+                                                  height: 24,
+                                                  color: Colors.black),
+                                              const SizedBox(width: 8.0),
+                                              Text(
+                                                localizations.knowledgeBoxes,
+                                                style: TextStyle(
+                                                    color: Colors
+                                                        .black), // Cambia colore in nero
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  const SizedBox(height: 24),
+
+// Lista delle chat salvate
+                                  if (widget.showChatList)
+                                    Expanded(
+                                      child: FutureBuilder(
+                                        future:
+                                            _chatHistoryFuture, // Assicurati che le chat siano caricate
+                                        builder: (context, snapshot) {
+                                          if (snapshot.connectionState ==
+                                              ConnectionState.waiting) {
+                                            return Center(
+                                                child:
+                                                    CircularProgressIndicator());
+                                          }
+
+                                          // Raggruppa le chat in base alla data di aggiornamento
+                                          final groupedChats =
+                                              _groupChatsByDate(_chatHistory);
+
+                                          // Filtra le sezioni per rimuovere quelle vuote
+                                          final nonEmptySections = groupedChats
+                                              .entries
+                                              .where((entry) =>
+                                                  entry.value.isNotEmpty)
+                                              .toList();
+
+                                          if (nonEmptySections.isEmpty) {
+                                            return Center(
+                                              child: Text(
+                                                localizations.noChatAvailable,
+                                                style: TextStyle(
+                                                    color: Colors.white70),
+                                              ),
+                                            );
+                                          }
+
+                                          return ShaderMask(
+                                              shaderCallback: (Rect bounds) {
+                                                return const LinearGradient(
+                                                  begin: Alignment.topCenter,
+                                                  end: Alignment.bottomCenter,
+                                                  colors: [
+                                                    Colors
+                                                        .transparent, // Mantiene opaco
+                                                    Colors
+                                                        .transparent, // Ancora opaco
+                                                    Colors
+                                                        .white, // A partire da qui diventa trasparente
+                                                  ],
+                                                  stops: [0.0, 0.75, 1.0],
+                                                ).createShader(bounds);
+                                              },
+                                              // Con dstOut, le parti del gradiente che sono bianche (o trasparenti) "tagliano" via il contenuto
+                                              blendMode: BlendMode.dstOut,
+                                              child: ListView.builder(
+                                                padding: const EdgeInsets.only(
+                                                    bottom:
+                                                        32.0), // Spazio extra in fondo
+                                                itemCount: nonEmptySections
+                                                    .length, // Numero delle sezioni non vuote
+                                                itemBuilder:
+                                                    (context, sectionIndex) {
+                                                  final section =
+                                                      nonEmptySections[
+                                                          sectionIndex];
+                                                  final sectionTitle = section
+                                                      .key; // Ottieni il titolo della sezione
+                                                  final chatsInSection = section
+                                                      .value; // Ottieni le chat di quella sezione
+
+                                                  return Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      // Intestazione della sezione
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 8.0,
+                                                                vertical: 4.0),
+                                                        child: Text(
+                                                          sectionTitle, // Titolo della sezione
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Colors.black,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      // Lista delle chat di questa sezione
+                                                      ...chatsInSection
+                                                          .map((chat) {
+                                                        final chatName = chat[
+                                                                'name'] ??
+                                                            'Chat senza nome'; // Nome della chat
+                                                        final chatId = chat[
+                                                            'id']; // ID della chat
+                                                        final isActive =
+                                                            _activeChatIndex ==
+                                                                _chatHistory
+                                                                    .indexOf(
+                                                                        chat); // Chat attiva
+                                                        final isHovered =
+                                                            hoveredIndex ==
+                                                                _chatHistory
+                                                                    .indexOf(
+                                                                        chat); // Chat in hover
+
+                                                        return MouseRegion(
+                                                          onEnter: (_) {
+                                                            setState(() {
+                                                              hoveredIndex =
+                                                                  _chatHistory
+                                                                      .indexOf(
+                                                                          chat); // Aggiorna hover
+                                                            });
+                                                          },
+                                                          onExit: (_) {
+                                                            setState(() {
+                                                              hoveredIndex =
+                                                                  null; // Rimuovi hover
+                                                            });
+                                                          },
+                                                          child:
+                                                              GestureDetector(
+                                                            onTap: () {
+                                                              _loadMessagesForChat(
+                                                                  chatId); // Carica messaggi della chat
+                                                              setState(() {
+                                                                _activeChatIndex =
+                                                                    _chatHistory
+                                                                        .indexOf(
+                                                                            chat); // Imposta la chat attiva
+                                                                _activeButtonIndex =
+                                                                    null; // Deseleziona i pulsanti principali
+                                                                showKnowledgeBase =
+                                                                    false; // Deseleziona "Basi di conoscenza"
+                                                                showSettings =
+                                                                    false; // Deseleziona "Impostazioni"
+                                                              });
+                                                              if (MediaQuery.of(
+                                                                          context)
+                                                                      .size
+                                                                      .width <
+                                                                  600) {
+                                                                sidebarWidth =
+                                                                    0.0; // Collassa barra laterale
+                                                              }
+                                                            },
+                                                            child: Container(
+                                                              height: 40,
+                                                              margin: const EdgeInsets
+                                                                  .symmetric(
+                                                                  horizontal: 4,
+                                                                  vertical:
+                                                                      2), // Margini laterali
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: isHovered ||
+                                                                        isActive
+                                                                    ? const Color
+                                                                        .fromARGB(
+                                                                        255,
+                                                                        224,
+                                                                        224,
+                                                                        224) // Colore scuro per hover o selezione
+                                                                    : Colors
+                                                                        .transparent, // Sfondo trasparente quando non attivo
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            4.0), // Arrotonda gli angoli
+                                                              ),
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
+                                                                      vertical:
+                                                                          4.0,
+                                                                      horizontal:
+                                                                          16.0),
+                                                              child: Row(
+                                                                children: [
+                                                                  Expanded(
+                                                                    child: Text(
+                                                                      chatName,
+                                                                      maxLines:
+                                                                          1, // 👉 mai andare a capo
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis, // 👉 “…”
+                                                                      softWrap:
+                                                                          false, // 👉 disabilita il wrap
+                                                                      style:
+                                                                          TextStyle(
+                                                                        color: Colors
+                                                                            .black,
+                                                                        fontWeight: isActive
+                                                                            ? FontWeight.bold
+                                                                            : FontWeight.normal,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  Theme(
+                                                                      data: Theme.of(
+                                                                              context)
+                                                                          .copyWith(
+                                                                        popupMenuTheme:
+                                                                            PopupMenuThemeData(
+                                                                          shape:
+                                                                              RoundedRectangleBorder(
+                                                                            borderRadius:
+                                                                                BorderRadius.circular(16),
+                                                                          ),
+                                                                          color:
+                                                                              Colors.white,
+                                                                        ),
+                                                                      ),
+                                                                      child: PopupMenuButton<
+                                                                          String>(
+                                                                        offset: const Offset(
+                                                                            0,
+                                                                            32),
+                                                                        borderRadius:
+                                                                            BorderRadius.circular(16), // Imposta un raggio di 8
+                                                                        color: Colors
+                                                                            .white,
+                                                                        icon:
+                                                                            Icon(
+                                                                          Icons
+                                                                              .more_horiz,
+                                                                          color: (isHovered || isActive)
+                                                                              ? Colors.black // Colore bianco per l'icona in hover o selezione
+                                                                              : Colors.transparent, // Nascondi icona se non attivo o in hover
+                                                                        ),
+                                                                        padding:
+                                                                            EdgeInsets.only(right: 4.0), // Riduci margine destro
+                                                                        onSelected:
+                                                                            (String
+                                                                                value) {
+                                                                          if (value ==
+                                                                              'delete') {
+                                                                            _deleteChat(_chatHistory.indexOf(chat)); // Elimina la chat
+                                                                          } else if (value ==
+                                                                              'edit') {
+                                                                            _showEditChatDialog(_chatHistory.indexOf(chat)); // Modifica la chat
+                                                                          } else if (value ==
+                                                                              'archive') {
+                                                                            _archiveChat(_chatHistory.indexOf(chat));
+                                                                          }
+                                                                        },
+                                                                        itemBuilder:
+                                                                            (BuildContext
+                                                                                context) {
+                                                                          return [
+                                                                            PopupMenuItem(
+                                                                              value: 'edit',
+                                                                              child: Text(localizations.edit),
+                                                                            ),
+                                                                            PopupMenuItem(
+                                                                                value: 'archive',
+                                                                                child: Text(localizations.archive)),
+                                                                            PopupMenuItem(
+                                                                              value: 'delete',
+                                                                              child: Text(localizations.delete),
+                                                                            ),
+                                                                          ];
+                                                                        },
+                                                                      )),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }).toList(),
+                                                      const SizedBox(
+                                                          height:
+                                                              24), // Spaziatura tra le sezioni
+                                                    ],
+                                                  );
+                                                },
+                                              ));
+                                        },
+                                      ),
+                                    ),
+                                  const SizedBox(height: 8),
+// Pulsante "Nuova Chat"
+                                  if (widget.showNewChatButton)
+                                    HoverableNewChatButton(
+                                        label: localizations.newChat,
+                                        onPressed: () {
+                                          _startNewChat();
+                                          setState(() {
+                                            _activeButtonIndex = 3;
+                                            showKnowledgeBase = false;
+                                            showSettings = false;
+                                            _activeChatIndex = null;
+                                          });
+                                        }),
+                                  const SizedBox(height: 56),
+                                ],
+                              )
+                            : SizedBox.shrink(),
+                  ),
+                ),
+              // Area principale
+
+              Expanded(
+                child: Container(
+                    margin: bs.margin, // margine esterno
+                    clipBehavior: Clip.hardEdge,
+                    decoration: BoxDecoration(
+                      // ─── SFONDO ────────────────────────────────────────────────
+                      color: bg.baseColor, // altrimenti usa il colore scelto
+                      gradient: bg.useGradient
+                          ? RadialGradient(
+                              center:
+                                  bg.gradientCenter, // es. Alignment(0.5, 0.25)
+                              radius: bg.gradientRadius, // es. 1.2
+                              colors: [bg.gradientInner, bg.gradientOuter],
+                              stops: const [
+                                0.0,
+                                1.0
+                              ], // es. [Color(0xFFC7E6FF), Colors.white]
+                            )
+                          : null,
+
+                      // ─── BORDO ────────────────────────────────────────────────
+                      borderRadius: BorderRadius.circular(bs.radius),
+                      border: bs.visible
+                          ? Border.all(
+                              color: bs.color,
+                              width: bs.thickness,
+                            )
+                          : null, // nessun bordo se visibile = false
+                    ),
+                    child: Column(children: [
+                      // Nuova top bar per info e pulsante utente
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        // ❶ garantisce SEMPRE l’altezza minima voluta
+                        constraints:
+                            BoxConstraints(minHeight: widget.topBarMinHeight),
+
+                        // ❷ background rimane trasparente come prima
+                        decoration:
+                            const BoxDecoration(color: Colors.transparent),
+
+                        // ❸ la Row originale resta identica:
+                        child: Row(
+                          children: [
+                            SizedBox(height: widget.topBarMinHeight, width: 0),
+                            // Lato sinistro: un Expanded per allineare a sinistra
+                            Expanded(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                children: [
+                                  if (sidebarWidth == 0.0) ...[
+                                    if (widget.hasSidebar)
+                                      IconButton(
+                                        icon: _appReady
+                                            ? SvgPicture.network(
+                                                'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+                                                width: 24,
+                                                height: 24,
+                                                color: Colors.grey)
+                                            : const SizedBox(
+                                                width: 24,
+                                                height: 24,
+                                                child: CircularProgressIndicator(
+                                                    strokeWidth:
+                                                        2)), //const Icon(Icons.menu,
+                                        //color: Colors.black),
+                                        onPressed: _appReady
+                                            ? () {
+                                                setState(() {
+                                                  isExpanded = true;
+                                                  sidebarWidth = MediaQuery.of(
+                                                                  context)
+                                                              .size
+                                                              .width <
+                                                          600
+                                                      ? MediaQuery.of(context)
+                                                          .size
+                                                          .width
+                                                      : 300.0;
+                                                });
+                                              }
+                                            : () {},
+                                      ),
+                                    const SizedBox(width: 8),
+                                    if (widget.showTopBarLogo) fullLogo,
+                                  ],
+                                ],
+                              ),
+                            ),
+                            if (widget.showUserMenu)
+                              Theme(
+                                  data: Theme.of(context).copyWith(
+                                    popupMenuTheme: PopupMenuThemeData(
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  child: PopupMenuButton<String>(
+                                    offset: const Offset(0, 50),
+                                    borderRadius: BorderRadius.circular(
+                                        16), // Imposta un raggio di 8
+                                    color: Colors.white,
+                                    icon: Builder(
+                                      builder: (context) {
+                                        // Recupera la larghezza disponibile usando MediaQuery
+                                        final availableWidth =
+                                            MediaQuery.of(context).size.width;
+                                        return Row(
+                                          mainAxisSize: MainAxisSize
+                                              .min, // Occupa solo lo spazio necessario
+                                          children: [
+                                            CircleAvatar(
+                                              backgroundColor: Colors.black,
+                                              child: Text(
+                                                widget.user.email
+                                                    .substring(0, 2)
+                                                    .toUpperCase(),
+                                                style: const TextStyle(
+                                                    color: Colors.white),
+                                              ),
                                             ),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 8, vertical: 6),
-                                            child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment
-                                                      .spaceBetween,
-                                              children: [
-                                                Text(
-                                                  label,
-                                                  style: TextStyle(
-                                                    fontWeight: isSelected
-                                                        ? FontWeight.bold
-                                                        : FontWeight.normal,
-                                                    color: Colors.black,
+                                            // Mostra nome ed email solo se la larghezza è almeno 450
+                                            if (availableWidth >= 450)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    left: 8.0),
+                                                child: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      widget.user.username,
+                                                      style: const TextStyle(
+                                                        color: Colors.black,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      widget.user.email,
+                                                      style: const TextStyle(
+                                                        color: Colors.black,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            // Aggiungi icona della lingua
+                                            //const SizedBox(width: 8.0),
+                                            //Icon(Icons.language, color: Colors.blue),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                    onSelected: (value) {
+                                      if (value == 'language') {
+                                        // Mostra un dialogo per selezionare la lingua
+                                        showDialog(
+                                          context: context,
+                                          builder: (context) {
+                                            final selectedLanguage =
+                                                LocalizationProviderWrapper.of(
+                                                        context)
+                                                    .currentLanguage;
+
+                                            Widget languageOption({
+                                              required String label,
+                                              required Language language,
+                                              required String
+                                                  countryCode, // es: "it", "us", "es"
+                                            }) {
+                                              final isSelected =
+                                                  selectedLanguage == language;
+                                              return SimpleDialogOption(
+                                                onPressed: () {
+                                                  LocalizationProviderWrapper
+                                                          .of(context)
+                                                      .setLanguage(language);
+                                                  Navigator.pop(context);
+                                                },
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: isSelected
+                                                        ? Colors.grey.shade200
+                                                        : Colors.transparent,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
+                                                  ),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 6),
+                                                  child: Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
+                                                    children: [
+                                                      Text(
+                                                        label,
+                                                        style: TextStyle(
+                                                          fontWeight: isSelected
+                                                              ? FontWeight.bold
+                                                              : FontWeight
+                                                                  .normal,
+                                                          color: Colors.black,
+                                                        ),
+                                                      ),
+                                                      ClipRRect(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(4),
+                                                        child: Image.network(
+                                                          'https://flagcdn.com/w40/$countryCode.png',
+                                                          width: 24,
+                                                          height: 18,
+                                                          fit: BoxFit.cover,
+                                                          errorBuilder: (context,
+                                                                  error,
+                                                                  stackTrace) =>
+                                                              const Icon(
+                                                                  Icons.flag),
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
-                                                ClipRRect(
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                  child: Image.network(
-                                                    'https://flagcdn.com/w40/$countryCode.png',
-                                                    width: 24,
-                                                    height: 18,
-                                                    fit: BoxFit.cover,
-                                                    errorBuilder: (context,
-                                                            error,
-                                                            stackTrace) =>
-                                                        const Icon(Icons.flag),
-                                                  ),
+                                              );
+                                            }
+
+                                            return SimpleDialog(
+                                              backgroundColor: Colors.white,
+                                              title: Text(localizations
+                                                  .select_language),
+                                              children: [
+                                                languageOption(
+                                                  label: 'Italiano',
+                                                  language: Language.italian,
+                                                  countryCode: 'it',
+                                                ),
+                                                languageOption(
+                                                  label: 'English',
+                                                  language: Language.english,
+                                                  countryCode: 'us',
+                                                ),
+                                                languageOption(
+                                                  label: 'Español',
+                                                  language: Language.spanish,
+                                                  countryCode: 'es',
                                                 ),
                                               ],
-                                            ),
-                                          ),
+                                            );
+                                          },
                                         );
-                                      }
-
-                                      return SimpleDialog(
-                                        backgroundColor: Colors.white,
-                                        title:
-                                            Text(localizations.select_language),
-                                        children: [
-                                          languageOption(
-                                            label: 'Italiano',
-                                            language: Language.italian,
-                                            countryCode: 'it',
-                                          ),
-                                          languageOption(
-                                            label: 'English',
-                                            language: Language.english,
-                                            countryCode: 'us',
-                                          ),
-                                          languageOption(
-                                            label: 'Español',
-                                            language: Language.spanish,
-                                            countryCode: 'es',
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                } else {
-                                  // Altri casi di selezione
-                                  switch (value) {
-                                    //case 'Profilo':
-                                    //Navigator.push(
-                                    //context,
-                                    //MaterialPageRoute(
-                                    //  builder: (context) => AccountSettingsPage(
-                                    //    user: widget.user,
-                                    //    token: widget.token,
-                                    //  ),
-                                    //),
-                                    //);
-                                    //break;
-                                    case 'Utilizzo':
-                                      showDialog(
-                                        context: context,
-                                        builder: (_) => UsageDialog(),
-                                      );
-                                      break;
-                                    case 'Impostazioni':
-                                      /*setState(() {
+                                      } else {
+                                        // Altri casi di selezione
+                                        switch (value) {
+                                          //case 'Profilo':
+                                          //Navigator.push(
+                                          //context,
+                                          //MaterialPageRoute(
+                                          //  builder: (context) => AccountSettingsPage(
+                                          //    user: widget.user,
+                                          //    token: widget.token,
+                                          //  ),
+                                          //),
+                                          //);
+                                          //break;
+                                          case 'Utilizzo':
+                                            showDialog(
+                                              context: context,
+                                              builder: (_) => UsageDialog(),
+                                            );
+                                            break;
+                                          case 'Impostazioni':
+                                            /*setState(() {
             showSettings = true;
             showKnowledgeBase = false;
           });*/
-                                      showDialog(
-                                        context: context,
-                                        builder: (_) => SettingsDialog(
-                                          accessToken: widget.token.accessToken,
-                                          onArchiveAll: _archiveAllChats,
-                                          onDeleteAll: _deleteAllChats,
-                                        ),
-                                      );
-                                      break;
-                                    case 'Logout':
-                                      _logout(context);
-                                      break;
-                                  }
-                                }
-                              },
-                              itemBuilder: (BuildContext context) {
-                                return [
-                                  /*PopupMenuItem(
+                                            showDialog(
+                                              context: context,
+                                              builder: (_) => SettingsDialog(
+                                                accessToken:
+                                                    widget.token.accessToken,
+                                                onArchiveAll: _archiveAllChats,
+                                                onDeleteAll: _deleteAllChats,
+                                              ),
+                                            );
+                                            break;
+                                          case 'Logout':
+                                            _logout(context);
+                                            break;
+                                        }
+                                      }
+                                    },
+                                    itemBuilder: (BuildContext context) {
+                                      return [
+                                        /*PopupMenuItem(
                                     value: 'Profilo',
                                     child: Row(
                                       children: [
@@ -3691,449 +4441,346 @@ void _applyChatVars(Map<String, dynamic> patch) {
                                       ],
                                     ),
                                   ),*/
-                                  PopupMenuItem(
-                                    value: 'Utilizzo',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.bar_chart,
-                                            color: Colors.black),
-                                        const SizedBox(width: 8.0),
-                                        Text(localizations.usage),
-                                      ],
-                                    ),
+                                        PopupMenuItem(
+                                          value: 'Utilizzo',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.bar_chart,
+                                                  color: Colors.black),
+                                              const SizedBox(width: 8.0),
+                                              Text(localizations.usage),
+                                            ],
+                                          ),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'Impostazioni',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.settings,
+                                                  color: Colors.black),
+                                              const SizedBox(width: 8.0),
+                                              Text(localizations.settings),
+                                            ],
+                                          ),
+                                        ),
+                                        // Elemento per la selezione della lingua
+                                        PopupMenuItem(
+                                          value: 'language',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.language,
+                                                  color: Colors.black),
+                                              const SizedBox(width: 8.0),
+                                              Text(localizations
+                                                  .select_language),
+                                            ],
+                                          ),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'Logout',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.logout,
+                                                  color: Colors.red),
+                                              const SizedBox(width: 8.0),
+                                              Text(
+                                                localizations.logout,
+                                                style: const TextStyle(
+                                                    color: Colors.red),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ];
+                                    },
+                                  ))
+                            else
+                              const SizedBox.shrink()
+                          ],
+                        ),
+                      ),
+
+                      if (widget.separatorStyle.visible)
+                        Container(
+                          margin: EdgeInsets.only(
+                              top: widget.separatorStyle.topOffset),
+                          height: widget.separatorStyle.thickness,
+                          color: widget.separatorStyle.color,
+                        ),
+
+                      Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.all(12.0),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 0.0, vertical: 0.0),
+                          color: Colors.transparent,
+                          child: showKnowledgeBase
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4.0, vertical: 4.0),
+                                  decoration: BoxDecoration(
+                                    color: Colors.transparent,
+                                    borderRadius: BorderRadius.circular(16.0),
                                   ),
-                                  PopupMenuItem(
-                                    value: 'Impostazioni',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.settings,
-                                            color: Colors.black),
-                                        const SizedBox(width: 8.0),
-                                        Text(localizations.settings),
-                                      ],
-                                    ),
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 800),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: DashboardScreen(
+                                          username: widget.user.username,
+                                          token: widget.token.accessToken,
+
+                                          // ▼▼▼  NUOVO PARAMETRO  ▼▼▼
+                                          onNewPendingJob: _onNewPendingJob,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  // Elemento per la selezione della lingua
-                                  PopupMenuItem(
-                                    value: 'language',
-                                    child: Row(
+                                )
+                              : showSettings
+                                  ? Container(
+                                      padding: const EdgeInsets.all(4.0),
+                                      decoration: BoxDecoration(
+                                        color: Colors.transparent,
+                                        borderRadius:
+                                            BorderRadius.circular(2.0),
+                                      ),
+                                      constraints:
+                                          const BoxConstraints(maxWidth: 600),
+                                      //child: AccountSettingsPage(
+                                      //  user: widget.user,
+                                      //  token: widget.token,
+                                      //),
+                                    )
+                                  : Column(
                                       children: [
-                                        Icon(Icons.language,
-                                            color: Colors.black),
-                                        const SizedBox(width: 8.0),
-                                        Text(localizations.select_language),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'Logout',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.logout, color: Colors.red),
-                                        const SizedBox(width: 8.0),
-                                        Text(
-                                          localizations.logout,
-                                          style: const TextStyle(
-                                              color: Colors.red),
+                                        // Sezione principale con i messaggi
+                                        _forceInitialChatLoading
+                                            ? const Expanded(
+                                                child: Center(
+                                                    child:
+                                                        CircularProgressIndicator()),
+                                              )
+                                            : messages.isEmpty
+                                                ? buildEmptyChatScreen(
+                                                    context, _handleUserInput)
+                                                : Expanded(
+                                                    child: LayoutBuilder(
+                                                      builder: (context,
+                                                          constraints) {
+                                                        final double
+                                                            rightContainerWidth =
+                                                            constraints
+                                                                .maxWidth;
+                                                        final double
+                                                            containerWidth =
+                                                            (rightContainerWidth >
+                                                                    800)
+                                                                ? 800.0
+                                                                : rightContainerWidth;
+
+                                                        return Stack(children: [
+                                                          ShaderMask(
+                                                              shaderCallback:
+                                                                  (Rect
+                                                                      bounds) {
+                                                                return const LinearGradient(
+                                                                  begin: Alignment
+                                                                      .topCenter,
+                                                                  end: Alignment
+                                                                      .bottomCenter,
+                                                                  colors: [
+                                                                    Colors
+                                                                        .white,
+                                                                    Colors
+                                                                        .transparent,
+                                                                    Colors
+                                                                        .transparent,
+                                                                    Colors
+                                                                        .white,
+                                                                  ],
+                                                                  stops: [
+                                                                    0.0,
+                                                                    0.03,
+                                                                    0.97,
+                                                                    1.0
+                                                                  ],
+                                                                ).createShader(
+                                                                    bounds);
+                                                              },
+                                                              blendMode:
+                                                                  BlendMode
+                                                                      .dstOut,
+                                                              child: SingleChildScrollView(
+                                                                  controller: _messagesScrollController,
+                                                                  physics: const AlwaysScrollableScrollPhysics(),
+                                                                  child: Center(
+                                                                      // (2) Centra la colonna
+                                                                      child: ConstrainedBox(
+                                                                    // (3) Limita la larghezza della colonna a containerWidth
+                                                                    constraints:
+                                                                        BoxConstraints(
+                                                                      maxWidth:
+                                                                          containerWidth,
+                                                                    ),
+                                                                    child:
+                                                                        Column(
+                                                                      children:
+                                                                          _buildMessagesList(
+                                                                              containerWidth),
+                                                                    ),
+                                                                  )))),
+// 2️⃣ The FAB, positioned at bottom-center:
+                                                          if (_showScrollToBottomButton)
+                                                            Positioned(
+                                                              bottom: 16,
+                                                              left: 0,
+                                                              right:
+                                                                  0, // ← fa sì che il Positioned sia largo quanto il parent
+                                                              child: Align(
+                                                                // ← allinea il figlio al centro orizzontalmente
+                                                                alignment:
+                                                                    Alignment
+                                                                        .center,
+                                                                child:
+                                                                    FloatingActionButton(
+                                                                  mini: true,
+                                                                  backgroundColor:
+                                                                      Colors
+                                                                          .white, // ← sfondo bianco
+                                                                  elevation:
+                                                                      4.0,
+                                                                  shape:
+                                                                      RoundedRectangleBorder(
+                                                                    // ← bordo arrotondato con raggio 30
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                            30),
+                                                                  ), // ← ombra sottile
+                                                                  child:
+                                                                      const Icon(
+                                                                    Icons
+                                                                        .arrow_downward,
+                                                                    color: Colors
+                                                                        .blue, // ← freccia blu
+                                                                  ),
+                                                                  onPressed:
+                                                                      () {
+                                                                    _messagesScrollController
+                                                                        .animateTo(
+                                                                      _messagesScrollController
+                                                                          .position
+                                                                          .maxScrollExtent,
+                                                                      duration: const Duration(
+                                                                          milliseconds:
+                                                                              300),
+                                                                      curve: Curves
+                                                                          .easeOut,
+                                                                    );
+                                                                  },
+                                                                ),
+                                                              ),
+                                                            ),
+                                                        ]);
+                                                      },
+                                                    ),
+                                                  ),
+
+                                        ChatInputWidget(
+                                          apiSdk: _apiSdk,
+                                          inputScroll: _inputScroll,
+                                          controller: _controller,
+                                          inputFocus: _inputFocus,
+                                          isListening: _isListening,
+                                          isStreaming: _isStreaming,
+                                          isCostLoading: _isCostLoading,
+                                          liveCost: _liveCost,
+                                          listen: _listen,
+                                          stopStreaming: _stopStreaming,
+                                          handleUserInput: _handleUserInput,
+                                          updateLiveCost: _updateLiveCost,
+                                          showContextDialog: _showContextDialog,
+                                          uploadFileForChatAsync:
+                                              _uploadFileForChatAsync,
+                                          localizations:
+                                              localizations, // la stessa variabile che usavi
+                                          onAddImage: _addInputImage, // NEW
+                                          onRemoveImage:
+                                              _removeInputImageAt, // NEW
+                                          pendingInputImages:
+                                              _pendingInputImages, // NEW
+                                          isSending: _isSending,
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ];
-                              },
-                            ))
-                      ],
-                    ),
-                  ),
-
-                  const Divider(
-                    color: Colors.grey,
-                    height: 0,
-                  ),
-
-                  Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.all(12.0),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 0.0, vertical: 0.0),
-                      color: Colors.transparent,
-                      child: showKnowledgeBase
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 4.0, vertical: 4.0),
-                              decoration: BoxDecoration(
-                                color: Colors.transparent,
-                                borderRadius: BorderRadius.circular(16.0),
-                              ),
-                              constraints: const BoxConstraints(maxWidth: 800),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: DashboardScreen(
-                                      username: widget.user.username,
-                                      token: widget.token.accessToken,
-
-                                      // ▼▼▼  NUOVO PARAMETRO  ▼▼▼
-                                      onNewPendingJob: _onNewPendingJob,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : showSettings
-                              ? Container(
-                                  padding: const EdgeInsets.all(4.0),
-                                  decoration: BoxDecoration(
-                                    color: Colors.transparent,
-                                    borderRadius: BorderRadius.circular(2.0),
-                                  ),
-                                  constraints:
-                                      const BoxConstraints(maxWidth: 600),
-                                  //child: AccountSettingsPage(
-                                  //  user: widget.user,
-                                  //  token: widget.token,
-                                  //),
-                                )
-                              : Column(
-                                  children: [
-                                    // Sezione principale con i messaggi
-
-                                    messages.isEmpty
-                                        ? buildEmptyChatScreen(
-                                            context, _handleUserInput)
-                                        : Expanded(
-                                            child: LayoutBuilder(
-                                              builder: (context, constraints) {
-                                                final double
-                                                    rightContainerWidth =
-                                                    constraints.maxWidth;
-                                                final double containerWidth =
-                                                    (rightContainerWidth > 800)
-                                                        ? 800.0
-                                                        : rightContainerWidth;
-
-                                                return Stack(children: [
-                                                  ShaderMask(
-                                                      shaderCallback:
-                                                          (Rect bounds) {
-                                                        return const LinearGradient(
-                                                          begin: Alignment
-                                                              .topCenter,
-                                                          end: Alignment
-                                                              .bottomCenter,
-                                                          colors: [
-                                                            Colors.white,
-                                                            Colors.transparent,
-                                                            Colors.transparent,
-                                                            Colors.white,
-                                                          ],
-                                                          stops: [
-                                                            0.0,
-                                                            0.03,
-                                                            0.97,
-                                                            1.0
-                                                          ],
-                                                        ).createShader(bounds);
-                                                      },
-                                                      blendMode:
-                                                          BlendMode.dstOut,
-                                                      child:
-                                                          SingleChildScrollView(
-                                                              controller:
-                                                                  _messagesScrollController,
-                                                              physics:
-                                                                  const AlwaysScrollableScrollPhysics(),
-                                                              child: Center(
-                                                                  // (2) Centra la colonna
-                                                                  child:
-                                                                      ConstrainedBox(
-                                                                // (3) Limita la larghezza della colonna a containerWidth
-                                                                constraints:
-                                                                    BoxConstraints(
-                                                                  maxWidth:
-                                                                      containerWidth,
-                                                                ),
-                                                                child: Column(
-                                                                  children:
-                                                                      _buildMessagesList(
-                                                                          containerWidth),
-                                                                ),
-                                                              )))),
-// 2️⃣ The FAB, positioned at bottom-center:
-                                                  if (_showScrollToBottomButton)
-                                                    Positioned(
-                                                      bottom: 16,
-                                                      left: 0,
-                                                      right:
-                                                          0, // ← fa sì che il Positioned sia largo quanto il parent
-                                                      child: Align(
-                                                        // ← allinea il figlio al centro orizzontalmente
-                                                        alignment:
-                                                            Alignment.center,
-                                                        child:
-                                                            FloatingActionButton(
-                                                          mini: true,
-                                                          backgroundColor: Colors
-                                                              .white, // ← sfondo bianco
-                                                          elevation: 4.0,
-                                                          shape:
-                                                              RoundedRectangleBorder(
-                                                            // ← bordo arrotondato con raggio 30
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        30),
-                                                          ), // ← ombra sottile
-                                                          child: const Icon(
-                                                            Icons
-                                                                .arrow_downward,
-                                                            color: Colors
-                                                                .blue, // ← freccia blu
-                                                          ),
-                                                          onPressed: () {
-                                                            _messagesScrollController
-                                                                .animateTo(
-                                                              _messagesScrollController
-                                                                  .position
-                                                                  .maxScrollExtent,
-                                                              duration:
-                                                                  const Duration(
-                                                                      milliseconds:
-                                                                          300),
-                                                              curve: Curves
-                                                                  .easeOut,
-                                                            );
-                                                          },
-                                                        ),
-                                                      ),
-                                                    ),
-                                                ]);
-                                              },
-                                            ),
-                                          ),
-
-                                    // Container di input unificato (testo + icone + mic/invia)
-                                    Container(
-                                      margin: const EdgeInsets.fromLTRB(
-                                          0, 16, 0, 0),
-                                      child: LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final double availableWidth =
-                                              constraints.maxWidth;
-                                          final double containerWidth =
-                                              (availableWidth > 800)
-                                                  ? 800
-                                                  : availableWidth;
-
-                                          return ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth: containerWidth,
-                                            ),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 8.0),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white,
-                                                borderRadius:
-                                                    BorderRadius.circular(16.0),
-                                                boxShadow: const [
-                                                  BoxShadow(
-                                                    color: Colors.black12,
-                                                    blurRadius: 4.0,
-                                                    offset: Offset(2, 2),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.stretch,
-                                                children: [
-                                                  // RIGA 1: Campo di input testuale
-                                                  Padding(
-                                                    padding: const EdgeInsets
-                                                        .fromLTRB(
-                                                        16.0, 8.0, 16.0, 8.0),
-                                                    child: // ⬅︎ metti in cima al widget build o come campo di stato
-
-                                                        ConstrainedBox(
-                                                      constraints:
-                                                          const BoxConstraints(
-                                                        // ⬅︎ limite d’altezza
-                                                        maxHeight:
-                                                            150, //   200 px
-                                                      ),
-                                                      child: Scrollbar(
-                                                        // ⬅︎ mostra la barra se necessario
-                                                        thumbVisibility: true,
-                                                        controller:
-                                                            _inputScroll,
-                                                        child: TextField(
-                                                          controller:
-                                                              _controller,
-                                                          focusNode:
-                                                              _inputFocus, // 👈 nuovo
-                                                          minLines: 1,
-                                                          maxLines: null,
-                                                          keyboardType:
-                                                              TextInputType
-                                                                  .multiline,
-                                                          textInputAction:
-                                                              TextInputAction
-                                                                  .send, // 👈 mostra “Send” su mobile
-                                                          decoration:
-                                                              const InputDecoration(
-                                                            hintText:
-                                                                'Scrivi qui…',
-                                                            border: InputBorder
-                                                                .none,
-                                                            isCollapsed: true,
-                                                          ),
-                                                          onChanged:   _updateLiveCost,
-                                                          onSubmitted: (value) =>
-                                                              _handleUserInput(
-                                                                  value), // ⇢ Enter invia
-                                                          /*onEditingComplete: () {
-    // impedisce l’andare‐a‐capo quando TextInputAction.send non è supportato
-    _handleUserInput(_controller.text);
-  },*/
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-
-                                                  // Divider sottile per separare input text e icone
-                                                  const Divider(
-                                                    height: 1,
-                                                    thickness: 1,
-                                                    color: Color(0xFFE0E0E0),
-                                                  ),
-
-                                                  // RIGA 2: Icone in basso (contesti, doc, media) + mic/freccia
-                                                  Padding(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 8.0,
-                                                        vertical: 0.0),
-                                                    child: Row(
-                                                      children: [
-                                                        // Icona contesti
-                                                        IconButton(
-                                                          icon: SvgPicture.network(
-                                                              'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element2.svg',
-                                                              width: 24,
-                                                              height: 24,
-                                                              color:
-                                                                  Colors.grey),
-                                                          tooltip: localizations
-                                                              .knowledgeBoxes,
-                                                          onPressed:
-                                                              _showContextDialog,
-                                                        ),
-                                                        // Icona doc (inattiva)
-                                                        IconButton(
-                                                          icon: SvgPicture.network(
-                                                              'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element7.svg',
-                                                              width: 24,
-                                                              height: 24,
-                                                              color:
-                                                                  Colors.grey),
-                                                          tooltip: localizations
-                                                              .upload_document,
-                                                          onPressed: () =>
-                                                              _uploadFileForChatAsync(
-                                                                  isMedia:
-                                                                      false),
-                                                        ),
-                                                        // Icona media (inattiva)
-                                                        IconButton(
-                                                          icon: SvgPicture.network(
-                                                              'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element8.svg',
-                                                              width: 24,
-                                                              height: 24,
-                                                              color:
-                                                                  Colors.grey),
-                                                          tooltip: localizations
-                                                              .upload_media,
-                                                          onPressed: () =>
-                                                              _uploadFileForChatAsync(
-                                                                  isMedia:
-                                                                      true),
-                                                        ),
-
-                                                        const Spacer(),
-/*────────────── QUI il numerino del costo (o spinner) ─────────────*/
-    _isCostLoading
-        ? const SizedBox(
-            width: 40, height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2))
-        : Text(
-            "\$${_liveCost.toStringAsFixed(4)}",
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
+                        ),
+                      )
+                    ])),
+              )
+            ],
           ),
-          const SizedBox(width: 8),  
-// ───────────────────────── pulsante finale ─────────────────────────
-                                                        _isStreaming
-                                                            // ① streaming in corso → STOP ▢
-                                                            ? IconButton(
-                                                                icon: const Icon(
-                                                                    Icons.stop,
-                                                                    size: 24),
-                                                                tooltip:
-                                                                    'Interrompi risposta',
-                                                                onPressed:
-                                                                    _stopStreaming,
-                                                              )
-                                                            // ② nessuno stream → logica originale (mic / send)
-                                                            : (_controller.text
-                                                                    .isEmpty
-                                                                ? IconButton(
-                                                                    icon: Icon(_isListening
-                                                                        ? Icons
-                                                                            .mic_off
-                                                                        : Icons
-                                                                            .mic),
-                                                                    tooltip:
-                                                                        localizations
-                                                                            .enable_mic,
-                                                                    onPressed:
-                                                                        _listen,
-                                                                  )
-                                                                : IconButton(
-                                                                    icon: const Icon(
-                                                                        Icons
-                                                                            .send),
-                                                                    tooltip:
-                                                                        localizations
-                                                                            .send_message,
-                                                                    onPressed: () =>
-                                                                        _handleUserInput(
-                                                                            _controller.text),
-                                                                  )),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                    ),
-                  )
-                ])),
-          )
-        ],
-      ),
-    );
+        ));
+  }
+
+  /// Riconfigura SEMPRE la chain con i contesti/model allo stato attuale.
+  /// • assicura la KB di chat           (→ _prepareChainForCurrentChat)
+  /// • chiama configureAndLoadChain     (→ nuovi ID)
+  /// • aggiorna stato + localStorage
+  /// • ricalcola la baseline dei costi
+  Future<void> _reconfigureAndLoadChain() async {
+    // evita corse concorrenti
+    if (_isChainLoading) {
+      while (_isChainLoading) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      return;
+    }
+
+    setState(() => _isChainLoading = true);
+    try {
+      // 1) KB esistente + chain “vuota” se serve
+      await _prepareChainForCurrentChat();
+
+      // 2) contesti effettivi (utente + KB chat) e modello
+      final effectiveRaw = _stripUserPrefixList(
+        buildRawContexts(
+          _selectedContexts,
+          chatKbPath: _chatKbPath,
+          chatKbHasDocs: chatKbHasIndexedDocs(
+            chatKbPath: _chatKbPath,
+            messages: messages,
+          ),
+        ),
+      );
+
+      final resp = await _withRetry(
+        () => _contextApiSdk.configureAndLoadChain(
+          widget.user.username,
+          widget.token.accessToken,
+          effectiveRaw,
+          _selectedModel,
+          toolSpecs: _toolSpecs,
+        ),
+        retries: _maxSendRetries,
+      );
+
+      setState(() {
+        _latestChainId = resp['load_result']?['chain_id'] as String?;
+        _latestConfigId = resp['config_result']?['config_id'] as String?;
+      });
+
+      // persistenza leggera
+      html.window.localStorage['latestChainId'] = _latestChainId ?? '';
+      html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
+
+      // baseline costi ricalcolata ad ogni turno
+      await _fetchInitialCost();
+    } finally {
+      setState(() => _isChainLoading = false);
+    }
   }
 
   Future<void> _deleteChat(int index) async {
@@ -4262,94 +4909,152 @@ void _applyChatVars(Map<String, dynamic> patch) {
       showSettings = false;
     });
 
-    await _prepareChainForCurrentChat(); // creerà una chain VUOTA
-    await _fetchInitialCost();
+    //await _prepareChainForCurrentChat(); // creerà una chain VUOTA
+    //await _fetchInitialCost();
+
+    // ↙️ qui forzi: niente eredità, usa forced default se c'è
+    await _restoreChainForCurrentChat(skipInheritance: true);
   }
 
-/// Carica i messaggi di `chatId`, riallinea la chain
-/// e ricalcola la baseline del costo.
-Future<void> _loadMessagesForChat(String chatId) async {
-  // 1. interrompi eventuale stream in corso e svuota cache widget
-  _cancelActiveStreamAndPersist();
-  _widgetCache.clear();
+  /// Carica i messaggi di `chatId`, riallinea la chain
+  /// e ricalcola la baseline del costo.
+  Future<void> _loadMessagesForChat(String chatId) async {
+    // 1. interrompi eventuale stream in corso e svuota cache widget
+    _cancelActiveStreamAndPersist();
+    _widgetCache.clear();
 
-  try {
-    /* ──────────────────────────────────────────────────────────────
+    try {
+      /* ──────────────────────────────────────────────────────────────
      * 2. recupero chat dal local‑state
      * ────────────────────────────────────────────────────────────── */
-    final chat = _chatHistory.firstWhere(
-      (c) => c['id'] == chatId,
-      orElse: () => null,
-    );
-    if (chat == null) {
-      debugPrint('[chat] Nessuna chat con ID $chatId');
-      return;
-    }
+      final chat = _chatHistory.firstWhere(
+        (c) => c['id'] == chatId,
+        orElse: () => null,
+      );
+      if (chat == null) {
+        debugPrint('[chat] Nessuna chat con ID $chatId');
+        return;
+      }
 
-    _chatKbPath     = chat['kb_path'] as String?;
-    _syncedMsgIds.clear();
+      _chatKbPath = chat['kb_path'] as String?;
+      _syncedMsgIds.clear();
 
-    /* ─────────────── messaggi ordinati cronologicamente ─────────── */
-    final List<dynamic> chatMessages = List<dynamic>.from(chat['messages'] ?? []);
-    chatMessages.sort((a, b) =>
-        DateTime.parse(a['createdAt']).compareTo(DateTime.parse(b['createdAt'])));
+      /* ─────────────── messaggi ordinati cronologicamente ─────────── */
+      final List<dynamic> chatMessages =
+          List<dynamic>.from(chat['messages'] ?? []);
+      chatMessages.sort((a, b) => DateTime.parse(a['createdAt'])
+          .compareTo(DateTime.parse(b['createdAt'])));
 
-    _chatVars = Map<String, dynamic>.from(chat['chatVars'] ?? {});
+      _chatVars = Map<String, dynamic>.from(chat['chatVars'] ?? {});
 
-    /* ────────────────────────────── setState UI ─────────────────── */
-    setState(() {
-      _activeChatIndex = _chatHistory.indexWhere((c) => c['id'] == chatId);
+      /* ────────────────────────────── setState UI ─────────────────── */
+      setState(() {
+        _activeChatIndex = _chatHistory.indexWhere((c) => c['id'] == chatId);
 
-      messages
-        ..clear()
-        ..addAll(chatMessages.map<Map<String, dynamic>>(
-          (m) => Map<String, dynamic>.from(m),
-        ));
+        messages
+          ..clear()
+          ..addAll(chatMessages.map<Map<String, dynamic>>(
+            (m) => Map<String, dynamic>.from(m),
+          ));
 
-      showKnowledgeBase = false;
-      showSettings      = false;
-    });
+        showKnowledgeBase = false;
+        showSettings = false;
 
-    /* ─────────── chain‑id / config‑id dal messaggio più recente ─── */
-    if (messages.isNotEmpty) {
-      final cfg = messages.last['agentConfig'] as Map<String, dynamic>?;
-      _latestChainId  = cfg?['chain_id'];
-      _latestConfigId = cfg?['config_id'];
-    } else {
-      _latestChainId  = null;
-      _latestConfigId = null;
-    }
+        /* ─────────── chain‑id / config‑id dal messaggio più recente ─── */
+        if (messages.isNotEmpty) {
+          final cfg = messages.last['agentConfig'] as Map<String, dynamic>?;
+          _latestChainId = cfg?['chain_id'];
+          _latestConfigId = cfg?['config_id'];
+        } else {
+          _latestChainId = null;
+          _latestConfigId = null;
+        }
+      });
 
-    /* ──────────────────────────────────────────────────────────────
+      await _restoreChainForCurrentChat(); // NEW
+
+      /* ──────────────────────────────────────────────────────────────
      * 3. assicura che la KB‑chat sia inclusa nella chain
      *    (attendi il completamento)
      * ────────────────────────────────────────────────────────────── */
-    await _ensureChainIncludesChatKb(chatId);
+      /// Rimuove il prefisso "<username>-" dai context formattati
+      String _stripUserPrefix(String ctx) {
+        final prefix = "${widget.user.username}-";
+        return ctx.startsWith(prefix) ? ctx.substring(prefix.length) : ctx;
+      }
 
-    /* ──────────────────────────────────────────────────────────────
+      await ensureChainIncludesChatKbPure(
+        chatHistory: _chatHistory.cast<Map<String, dynamic>>(), // 👈
+        chatId: chatId,
+        username: widget.user.username,
+        accessToken: widget.token.accessToken,
+        defaultModel: _defaultModel,
+        stripUserPrefix: _stripUserPrefix,
+        configureChain: (u, t, ctx, m) => _contextApiSdk.configureAndLoadChain(
+          u,
+          t,
+          ctx,
+          m,
+          toolSpecs: _toolSpecs,
+        ),
+        onVisibleChatChange: (chain, config) {
+          setState(() {
+            _latestChainId = chain;
+            _latestConfigId = config;
+          });
+        },
+        persistChatHistory: (history) {
+          html.window.localStorage['chatHistory'] =
+              jsonEncode({'chatHistory': history});
+        },
+      );
+
+      /* ──────────────────────────────────────────────────────────────
      * 4. ricalcola baseline costo per la nuova chat‑history
      *    (attendi la fine per avere _baseCost valorizzata)
      * ────────────────────────────────────────────────────────────── */
-    await _fetchInitialCost();      // spinner visibile in UI
-    _updateLiveCost("");            // reset preview
+      await _fetchInitialCost(); // spinner visibile in UI
+      _updateLiveCost(""); // reset preview
 
-    debugPrint('[chat] Caricata chat $chatId ‑ msg: ${messages.length}');
-  } catch (e, st) {
-    debugPrint('[chat] errore loadMessages: $e\n$st');
+      debugPrint('[chat] Caricata chat $chatId ‑ msg: ${messages.length}');
+    } catch (e, st) {
+      debugPrint('[chat] errore loadMessages: $e\n$st');
+    }
   }
-}
 
-  Future<void> _handleUserInput(String input) async {
+/*───────────────────────────────────────────────────────────*/
+/* Deep‑copy di _pendingInputImages                          */
+/*───────────────────────────────────────────────────────────*/
+  List<Map<String, dynamic>> _clonePendingImages() {
+    // jsonEncode/Decode è il modo più semplice e sicuro
+    return (jsonDecode(jsonEncode(_pendingInputImages)) as List)
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<void> _handleUserInput(
+    String input, {
+    String? sequenceId,
+    String  visibility = kVisNormal,
+    String? displayText,
+  }) async {
     if (input.isEmpty) return;
 
-    await _ensureChainReady();
+    if (_isSending || _isStreaming) return; // debounce
+    setState(() => _isSending = true);
 
-    // Make absolutely sure we have a chain.
-    //await _ensureDefaultChainConfigured();
-    print("************************");
-    print(_latestChainId);
-    print(_latestConfigId);
-    print("************************");
+    // ① copia PROFONDA delle immagini pending
+    final inputImages = _clonePendingImages();
+
+    try {
+    await _reconfigureAndLoadChain();          // ora ha retry “a cascata”
+  } catch (e) {
+    setState(() => _isSending = false);        // sblocca spinner
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Errore di configurazione: $e')),
+    );
+    return;                                    // abortisce l’invio
+  }
+
     // Determina il nome corrente della chat (se non esiste, il default è "New Chat")
     String currentChatName = "New Chat";
     if (_activeChatIndex != null && _chatHistory.isNotEmpty) {
@@ -4389,10 +5094,15 @@ Future<void> _loadMessagesForChat(String chatId) async {
         'id': userMessageId, // ID univoco del messaggio utente
         'role': 'user', // Ruolo dell'utente
         'content': input, // Contenuto del messaggio
+        kMsgVisibility : visibility,
+        if (displayText != null)
+         kMsgDisplayText : displayText,
         'createdAt': currentTime, // Timestamp
         'agentConfig': agentConfiguration, // Configurazione dell'agente
+        'sequenceId': sequenceId,
+        'input_images': inputImages
       });
-      
+      _retryCounts[assistantMessageId] = 0; // reset tentativi
       fullResponse = ""; // Reset della risposta completa
 
       // Aggiungi un placeholder per la risposta dell'assistente
@@ -4402,14 +5112,21 @@ Future<void> _loadMessagesForChat(String chatId) async {
         'content': '', // Placeholder per il contenuto
         'createdAt': DateTime.now().toIso8601String(), // Timestamp
         'agentConfig': agentConfiguration, // Configurazione dell'agente
+        'sequenceId': sequenceId
       });
+
+      _pendingInputImages.clear();
     });
-_updateLiveCost("");
+
+    _updateLiveCost("");
     // Pulisce il campo di input
     _controller.clear();
 
+    if (mounted) setState(() => _isSending = false);
+
     // Invia il messaggio all'API per ottenere la risposta
-    await _sendMessageToAPI(modifiedInput);
+
+    await _sendMessageToAPI(modifiedInput, assistantMessageId, inputImages);
 
     // Salva la conversazione con ID univoco per ogni messaggio
     _saveConversation(messages);
@@ -4462,7 +5179,14 @@ _updateLiveCost("");
 
       // assicura che la KB esista anche per le chat appena create
       if (_chatKbPath == null) {
-        _chatKbPath = await _ensureChatKb(chatId, chatName);
+        _chatKbPath = await ensureChatKb(
+          api: _contextApiSdk,
+          userName: widget.user.username,
+          accessToken: widget.token.accessToken,
+          chatId: chatId,
+          chatName: chatName,
+          currentKbPath: _chatKbPath, // passa quello attuale (può essere null)
+        );
       }
 
       // ▸ 2. sincronizza tutti i messaggi non ancora presenti nella KB
@@ -4617,12 +5341,14 @@ _updateLiveCost("");
     // Carichiamo i contesti (se serve farlo qui) ...
     _loadAvailableContexts();
 
+    final cleaned = _stripUserPrefixList(_selectedContexts);
+
     // Richiamiamo il dialog esterno
     showSelectContextDialog(
       chatHistory: _chatHistory,
       context: context,
       availableContexts: _availableContexts,
-      initialSelectedContexts: _selectedContexts,
+      initialSelectedContexts: cleaned,
       initialModel: _selectedModel,
       onConfirm: (List<String> newContexts, String newModel) async {
         setState(() {
@@ -4630,8 +5356,17 @@ _updateLiveCost("");
           _selectedModel = newModel;
         });
         // E se vuoi, chiami la funzione set_context
-        await set_context(_rawContextsForChain(), _selectedModel);
-        await _fetchInitialCost();          // unica call al backend
+        await set_context(
+            buildRawContexts(
+              _selectedContexts,
+              chatKbPath: _chatKbPath,
+              chatKbHasDocs: chatKbHasIndexedDocs(
+                chatKbPath: _chatKbPath,
+                messages: messages,
+              ),
+            ),
+            _selectedModel);
+        await _fetchInitialCost(); // unica call al backend
       },
     );
   }
@@ -4653,15 +5388,26 @@ _updateLiveCost("");
 
       // 2.  lista “effettiva” da passare al backend
       //     (= contesti scelti  +  KB-chat  senza doppi)
-      final List<String> effectiveRaw = _rawContextsForChain();
+      final List<String> effectiveRaw = buildRawContexts(
+        _selectedContexts,
+        chatKbPath: _chatKbPath,
+        chatKbHasDocs: chatKbHasIndexedDocs(
+          chatKbPath: _chatKbPath,
+          messages: messages,
+        ),
+      );
 
       // 3.  chiama l’SDK
-      final response = await _contextApiSdk.configureAndLoadChain(
+final response = await _withRetry(
+  () => _contextApiSdk.configureAndLoadChain(
         widget.user.username,
         widget.token.accessToken,
         effectiveRaw,
         model,
-      );
+        toolSpecs: _toolSpecs,
+      ),
+  retries: _maxSendRetries,              // già = 5
+);
       debugPrint('Chain configurata su: $effectiveRaw');
 
       // 4.  estrae gli ID restituiti
@@ -4681,234 +5427,6 @@ _updateLiveCost("");
     } catch (e, st) {
       debugPrint('❌  set_context error: $e\n$st');
     }
-  }
-
-  // Sezione impostazioni TTS e customizzazione grafica nella barra laterale
-  Widget _buildSettingsSection() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Container(
-        width: double
-            .infinity, // Imposta la larghezza per occupare tutto lo spazio disponibile
-        decoration: BoxDecoration(
-          color: Colors.white, // Colore di sfondo bianco
-          borderRadius: BorderRadius.circular(8.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 6.0,
-              spreadRadius: 1.0,
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Impostazioni Text-to-Speech",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            SizedBox(height: 16.0),
-            // Dropdown per la lingua
-            Text("Seleziona lingua"),
-            DropdownButton<String>(
-              value: _selectedLanguage,
-              items: [
-                DropdownMenuItem(
-                  value: "en-US",
-                  child: Text("English (US)"),
-                ),
-                DropdownMenuItem(
-                  value: "it-IT",
-                  child: Text("Italian"),
-                ),
-              ],
-              onChanged: (value) {
-                setState(() {
-                  _selectedLanguage = value!;
-                });
-              },
-            ),
-            SizedBox(height: 16.0),
-            // Slider per la velocità di lettura
-            Text("Velocità lettura: ${_speechRate.toStringAsFixed(2)}"),
-            Slider(
-              value: _speechRate,
-              min: 0.1,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _speechRate = value;
-                });
-              },
-            ),
-            // Slider per il pitch
-            Text("Intonazione (Pitch): ${_pitch.toStringAsFixed(1)}"),
-            Slider(
-              value: _pitch,
-              min: 0.5,
-              max: 2.0,
-              onChanged: (value) {
-                setState(() {
-                  _pitch = value;
-                });
-              },
-            ),
-            // Slider per il volume
-            Text("Volume: ${_volume.toStringAsFixed(2)}"),
-            Slider(
-              value: _volume,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _volume = value;
-                });
-              },
-            ),
-            // Slider per la pausa tra le frasi
-            Text(
-                "Pausa tra frasi: ${_pauseBetweenSentences.toStringAsFixed(1)} sec"),
-            Slider(
-              value: _pauseBetweenSentences,
-              min: 0.0,
-              max: 2.0,
-              onChanged: (value) {
-                setState(() {
-                  _pauseBetweenSentences = value;
-                });
-              },
-            ),
-            SizedBox(height: 16.0),
-            Text("Personalizzazione grafica",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            // Colore del messaggio dell'utente
-            Text("Colore messaggio utente"),
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                icon: Icon(Icons.color_lens, color: _userMessageColor),
-                onPressed: () {
-                  _showColorPickerDialog(_userMessageColor, (color) {
-                    _userMessageColor = color;
-                  });
-                },
-              ),
-            ),
-            // Opacità messaggio utente
-            Slider(
-              value: _userMessageOpacity,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _userMessageOpacity = value;
-                });
-              },
-            ),
-            SizedBox(height: 16.0),
-            // Colore del messaggio dell'assistente
-            Text("Colore messaggio assistente"),
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                icon: Icon(Icons.color_lens, color: _assistantMessageColor),
-                onPressed: () {
-                  _showColorPickerDialog(_assistantMessageColor, (color) {
-                    _assistantMessageColor = color;
-                  });
-                },
-              ),
-            ),
-            // Opacità messaggio assistente
-            Slider(
-              value: _assistantMessageOpacity,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _assistantMessageOpacity = value;
-                });
-              },
-            ),
-            SizedBox(height: 16.0),
-            // Colore dello sfondo della chat
-            Text("Colore sfondo chat"),
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                icon: Icon(Icons.color_lens, color: _chatBackgroundColor),
-                onPressed: () {
-                  _showColorPickerDialog(_chatBackgroundColor, (color) {
-                    _chatBackgroundColor = color;
-                  });
-                },
-              ),
-            ),
-            // Opacità sfondo chat
-            Slider(
-              value: _chatBackgroundOpacity,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _chatBackgroundOpacity = value;
-                });
-              },
-            ),
-            SizedBox(height: 16.0),
-            // Colore avatar
-            Text("Colore avatar"),
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                icon: Icon(Icons.color_lens, color: _avatarBackgroundColor),
-                onPressed: () {
-                  _showColorPickerDialog(_avatarBackgroundColor, (color) {
-                    _avatarBackgroundColor = color;
-                  });
-                },
-              ),
-            ),
-            // Opacità avatar
-            Slider(
-              value: _avatarBackgroundOpacity,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _avatarBackgroundOpacity = value;
-                });
-              },
-            ),
-            SizedBox(height: 16.0),
-            // Colore icona avatar
-            Text("Colore icona avatar"),
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                icon: Icon(Icons.color_lens, color: _avatarIconColor),
-                onPressed: () {
-                  _showColorPickerDialog(_avatarIconColor, (color) {
-                    _avatarIconColor = color;
-                  });
-                },
-              ),
-            ),
-            // Opacità icona avatar
-            Slider(
-              value: _avatarIconOpacity,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) {
-                setState(() {
-                  _avatarIconOpacity = value;
-                });
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   // Funzione per iniziare o fermare l'ascolto
@@ -4948,14 +5466,6 @@ _updateLiveCost("");
     }
   }
 
-  // Funzione per fermare il Text-to-Speech
-  Future<void> _stopSpeaking() async {
-    await _flutterTts.stop();
-    setState(() {
-      _isPlaying = false;
-    });
-  }
-
   // Funzione per copiare il messaggio negli appunti
   void _copyToClipboard(String message) {
     final localizations = LocalizationProvider.of(context);
@@ -4965,7 +5475,45 @@ _updateLiveCost("");
     );
   }
 
-  Future<void> _sendMessageToAPI(String input) async {
+  /// Restituisce il testo del messaggio con i placeholder dei widget
+  /// sostituiti dalla stringa < TYPE='WIDGET' … > completa.
+  ///
+  /// • Rimuove eventuali "[WIDGET_SPINNER]" e "▌".
+  /// • Rimuove la chiave `is_first_time` dal JSON prima di serializzare.
+  String _contentWithWidgets(Map<String, dynamic> msg) {
+    String out = (msg['content'] as String? ?? '')
+        .replaceAll("[WIDGET_SPINNER]", "")
+        .replaceAll("▌", "");
+
+    final List<dynamic>? wList = msg['widgetDataList'] as List?;
+    if (wList == null || wList.isEmpty) return out;
+
+    for (final dynamic w in wList) {
+      if (w is! Map) continue;
+
+      final placeholder = w['placeholder'] as String? ?? '';
+      final widgetId = w['widgetId'] as String? ?? 'UnknownWidget';
+      final Map<String, dynamic> jsonData =
+          Map<String, dynamic>.from(w['jsonData'] ?? const {});
+
+      jsonData.remove('is_first_time'); // pulizia
+
+      final block = "< TYPE='WIDGET' WIDGET_ID='$widgetId' | "
+          "${jsonEncode(jsonData)} | "
+          "TYPE='WIDGET' WIDGET_ID='$widgetId' >";
+
+      out = out.replaceAll(placeholder, block);
+    }
+    return out;
+  }
+
+  Future<void> _sendMessageToAPI(
+    String input,
+    String assistantMsgId,
+    List<Map<String, dynamic>> inputImages,
+  ) async {
+    final int currentRetry = _retryCounts[assistantMsgId] ?? 0;
+
     if (_nlpApiUrl == null) {
       await _loadConfig(); // Assicurati che l'URL sia caricato
     }
@@ -4977,16 +5525,70 @@ _updateLiveCost("");
         ? _latestChainId!
         : 'default_agent_with_tools';
 
-    // Configurazione dell'agente
-    final agentConfiguration = {
-      'model': _selectedModel, // Modello selezionato
-      'contexts': _formattedContextsForAgent(), // Contesti selezionati
-      'chain_id': chainIdToUse, // Usa la chain ID dal backend (oppure fallback)
-      'config_id': _latestConfigId, // Memorizza anche la config ID
-    };
+    // ① tronco sempre gli ultimi due messaggi
+    final List<Map<String, dynamic>> historyTruncated = messages.length > 2
+        ? messages.sublist(0, messages.length - 2)
+        : <Map<String, dynamic>>[];
+
+// Trasforma la chat history nel formato multimodale:
+// ogni messaggio diventa { role: ..., parts: [ {type,text}, {type,image_url}, … ] }
+    final transformedChatHistory = historyTruncated.map((message) {
+      // 1) Ruolo del messaggio
+      final String role = message['role'] as String;
+
+      // 2) Testo puro del messaggio (già con i widget serializzati se c’erano)
+      final content = _contentWithWidgets(message);
+
+      // 3) Lista di parts: parte sempre con il testo
+      final List<Map<String, dynamic>> parts = [
+        {
+          "type": "text",
+          "text": content,
+        }
+      ];
+
+// 4) Se ci sono immagini già normalizzate, aggiungile ai parts
+      if (message.containsKey('input_images') &&
+          message['input_images'] is List) {
+        final List<dynamic> imgs = message['input_images'] as List;
+
+        for (final dynamic item in imgs) {
+          if (item is Map<String, dynamic>) {
+            // Caso NUOVO: già nel formato
+            // {
+            //   "type": "image_url",
+            //   "image_url": { "url": "...", "detail": "auto" }
+            // }
+            if (item['type'] == 'image_url' && item['image_url'] is Map) {
+              parts.add(item);
+              continue;
+            }
+
+            // Caso VECCHIO: { "url": "...", "detail": "auto" }  → normalizza
+            /*if (item.containsKey('url')) {
+        parts.add({
+          "type": "image_url",
+          "image_url": {
+            "url": item['url'],
+            "detail": item['detail'] ?? 'auto',
+          },
+        });
+        continue;
+      }*/
+          }
+          // Se arriva qualcosa di non valido lo ignoro (o logga a debug)
+        }
+      }
+
+      // 5) Restituisci l’oggetto multimodale
+      return {
+        "role": role,
+        "parts": parts,
+      };
+    }).toList();
 
 // Trasforma la chat history sostituendo i placeholder dei widget con i JSON reali
-    final transformedChatHistory = messages.map((message) {
+    final transformedChatHistoryLegacy = historyTruncated.map((message) {
       String content = message['content'] as String;
       if (message.containsKey('widgetDataList')) {
         final List widgetList = message['widgetDataList'];
@@ -5025,7 +5627,14 @@ _updateLiveCost("");
     // Prepara il payload per l'API
     final payload = jsonEncode({
       "chain_id": chainIdToUse,
-      "query": {"input": input, "chat_history": transformedChatHistory},
+      //"query": {"input": input, "chat_history": transformedChatHistoryLegacy},
+      "input_text": input,
+      "input_images": inputImages,
+      /*[
+        {"type": "image_url", 
+        "image_url": {"url": 'https://static.tecnichenuove.it/animalidacompagnia/2024/04/gattino-che-miagola.jpg',
+         "detail": "auto"}}],*/
+      "chat_history": transformedChatHistory,
       "inference_kwargs": {}
     });
 
@@ -5100,24 +5709,29 @@ _updateLiveCost("");
 
 // ⬇︎ add these globals near the other stream‑parser state variables -------------
 
+// ────────────────────  TOOL-EVENT PARSER STATE ────────────────────
       bool insideWidgetBlock = false;
       bool seenEndMarker = false;
-      String? currentWidgetId;               // ID del widget esterno in parsing
-      String currentEndMarker = "";          // marker di chiusura su misura
-      int endLen = 0;                        // lunghezza del marker dinamico
-      final List<int> _ringEnd = <int>[];    // buffer circolare per comparison
+      String? currentWidgetId; // ID del widget esterno in parsing
+      String currentEndMarker = ""; // marker di chiusura su misura
+      int endLen = 0; // lunghezza del marker dinamico
+      final List<int> _ringEnd = <int>[]; // buffer circolare per comparison
+
+      /// run_id per cui è già stata creata la card-spinner “provvisoria”
+      final Set<String> _inFlightTools = <String>{};
+
       /// Consuma il chunk e intercetta TUTTI gli eventi tool.{start|end}.
       /// Ritorna `true` se *almeno un carattere* apparteneva ad un JSON-evento
       /// (così il chiamante non lo passerà a `processChunk`).
       bool _maybeHandleToolEvent(String chunk) {
         bool somethingHandled = false;
 
+        /*─────────────────────────────────────────────────────────*/
         void _feed(int codeUnit) {
           final String c = String.fromCharCode(codeUnit);
-
           _toolBuf.write(c);
 
-          // ── gestione escape & stringhe JSON
+          /*── 1. escape & stringhe JSON ─────────────────────────*/
           if (_escapeNextChar) {
             _escapeNextChar = false;
             return;
@@ -5126,51 +5740,53 @@ _updateLiveCost("");
             _escapeNextChar = true;
             return;
           }
-          if (c == '"') {
-            _inQuotes = !_inQuotes;
-          }
+          if (c == '"') _inQuotes = !_inQuotes;
           if (_inQuotes) return;
 
-          // ── bilanciamento parentesi graffe
+          /*── 2. bilanciamento graffe ───────────────────────────*/
           if (c == '{') _toolDepth++;
           if (c == '}') _toolDepth--;
 
-          // JSON completo quando la depth torna a 0
+          /*── 3. JSON completo  (_toolDepth == 0) ───────────────*/
           if (_toolDepth == 0) {
             final String rawJson = _toolBuf.toString().trim();
-            _toolBuf.clear(); // reset buffer per il prossimo evento
+            _toolBuf.clear(); // reset buffer
 
             if (rawJson.isEmpty) return;
-
-            // prova di parse
             Map<String, dynamic>? evt;
             try {
               evt = jsonDecode(rawJson) as Map<String, dynamic>;
             } catch (_) {
-              return; // non era un JSON valido
+              return; // non era JSON valido
             }
+            if (evt == null || evt['event'] == null) return;
 
-            if (evt == null || !evt.containsKey('event')) return;
-
-            somethingHandled = true; // 👈 almeno un carattere gestito
+            somethingHandled = true; // → gestito
 
             final String runId = evt['run_id'] as String;
-            final String name = evt['name'] as String;
+            final String name = evt['name'] as String? ?? 'tool';
 
             switch (evt['event']) {
+              /*──────────── on_tool_start ────────────*/
               case 'on_tool_start':
-                final placeholder = "[TOOL_PLACEHOLDER_$runId]";
+                // stub già creato? esci
+                if (_inFlightTools.contains(runId)) break;
+
+                _inFlightTools.add(runId);
+
+                final String placeholder = "[TOOL_PLACEHOLDER_$runId]";
+
                 _toolEvents[runId] = {
                   'name': name,
-                  'input': evt['data']['input'],
+                  'input': evt['data']?['input'] ?? {},
                   'isRunning': true,
                   'placeholder': placeholder,
                 };
 
-                // inserisci placeholder nel testo visibile
+                // ① placeholder nel testo visibile
                 displayOutput.write(placeholder);
 
-                // e relativa card
+                // ② card provvisoria
                 (messages.last['widgetDataList'] ??= <dynamic>[]).add({
                   "_id": runId,
                   "widgetId": "ToolEventWidget",
@@ -5178,18 +5794,20 @@ _updateLiveCost("");
                   "placeholder": placeholder,
                 });
 
+                // ③ refresh
                 setState(
                     () => messages.last['content'] = displayOutput.toString());
                 break;
 
+              /*──────────── on_tool_end ──────────────*/
               case 'on_tool_end':
                 final existing = _toolEvents[runId];
                 if (existing == null) break;
 
-                existing['output'] = evt['data']['output'];
+                existing['output'] = evt['data']?['output'];
                 existing['isRunning'] = false;
 
-                // forza rebuild della card
+                // invalida cache → ricrea la card con output
                 _widgetCache.remove(runId);
                 setState(() {});
                 break;
@@ -5197,7 +5815,7 @@ _updateLiveCost("");
           }
         }
 
-        // ── feed carattere per carattere
+        /*── 4. feed carattere per carattere ─────────────────────*/
         for (final cu in chunk.codeUnits) {
           _feed(cu);
         }
@@ -5269,51 +5887,56 @@ _updateLiveCost("");
             continue; // fine ramo "fuori" – passa al prossimo carattere
           }
 
-       // ─────────────────────────────────────────────────────────────
+          // ─────────────────────────────────────────────────────────────
 // 2) siamo DENTRO un blocco widget (aperto da startPattern)
 // ─────────────────────────────────────────────────────────────
-widgetBuffer.write(c);
+          widgetBuffer.write(c);
 
 // a) se non ho ancora l'ID del widget esterno, lo estraggo ora
-if (currentWidgetId == null) {
-  final m = RegExp(r"WIDGET_ID='([^']+)'")
-      .firstMatch(widgetBuffer.toString());
-  if (m != null) {
-    currentWidgetId = m.group(1);
-    currentEndMarker =
-      "| TYPE='WIDGET' WIDGET_ID='$currentWidgetId'";
-    endLen = currentEndMarker.length;
-  }
-}
+          if (currentWidgetId == null) {
+            final m = RegExp(r"WIDGET_ID='([^']+)'")
+                .firstMatch(widgetBuffer.toString());
+            if (m != null) {
+              currentWidgetId = m.group(1);
+              currentEndMarker = "| TYPE='WIDGET' WIDGET_ID='$currentWidgetId'";
+              endLen = currentEndMarker.length;
+            }
+          }
 
 // b) aggiorno il buffer circolare per cercare il mio endMarker
-  // b) se widgetBuffer termina con "<endMarker> >", abbiamo chiusura
-  final fullBuf = widgetBuffer.toString();
-  if (!seenEndMarker &&
-      currentWidgetId != null &&
-      fullBuf.endsWith("$currentEndMarker >")) {
-    seenEndMarker = true;
-  }
+          // b) se widgetBuffer termina con "<endMarker> >", abbiamo chiusura
+          final fullBuf = widgetBuffer.toString();
+          if (!seenEndMarker &&
+              currentWidgetId != null &&
+              fullBuf.endsWith("$currentEndMarker >")) {
+            seenEndMarker = true;
+          }
 
 // c) chiudo il blocco solo quando vedo il mio endMarker + '>'
-if (seenEndMarker && c == '>') {
-  // rimuovo lo spinner
-  final String withoutSpin = displayOutput
-      .toString()
-      .replaceFirst(spinnerPlaceholder, "");
-  displayOutput
-    ..clear()
-    ..write(withoutSpin);
+          if (seenEndMarker && c == '>') {
+            // rimuovo lo spinner
+            final String withoutSpin =
+                displayOutput.toString().replaceFirst(spinnerPlaceholder, "");
+            displayOutput
+              ..clear()
+              ..write(withoutSpin);
 
-  // finalize: converto il buffer in widget esterno
-  final String placeholder =
-    _finalizeWidgetBlock(widgetBuffer.toString());
-  displayOutput.write(placeholder);
+            // finalize: converto il buffer in widget esterno
+            final String placeholder =
+                _finalizeWidgetBlock(widgetBuffer.toString());
+            displayOutput.write(placeholder);
+
+// elimina lo spinner e la sua entry nella widgetDataList
+            final lastMsg = messages.last;
+            displayOutput.write('');
+            (lastMsg['widgetDataList'] as List)
+                ?.removeWhere((w) => w['widgetId'] == 'SpinnerPlaceholder');
+            _widgetCache.removeWhere((id, _) => id.startsWith('SpinnerFake_'));
 
             // 3) POPOLA IMMEDIATAMENTE widgetDataList (solo esterno)
             final rawJson = widgetBuffer
                 .toString()
-                .split('|')[1]  // fra le due barre verticali
+                .split('|')[1] // fra le due barre verticali
                 .trim();
             Map<String, dynamic> widgetJson;
             try {
@@ -5322,7 +5945,7 @@ if (seenEndMarker && c == '>') {
               widgetJson = <String, dynamic>{};
             }
             final widgetUniqueId = uuid.v4();
-            final lastMsg = messages.last;
+            //final lastMsg = messages.last;
             (lastMsg['widgetDataList'] ??= <dynamic>[]).add({
               "_id": widgetUniqueId,
               "widgetId": currentWidgetId!,
@@ -5330,14 +5953,13 @@ if (seenEndMarker && c == '>') {
               "placeholder": placeholder,
             });
 
-  // reset parser state
-  insideWidgetBlock = false;
-  seenEndMarker = false;
-  currentWidgetId = null;
-  currentEndMarker = "";
-  _ringEnd.clear();
-}
-
+            // reset parser state
+            insideWidgetBlock = false;
+            seenEndMarker = false;
+            currentWidgetId = null;
+            currentEndMarker = "";
+            _ringEnd.clear();
+          }
         }
 
         // ---------------------------------------------------------------------------
@@ -5371,15 +5993,15 @@ if (seenEndMarker && c == '>') {
             readChunk();
           } else {
             // ─── FINE STREAMING – chiusura semplice ───────────────────────
-            final generatedTok = _estimateTokens(fullOutput.toString());   // F‑4
-_advanceBaseline(input, generatedTok);
+            final generatedTok = _estimateTokens(fullOutput.toString()); // F‑4
+            _advanceBaseline(input, generatedTok);
             setState(() {
               final msg = messages.last;
               // 1) rimuovo solo lo spinner textuale
               const String spinnerPh = "[WIDGET_SPINNER]";
               msg['content'] =
                   displayOutput.toString().replaceFirst(spinnerPh, "");
-              // 2) NON rifaccio _parsePotentialWidgets: 
+              // 2) NON rifaccio _parsePotentialWidgets:
               //    widgetDataList è già popolato dentro processChunk
             });
 
@@ -5394,28 +6016,62 @@ _advanceBaseline(input, generatedTok);
             _streamReader = null;
             _abortController = null;
           }
-        }).catchError((error) {
-          // Errore durante la lettura del chunk
+        }).catchError((error) async {
+          // 1️⃣ log + placeholder d’errore
           print('Errore durante la lettura del chunk: $error');
-          setState(() {
-            messages[messages.length - 1]['content'] = 'Errore: $error';
-          });
-          // 🔻 STOP pulsante solo *qui*
-          setState(() => _isStreaming = false);
-          _streamReader = null;
-          _abortController = null;
+
+          final idx = messages.indexWhere((m) => m['id'] == assistantMsgId);
+          if (idx != -1) {
+            setState(() => messages[idx]['content'] = 'Errore: $error');
+          }
+
+          // 2️⃣ chiudi in modo CLEAN lo streaming corrente
+          setState(() => _isStreaming = false); // ri‑abilita i controlli UI
+          _streamReader = null; // libera il reader JS
+          _abortController = null; // chiude la fetch
+
+          // 3️⃣ tenta di rigenerare la risposta (max 5 volte)
+          await _retrySendMessage(
+              input, assistantMsgId, currentRetry, inputImages);
         });
       }
 
       // Avvia la lettura dei chunk
       readChunk();
     } catch (e) {
-      // Gestione errori fetch
+      // Errore PRIMA che lo stream inizi (o in fetch)
       print('Errore durante il fetch dei dati: $e');
-      setState(() {
-        messages[messages.length - 1]['content'] = 'Errore: $e';
-      });
+
+      final idx = messages.indexWhere((m) => m['id'] == assistantMsgId);
+      if (idx != -1) {
+        // NEW
+
+        setState(() => messages[idx]['content'] = 'Errore: $e');
+      }
+
+      // riprova finché non superi il limite maxRetry
+      await _retrySendMessage(input, assistantMsgId, currentRetry, inputImages);
     }
+  }
+
+  Future<void> _retrySendMessage(String originalInput, String assistantMsgId,
+      int previousRetry, List<Map<String, dynamic>> inputImages) async {
+    if (previousRetry + 1 >= _maxRetries) return; // esauriti i tentativi
+
+    _retryCounts[assistantMsgId] = previousRetry + 1;
+
+    // sostituisci l’errore con lo spinner visivo
+    setState(() {
+      final idx = messages.indexWhere((m) => m['id'] == assistantMsgId);
+      if (idx != -1) messages[idx]['content'] = "[WIDGET_SPINNER]";
+      _isStreaming = false; // reset stato UI
+    });
+
+    // piccolo delay per evitare loop troppo rapidi
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // riprova
+    await _sendMessageToAPI(originalInput, assistantMsgId, inputImages);
   }
 
   Uint8List _convertJSArrayBufferToDartUint8List(dynamic jsArrayBuffer) {
@@ -5479,6 +6135,156 @@ class NButtonWidget extends StatelessWidget {
           child: Text(btn["label"] ?? "Senza etichetta"),
         );
       }).toList(),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+//  _SequenceCard  –  super‑messaggio che raggruppa la sequenza
+//  PATCH 2025‑07‑24:
+//    • _expandedIdx   → sempre sull’ultimo step
+//    • niente PageStorageKey  (usiamo ValueKey che cambia a ogni rebuild)
+// ────────────────────────────────────────────────────────────────────
+class _SequenceCard extends StatefulWidget {
+  const _SequenceCard({
+    Key? key,
+    required this.seqMsg,
+    required this.containerWidth,
+    required this.buildMixedContent,
+  }) : super(key: key);
+
+  final Map<String, dynamic> seqMsg;
+  final double containerWidth;
+  final Widget Function(Map<String, dynamic>) buildMixedContent;
+
+  @override
+  State<_SequenceCard> createState() => _SequenceCardState();
+}
+
+class _SequenceCardState extends State<_SequenceCard> {
+  late List<Map<String, Map<String, dynamic>>> _steps;
+  late int _expandedIdx; // indice aperto
+
+  /*──────── init ───────────────*/
+  @override
+  void initState() {
+    super.initState();
+    _rebuildSteps(); // 1ª inizializzazione
+  }
+
+  /*──────── on widget‑update ────*/
+  @override
+  void didUpdateWidget(covariant _SequenceCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final oldLen = _steps.length;
+    _rebuildSteps(); // riallinea sempre
+
+    // nuovo step arrivato → apri l’ultimo
+    if (_steps.length > oldLen) _expandedIdx = _steps.length - 1;
+    // nessun setState: il framework ricostruisce comunque dopo didUpdateWidget
+  }
+
+  /*──────── helper ─────────────*/
+  void _rebuildSteps() {
+    _steps =
+        List<Map<String, Map<String, dynamic>>>.from(widget.seqMsg['steps']);
+
+    // ❶  sempre e comunque sull’ultimo
+    _expandedIdx = _steps.isEmpty ? 0 : _steps.length - 1;
+  }
+
+  /*──────── build ──────────────*/
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: widget.containerWidth,
+              minWidth: 200,
+            ),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 4,
+                    offset: Offset(2, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  /*──────── intestazione ─────────*/
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: Colors.transparent,
+                        child: assistantAvatar,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('Sequenza automatica',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  /*──────── elenco step ──────────*/
+                  ..._steps.asMap().entries.map((e) {
+                    final idx = e.key;
+                    final instr = e.value['instruction']!;
+                    final resp = e.value['response']!;
+
+                    return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Theme(
+                          data: Theme.of(context)
+                              .copyWith(dividerColor: Colors.transparent),
+                          child: ExpansionTile(
+                            // 👇 ValueKey ➔ forza la ricreazione se cambia lunghezza
+                            key: ValueKey(
+                                'seq_${widget.seqMsg['sequenceId']}_${idx}_${_steps.length}'),
+                            maintainState: true,
+                            initiallyExpanded: idx == _expandedIdx,
+                            onExpansionChanged: (open) {
+                              if (open) setState(() => _expandedIdx = idx);
+                            },
+                            tilePadding:
+                                const EdgeInsets.symmetric(horizontal: 12),
+                            childrenPadding:
+                                const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            title: Text(
+                              '${idx + 1}. ${instr['content']}',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            children: [
+                              // delega al builder esterno
+                              widget.buildMixedContent(resp),
+                            ],
+                          ),
+                        ));
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

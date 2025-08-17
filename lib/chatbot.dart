@@ -2343,8 +2343,8 @@ void clearUserInputPrefix() => _userInputPrefix = '';
         "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
         "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://127.0.0.1:8777",
-        //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        "chatbot_nlp_api": "http://127.0.0.1:8777"
+        "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+        //"chatbot_nlp_api": "http://127.0.0.1:8777"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {

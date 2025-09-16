@@ -567,6 +567,7 @@ class ChatBotPage extends StatefulWidget {
   final bool hasSidebar; // true = sidebar presente
   final double sidebarStartMinWidth; // larghezza iniziale se presente
   final double sidebarStartMaxWidth; // larghezza iniziale se presente
+  final bool showEmptyChatPlaceholder;
   final bool showUserMenu; // mostra avatar + menu in top-bar
   final bool showTopBarLogo; // logo nella top-bar
   final bool showSidebarLogo; // logo nella sidebar (se esiste)
@@ -597,6 +598,7 @@ class ChatBotPage extends StatefulWidget {
     this.hasSidebar = true, // ⇦ DEFAULT
     this.sidebarStartMinWidth = 300.0, // ⇦ DEFAULT
     this.sidebarStartMaxWidth = 300.0, // ⇦ DEFAULT
+    this.showEmptyChatPlaceholder = true,
     this.showUserMenu = true, // ⇦ DEFAULT
     this.showTopBarLogo = true, // ⇦ DEFAULT
     this.showSidebarLogo = true, // ⇦ DEFAULT
@@ -870,6 +872,12 @@ Future<void> downloadFileByName(String fileName) async {
 
 // Streaming in corso?
   bool _isStreaming = false;
+
+  // ──────────────────────────────────────────────────────────────
+//  PUBLIC API – stato dello stream
+//  Accessible via  chatKey.currentState?.isAssistantStreaming
+// ──────────────────────────────────────────────────────────────
+bool get isAssistantStreaming => _isStreaming;
 // ─────────────────────────────────────────────────────────────
 //  cost‑estimate  (widget ChatBotPageState)
 // ─────────────────────────────────────────────────────────────
@@ -959,7 +967,6 @@ Future<void> downloadFileByName(String fileName) async {
     _liveCost = _baseCost!.costTotalUsd;
     setState(() {}); // refresh UI
   }
-
 
 // Riferimenti per cancellare lo stream
   dynamic _streamReader; // il reader JS
@@ -1414,6 +1421,14 @@ void setDefaultChain({
 
     // 3) chat nuova / nessun chainId -> usa prima la forced default
     if (chainIdCandidate == null || chainIdCandidate.isEmpty) {
+
+            final List<String> ctxs =
+          List<String>.from(_defaultChainConfig!['contexts'] ?? const []);
+      final String mdl = _defaultChainConfig?['model_name'] ?? _defaultModel;
+      final String sysMsg = _defaultChainConfig?["system_message"];
+      final List<Map<String, dynamic>> srvrTls =
+          _defaultChainConfig?["custom_server_tools"];
+
       // tenta la chain forzata
       await _applyForcedDefaultChainIfNeeded();
       if (_latestChainId?.isNotEmpty == true) {
@@ -1423,10 +1438,10 @@ void setDefaultChain({
 
       // fallback vecchio comportamento (crea KB ecc.)
       await _prepareChainForCurrentChat();
-      _selectedModel =
-          _selectedModel.isNotEmpty ? _selectedModel : _defaultModel;
+      /*_selectedModel =
+          _selectedModel.isNotEmpty ? _selectedModel : _defaultModel;*/
 
-      final effectiveRaw = _stripUserPrefixList(
+      /*final effectiveRaw = _stripUserPrefixList(
         buildRawContexts(
           _selectedContexts,
           chatKbPath: _chatKbPath,
@@ -1435,16 +1450,16 @@ void setDefaultChain({
             messages: messages,
           ),
         ),
-      );
+      );*/
 
 
       final resp = await _contextApiSdk.configureAndLoadChain(
         widget.user.username,
         widget.token.accessToken,
-        effectiveRaw,
-        _defaultChainConfig?["model_name"],
-        systemMessageContent: _defaultChainConfig?["system_message_content"],
-        customServerTools: _defaultChainConfig?["custom_server_tools"],
+        ctxs,
+        mdl,
+        systemMessageContent: sysMsg,
+        customServerTools: srvrTls,
         toolSpecs: _toolSpecs,
       );
 
@@ -1585,6 +1600,18 @@ void setDefaultChain({
   ///   }
   /// Scansione lineare di `src`: mantiene l’ordine e
   /// inserisce la super-sequenza esattamente dove è nata.
+  /// 
+  // Dentro ChatBotPageState
+String _userInputPrefix = '';
+
+/// Imposta/aggiorna il prefisso da pre‑appendere a TUTTI i prossimi input utente
+void setUserInputPrefix(String prefix) {
+  _userInputPrefix = prefix.trim();
+}
+
+/// Cancella il prefisso
+void clearUserInputPrefix() => _userInputPrefix = '';
+
   List<Map<String, dynamic>> _mergeSequences(List<Map<String, dynamic>> src) {
     final out = <Map<String, dynamic>>[]; // output finale
     final seen = <String>{}; // sequenceId già emessi
@@ -2316,8 +2343,8 @@ void setDefaultChain({
         "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
         "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://127.0.0.1:8777",
-        //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        "chatbot_nlp_api": "http://127.0.0.1:8777"
+        "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+        //"chatbot_nlp_api": "http://127.0.0.1:8777"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {
@@ -2471,6 +2498,11 @@ void setDefaultChain({
 
       _latestChainId = resp['load_result']?['chain_id'] as String?;
       _latestConfigId = resp['config_result']?['config_id'] as String?;
+
+      // (in alternativa – se volete evitare duplicazione di logica):
+      final cfg = await _contextApiSdk.getChainConfiguration(
+         chainId: _latestChainId, token: widget.token.accessToken);
+       await _reconfigureFromChainConfig(cfg);
 
       html.window.localStorage['latestChainId'] = _latestChainId ?? '';
       html.window.localStorage['latestConfigId'] = _latestConfigId ?? '';
@@ -4564,9 +4596,17 @@ void setDefaultChain({
                                                     child:
                                                         CircularProgressIndicator()),
                                               )
-                                            : messages.isEmpty
-                                                ? buildEmptyChatScreen(
-                                                    context, _handleUserInput)
+: messages.isEmpty
+    ? (
+        widget.showEmptyChatPlaceholder
+            // placeholder classico
+            ? buildEmptyChatScreen(context, _handleUserInput)
+            // chat vuota “silenziosa” ma che riempie lo spazio
+            : Expanded(
+                child: Container(color: Colors
+                    .transparent), // o il colore di background che preferisci
+              )
+      )
                                                 : Expanded(
                                                     child: LayoutBuilder(
                                                       builder: (context,
@@ -5067,11 +5107,12 @@ void setDefaultChain({
 
     // Ottieni l'input modificato usando la funzione esterna
     final modifiedInput = appendChatInstruction(
-      input,
+         _userInputPrefix.isNotEmpty  ? '$_userInputPrefix $input'
+     : input,
       currentChatName: currentChatName,
       messageCount: currentMessageCount,
     );
-
+    
     final currentTime = DateTime.now().toIso8601String(); // Ora corrente
     final userMessageId =
         uuid.v4(); // Genera un ID univoco per il messaggio utente

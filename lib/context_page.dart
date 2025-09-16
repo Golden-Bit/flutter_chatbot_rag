@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_app/ui_components/dialogs/loader_config_dialog.dart';
 import 'package:flutter_app/ui_components/icons/cube.dart';
+import 'package:flutter_app/user_manager/state/billing_globals.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:universal_html/html.dart' as html;
 import 'context_api_sdk.dart';
@@ -956,7 +957,18 @@ void _filterContexts() {
   });
 }
 
-
+String? _readSubscriptionId(dynamic plan) {
+  try {
+    final v = plan?.subscriptionId;
+    if (v is String) return v;
+  } catch (_) {}
+  try {
+    if (plan is Map && plan['subscription_id'] is String) {
+      return plan['subscription_id'] as String;
+    }
+  } catch (_) {}
+  return null;
+}
 
   // Funzione per caricare i file di un contesto specifico
   Future<List<Map<String, dynamic>>> _loadFilesForContext(
@@ -974,6 +986,7 @@ void _filterContexts() {
   // Funzione per caricare un file in più contesti
   Future<void> _uploadFile(Uint8List fileBytes, List<String> contexts,
       {String? description, required String fileName}) async {
+
     try {
       await _apiSdk.uploadFileToContexts(
           fileBytes, contexts, widget.username, widget.token,
@@ -1002,11 +1015,16 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
   Map<String, dynamic>? loaders,        // ⬅️ NEW
   Map<String, dynamic>? loaderKwargs,   // ⬅️ NEW
 }) async {
+
+          final curPlan = BillingGlobals.snap.plan;
+final subId   = _readSubscriptionId(curPlan);
+
   final resp = await _apiSdk.uploadFileToContextsAsync(
     fileBytes,
     contexts,
     widget.username,
     widget.token,
+    subscriptionId: subId,
     description: description,
     fileName: fileName,
     loaders: loaders,                   // ⬅️ pass-through

@@ -1,4 +1,4 @@
-import 'package:flutter_app/apps/enac_app/app.dart';
+//import 'package:flutter_app/apps/enac_app/app.dart';
 import 'package:flutter_app/chatbot.dart';
 import 'package:flutter_app/databases_manager/database_service.dart';
 import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';

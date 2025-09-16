@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/context_api_sdk.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/components/securety_settings_content.dart';
 import 'package:flutter_app/user_manager/components/general_settings_content.dart';
@@ -68,7 +69,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
       case 4:
         return SecuritySettingsContent(accessToken: widget.accessToken);
       case 5:
-        return SubscriptionSettingsContent();
+        return SubscriptionSettingsContent(                      // ⬅️ passa SDK
+           accessToken: widget.accessToken,       // ⬅️ passa token
+   );
       default:
         return Center(
           child: Text(

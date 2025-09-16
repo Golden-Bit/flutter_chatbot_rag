@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_app/apps/enac_app/app.dart';
+//import 'package:flutter_app/apps/enac_app/app.dart';
 import 'package:flutter_app/chatbot.dart';
 import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';

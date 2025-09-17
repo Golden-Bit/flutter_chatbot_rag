@@ -25,6 +25,7 @@ import 'package:flutter_app/ui_components/message/table_md_builder.dart';
 import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter_app/user_manager/components/settings_dialog.dart';
 import 'package:flutter_app/user_manager/components/usage_analytics_dialog.dart';
+import 'package:flutter_app/user_manager/pages/billing_page.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -54,7 +55,7 @@ import 'package:markdown/markdown.dart' as md; // parse Element
 import 'dart:html' as html; // download CSV
 import 'package:collection/collection.dart';
 import 'dart:async';
-
+import 'package:flutter_app/user_manager/state/billing_globals.dart';
 
 /// ➊  Chiave che descrive come il messaggio deve apparire nella UI
 ///     'normal'      → si vede subito (default)
@@ -622,6 +623,15 @@ class ChatBotPage extends StatefulWidget {
 
 class ChatBotPageState extends State<ChatBotPage> {
   Map<String, dynamic>? _defaultChainConfig;
+// ────────────────────────────────────────────────────────────────
+// NEW ▸ stato billing (copia locale + guard)
+// ────────────────────────────────────────────────────────────────
+CurrentPlanResponse? _currentPlan;
+UserCreditsResponse? _currentCredits;
+bool _paymentsFetchInFlight = false;
+
+CurrentPlanResponse? get currentPlan => _currentPlan;
+UserCreditsResponse? get currentCredits => _currentCredits;
 
   // ───────────────────────────────────────────────────────────
 //  NEW STATE – lista di immagini da allegare prima dell'invio
@@ -636,6 +646,7 @@ class ChatBotPageState extends State<ChatBotPage> {
     setState(() => _pendingInputImages.removeAt(idx));
   }
 
+bool _didRefreshCreditsOnFirstToken = false;
   bool _isSending = false; // spinner sull’icona SEND
   static const int _maxSendRetries = 5;
   late final List<ToolSpec> _toolSpecs;
@@ -1127,6 +1138,9 @@ bool get isAssistantStreaming => _isStreaming;
       );
     }
 
+final curPlan = BillingGlobals.snap.plan;
+final subId   = _readSubscriptionId(curPlan);
+
     // ─────────────────────────────────────────────────────────────────────────
     // 3. apri dialog per configurare il loader + stima costo live ------------
     // Se l’utente annulla, esci senza fare nulla
@@ -1140,11 +1154,15 @@ bool get isAssistantStreaming => _isStreaming;
       [_chatKbPath!], // contesti (solo la KB chat)
       widget.user.username,
       widget.token.accessToken,
+      subscriptionId: subId,
       fileName: fName,
       loaders: loaderConfig['loaders'] as Map<String, String>,
       loaderKwargs:
           loaderConfig['loader_kwargs'] as Map<String, Map<String, dynamic>>,
     );
+
+    // ⬇⬇⬇  NEW: refresh crediti non-bloccante (subito dopo l’upload)
+_scheduleCreditsRefresh();
 
     final Map<String, TaskIdsPerContext> tasksPerCtx = resp.tasks;
 
@@ -2344,7 +2362,7 @@ void clearUserInputPrefix() => _userInputPrefix = '';
         "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://127.0.0.1:8777",
         "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        //"chatbot_nlp_api": "http://127.0.0.1:8777"
+        //"chatbot_nlp_api": "http://127.0.0.1:8888"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {
@@ -2560,6 +2578,116 @@ void clearUserInputPrefix() => _userInputPrefix = '';
   /// Per sapere dallo host lo stato corrente.
   bool get isUiVisible => _uiVisible;
 
+
+// ChatBotPageState
+
+bool _creditsRefreshInFlight = false;
+
+/// Refresh "leggero" dei crediti: non blocca la UI.
+/// - se conosciamo già il piano (_currentPlan), evitiamo round-trip extra
+/// - altrimenti usiamo getCurrentPlanOrNull
+Future<void> _refreshCreditsFast() async {
+  if (_creditsRefreshInFlight) return;
+  _creditsRefreshInFlight = true;
+  try {
+    final tok = widget.token.accessToken;
+
+    // 1) Piano (preferisci cache locale se presente)
+    CurrentPlanResponse? plan = _currentPlan;
+    plan ??= await _apiSdk.getCurrentPlanOrNull(tok);
+
+    if (plan == null) {
+      // nessuna subscription attiva
+      _currentPlan = null;
+      _currentCredits = null;
+      BillingGlobals.setNoPlan();
+      if (mounted) setState(() {}); // ridisegna pill
+      return;
+    }
+
+    // 2) Crediti con subscription_id (più veloce/selettivo lato backend)
+    final credits = await _apiSdk.getUserCredits(tok, subscriptionId: plan.subscriptionId);
+
+    // 3) aggiorna stato + notifier globale (Top-Bar si aggiorna da sola)
+    _currentPlan = plan;
+    _currentCredits = credits;
+    BillingGlobals.setData(plan: plan, credits: credits);
+    if (mounted) setState(() {}); // opzionale
+  } catch (e) {
+    // non bloccare: esponi errore “soft” e prosegui
+    BillingGlobals.setError(e);
+  } finally {
+    _creditsRefreshInFlight = false;
+  }
+}
+
+/// Schedula senza await (non blocca)
+void _scheduleCreditsRefresh() {
+  unawaited(_refreshCreditsFast());
+}
+
+
+Future<void> _fetchPaymentsInfo() async {
+  try {
+    final tok = widget.token.accessToken;
+
+
+// 1) Piano corrente (404 => nessuna subscription attiva)
+// ✅ DOPO (ritorna null se 404, niente eccezioni)
+final plan = await _apiSdk.getCurrentPlanOrNull(tok);
+_currentPlan = plan;
+
+final bool noPlan = (plan == null);
+
+    // 2) Crediti
+    dynamic credits;
+    if (!noPlan && plan != null) {
+      try {
+        credits =
+            await _apiSdk.getUserCredits(tok, subscriptionId: plan.subscriptionId);
+      } catch (_) {
+        // fallback senza subscriptionId
+        credits = await _apiSdk.getUserCredits(tok);
+      }
+      _currentCredits = credits;
+    } else {
+      // Richiesta: “crediti nulli” se l’utente non ha piani
+      credits = null;
+      _currentCredits = null;
+    }
+
+    // 3) Aggiorna lo stato GLOBALE reattivo (usato dalla UI)
+    if (noPlan) {
+      BillingGlobals.setNoPlan();
+    } else {
+      BillingGlobals.setData(plan: plan, credits: credits);
+    }
+
+    // (facoltativo) mantieni anche queste vecchie assegnazioni se le usi altrove
+    // BillingGlobals.currentPlan / userCredits sono già disponibili via getter
+    // BillingGlobals.lastUpdated è nel notifier (snapshot)
+
+    // Notifica UI immediata locale se serve
+    if (mounted) setState(() {});
+  } catch (e) {
+    debugPrint('[payments] fetch error: $e');
+    BillingGlobals.setError(e); // sblocca lo spinner anche in errore
+  } finally {
+    _paymentsFetchInFlight = false;
+  }
+}
+
+void _kickoffPaymentsFetch() {
+  if (_paymentsFetchInFlight) return;
+  _paymentsFetchInFlight = true;
+
+  // Stato globale: sta caricando
+  BillingGlobals.setLoading();
+
+  // Avvia senza bloccare l’init (unawaited)
+  unawaited(_fetchPaymentsInfo());
+}
+
   @override
   void initState() {
     super.initState();
@@ -2583,6 +2711,15 @@ void clearUserInputPrefix() => _userInputPrefix = '';
     _uiVisible = widget.startVisible; // ⬅ inizializza
     
     _initStateAsync(); // parte subito ma resta fuori dal build
+
+      // ─────────────────────────────────────────────────────────────
+  // NEW ▸ fai partire il recupero piano/crediti in background
+  //      (non blocca il resto dell'init e dell'UI)
+  // ─────────────────────────────────────────────────────────────
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _kickoffPaymentsFetch(); // NON await
+  });
+  
   }
 
   /// helper “completo” (può usare await senza problemi)
@@ -3511,6 +3648,231 @@ void clearUserInputPrefix() => _userInputPrefix = '';
     );
   }
 
+
+
+// ─────────────────────────────────────────────────────────────
+// Letture sicure (riuso con i modelli del tuo SDK o Map)
+// ─────────────────────────────────────────────────────────────
+num? _readNum(dynamic obj, String camel, String snake) {
+  try { final v = obj?.toJson()?[camel]; if (v is num) return v; } catch (_) {}
+  try { final v = obj?[camel]; if (v is num) return v; } catch (_) {}
+  try { if (obj is Map && obj[camel] is num) return obj[camel] as num; } catch (_) {}
+  try { if (obj is Map && obj[snake] is num) return obj[snake] as num; } catch (_) {}
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Badge crediti per la topbar (null → non mostrare)
+// ─────────────────────────────────────────────────────────────
+Widget? _buildTopbarCreditsPill() {
+  final snap = BillingGlobals.notifier.value;
+
+  // Evita overflow su schermi molto stretti
+  final w = MediaQuery.of(context).size.width;
+  if (w < 360) return null;
+
+  // Durante il fetch non mostrare nulla (topbar pulita)
+  if (!snap.hasFetched || snap.isLoading) return null;
+
+  // In caso di errore, non mostrare (la topbar ha già il menu utente)
+  if (snap.error != null) return null;
+
+  // Nessun piano → piccolo badge "Free"
+  if (!snap.hasActiveSubscription) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: const Text('Free', style: TextStyle(fontSize: 12, color: Colors.black87)),
+    );
+  }
+
+  // Piano attivo → prova a leggere i crediti
+  final credits = snap.credits;
+  final remaining = _readNum(credits, 'remainingTotal', 'remaining_total');
+  final used      = _readNum(credits, 'usedTotal', 'used_total');
+  final provided  = _readNum(credits, 'providedTotal', 'provided_total');
+
+  final label = (remaining != null) ? 'Crediti: $remaining' : 'Crediti: —';
+  final tooltip = 'Restanti: ${remaining ?? '—'} • Usati: ${used ?? '—'} • Totali: ${provided ?? '—'}';
+
+  return Tooltip(
+    message: tooltip,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.attach_money_outlined, size: 14, color: Colors.black87),
+          SizedBox(width: 6),
+          // Il testo lo mettiamo sotto, così possiamo localizzare facilmente se servirà
+        ],
+      ),
+    ),
+  );
+}
+Widget _spinnerPill({
+  required EdgeInsetsGeometry padding,
+  required double borderRadius,
+}) {
+  return Container(
+    padding: padding,
+    decoration: BoxDecoration(
+      color: Colors.white,
+      border: Border.all(color: Colors.black12),
+      borderRadius: BorderRadius.circular(borderRadius),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: const [
+        SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        SizedBox(width: 8),
+        Text('Caricamento…', style: TextStyle(fontSize: 13, color: Colors.black87)),
+      ],
+    ),
+  );
+}
+
+Widget _errorPill({
+  required String message,
+  required EdgeInsetsGeometry padding,
+  required double borderRadius,
+  double fontSize = 13,
+  double iconSize = 16,
+}) {
+  return Tooltip(
+    message: message,
+    child: Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.red.shade200),
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, size: iconSize, color: Colors.red.shade600),
+          const SizedBox(width: 8),
+          Text('Crediti: —', style: TextStyle(fontSize: fontSize, color: Colors.red.shade700)),
+        ],
+      ),
+    ),
+  );
+}
+
+// ⬇⬇⬇ Sostituisci la vecchia versione con questa ⬇⬇⬇
+Widget _buildTopbarCreditsPillWithText({
+  double fontSize = 14,
+  double iconSize = 18,
+  EdgeInsetsGeometry padding =
+      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+  double borderRadius = 28,
+}) {
+  final snap = BillingGlobals.notifier.value;
+
+  // Evita overflow su schermi molto stretti: in questo caso mostriamo comunque,
+  // ma potresti decidere di ridurre font/padding se vuoi.
+  // final w = MediaQuery.of(context).size.width;
+
+  // 1) FETCH IN CORSO → rotella
+  if (!snap.hasFetched || snap.isLoading) {
+    return _spinnerPill(padding: padding, borderRadius: borderRadius);
+  }
+
+  // 2) ERRORE NON-404 → pill rossa con tooltip (credits null per errore)
+  if (snap.error != null) {
+    return _errorPill(
+      message: snap.error!,
+      padding: padding,
+      borderRadius: borderRadius,
+      fontSize: fontSize,
+      iconSize: iconSize,
+    );
+  }
+
+  // 3) NESSUN PIANO ATTIVO → mostra 0 (credits null per "no plan")
+  if (!snap.hasActiveSubscription) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
+          const SizedBox(width: 8),
+          Text('Crediti: 0', style: TextStyle(fontSize: fontSize, color: Colors.black87)),
+        ],
+      ),
+    );
+  }
+
+  // 4) PIANO ATTIVO → prova a leggere i numeri; se mancanti, mostra "—"
+  final credits   = snap.credits;
+  num? remaining  = _readNum(credits, 'remainingTotal', 'remaining_total');
+  num? used       = _readNum(credits, 'usedTotal', 'used_total');
+  num? provided   = _readNum(credits, 'providedTotal', 'provided_total');
+
+  final text    = (remaining != null) ? '$remaining' : 'Crediti: —';
+  final tooltip = 'Restanti: ${remaining ?? '—'} • Usati: ${used ?? '—'} • Totali: ${provided ?? '—'}';
+
+  return Tooltip(
+    message: tooltip,
+    child: Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
+          const SizedBox(width: 8),
+          Text(text, style: TextStyle(fontSize: fontSize, color: Colors.black87)),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<void> _openBillingPageFromTopbar() async {
+  // usa un SDK già esistente se lo hai (_apiSdk); altrimenti creane uno al volo
+  final ContextApiSdk sdk = (_apiSdk ?? ContextApiSdk());
+  if (_apiSdk == null) {
+    try { await sdk.loadConfig(); } catch (_) {}
+  }
+
+  if (!mounted) return;
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => BillingPage(
+        onClose: () => Navigator.of(context).pop(),
+        sdk: sdk,
+        token: widget.token.accessToken, // già usato altrove
+      ),
+    ),
+  );
+}
+
+
   @override
   Widget build(BuildContext context) {
     final localizations = LocalizationProvider.of(context);
@@ -4250,6 +4612,49 @@ void clearUserInputPrefix() => _userInputPrefix = '';
                                 ],
                               ),
                             ),
+
+
+
+
+ValueListenableBuilder<BillingSnapshot>(
+  valueListenable: BillingGlobals.notifier,
+  builder: (context, snap, _) {
+    // Se la tua _buildTopbarCreditsPillWithText legge BillingGlobals.snap
+    // internamente, non devi passare nulla: la sola ricostruzione basta.
+    // (In caso contrario, puoi estenderla per accettare credits/isLoading/error.)
+    final pill = _buildTopbarCreditsPillWithText(
+      fontSize: 14,
+      iconSize: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      borderRadius: 28,
+
+      // ───────────────────────────────────────────────────────────────
+      // Se la funzione supporta parametri dinamici, puoi sbloccarli qui:
+      // credits   : snap.credits?.remainingTotal,
+      // isLoading : snap.isLoading,
+      // hasPlan   : snap.hasActiveSubscription,
+      // errorText : snap.error,
+      // ───────────────────────────────────────────────────────────────
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(28),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(28),
+            onTap: _openBillingPageFromTopbar, // apre BillingPage
+            child: pill,
+          ),
+        ),
+      ),
+    );
+  },
+)
+,
                             if (widget.showUserMenu)
                               Theme(
                                   data: Theme.of(context).copyWith(
@@ -4445,15 +4850,14 @@ void clearUserInputPrefix() => _userInputPrefix = '';
             showSettings = true;
             showKnowledgeBase = false;
           });*/
-                                            showDialog(
-                                              context: context,
-                                              builder: (_) => SettingsDialog(
-                                                accessToken:
-                                                    widget.token.accessToken,
-                                                onArchiveAll: _archiveAllChats,
-                                                onDeleteAll: _deleteAllChats,
-                                              ),
-                                            );
+showDialog(
+  context: context,
+  builder: (_) => SettingsDialog(                 // ⬅️ PASSA L’SDK
+    accessToken: widget.token.accessToken,   // ⬅️ PASSA IL TOKEN
+    onArchiveAll: _archiveAllChats,
+    onDeleteAll: _deleteAllChats,
+  ),
+);
                                             break;
                                           case 'Logout':
                                             _logout(context);
@@ -5548,6 +5952,19 @@ final response = await _withRetry(
     return out;
   }
 
+String? _readSubscriptionId(dynamic plan) {
+  try {
+    final v = plan?.subscriptionId;
+    if (v is String) return v;
+  } catch (_) {}
+  try {
+    if (plan is Map && plan['subscription_id'] is String) {
+      return plan['subscription_id'] as String;
+    }
+  } catch (_) {}
+  return null;
+}
+
   Future<void> _sendMessageToAPI(
     String input,
     String assistantMsgId,
@@ -5561,6 +5978,9 @@ final response = await _withRetry(
 
     // URL della chain API
     final url = "$_nlpApiUrl/stream_events_chain";
+
+final curPlan = BillingGlobals.snap.plan;
+final subId   = _readSubscriptionId(curPlan);
 
     final chainIdToUse = _latestChainId?.isNotEmpty == true
         ? _latestChainId!
@@ -5667,6 +6087,8 @@ final response = await _withRetry(
 
     // Prepara il payload per l'API
     final payload = jsonEncode({
+      "token": widget.token.accessToken,
+      "subscription_id": subId,
       "chain_id": chainIdToUse,
       //"query": {"input": input, "chat_history": transformedChatHistoryLegacy},
       "input_text": input,
@@ -5716,6 +6138,11 @@ final response = await _withRetry(
       // Ottieni un reader per leggere lo stream chunk-by-chunk
       final reader = js_util.callMethod(body, 'getReader', []);
       _streamReader = reader;
+
+      
+// ⬇⬇⬇  NEW — reset guard per “prima token”
+_didRefreshCreditsOnFirstToken = false;
+
       // Qui memorizziamo l'intero testo completo (con i widget originali)
       final StringBuffer fullOutput = StringBuffer();
 
@@ -6023,6 +6450,12 @@ final response = await _withRetry(
             final bytes = _convertJSArrayBufferToDartUint8List(value);
             final chunkString = utf8.decode(bytes);
 
+              // ⬇⬇⬇  NEW — refresh crediti alla *prima* token di testo dell'agente
+  if (!_didRefreshCreditsOnFirstToken  && chunkString.trim().isNotEmpty) {
+    _didRefreshCreditsOnFirstToken = true;
+    _scheduleCreditsRefresh(); // NON blocca lo stream
+  }
+  
             // Processa il chunk (token per token)
             final handled = _maybeHandleToolEvent(chunkString);
 

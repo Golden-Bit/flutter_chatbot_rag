@@ -11,6 +11,10 @@ final ContextApiSdk _apiSdk = ContextApiSdk();
 Map<String, List<String>>? _extToLoaders;
 Map<String, dynamic>?      _kwargsSchema;
 
+// Converte qualunque numero in testo intero senza simboli/decimali
+String _fmtIntNoCurrency(num? v) => ((v ?? 0).round()).toString();
+
+
 Future<void> _ensureLoaderCatalog() async {
   if (_extToLoaders != null && _kwargsSchema != null) return;
   _extToLoaders = await _apiSdk.getLoadersCatalog();
@@ -166,7 +170,7 @@ Widget _buildCostBox(FileCost fc) {
       Align(
         alignment: Alignment.centerRight,
         child: Text(
-          '\$${fc.costUsd!.toStringAsFixed(4)}',
+          _fmtIntNoCurrency(fc.costUsd),
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
       ),

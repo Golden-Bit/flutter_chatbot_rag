@@ -646,6 +646,7 @@ UserCreditsResponse? get currentCredits => _currentCredits;
     setState(() => _pendingInputImages.removeAt(idx));
   }
 
+bool _didRefreshCreditsOnFirstToken = false;
   bool _isSending = false; // spinner sull’icona SEND
   static const int _maxSendRetries = 5;
   late final List<ToolSpec> _toolSpecs;
@@ -1159,6 +1160,9 @@ final subId   = _readSubscriptionId(curPlan);
       loaderKwargs:
           loaderConfig['loader_kwargs'] as Map<String, Map<String, dynamic>>,
     );
+
+    // ⬇⬇⬇  NEW: refresh crediti non-bloccante (subito dopo l’upload)
+_scheduleCreditsRefresh();
 
     final Map<String, TaskIdsPerContext> tasksPerCtx = resp.tasks;
 
@@ -2574,6 +2578,55 @@ void clearUserInputPrefix() => _userInputPrefix = '';
   /// Per sapere dallo host lo stato corrente.
   bool get isUiVisible => _uiVisible;
 
+
+// ChatBotPageState
+
+bool _creditsRefreshInFlight = false;
+
+/// Refresh "leggero" dei crediti: non blocca la UI.
+/// - se conosciamo già il piano (_currentPlan), evitiamo round-trip extra
+/// - altrimenti usiamo getCurrentPlanOrNull
+Future<void> _refreshCreditsFast() async {
+  if (_creditsRefreshInFlight) return;
+  _creditsRefreshInFlight = true;
+  try {
+    final tok = widget.token.accessToken;
+
+    // 1) Piano (preferisci cache locale se presente)
+    CurrentPlanResponse? plan = _currentPlan;
+    plan ??= await _apiSdk.getCurrentPlanOrNull(tok);
+
+    if (plan == null) {
+      // nessuna subscription attiva
+      _currentPlan = null;
+      _currentCredits = null;
+      BillingGlobals.setNoPlan();
+      if (mounted) setState(() {}); // ridisegna pill
+      return;
+    }
+
+    // 2) Crediti con subscription_id (più veloce/selettivo lato backend)
+    final credits = await _apiSdk.getUserCredits(tok, subscriptionId: plan.subscriptionId);
+
+    // 3) aggiorna stato + notifier globale (Top-Bar si aggiorna da sola)
+    _currentPlan = plan;
+    _currentCredits = credits;
+    BillingGlobals.setData(plan: plan, credits: credits);
+    if (mounted) setState(() {}); // opzionale
+  } catch (e) {
+    // non bloccare: esponi errore “soft” e prosegui
+    BillingGlobals.setError(e);
+  } finally {
+    _creditsRefreshInFlight = false;
+  }
+}
+
+/// Schedula senza await (non blocca)
+void _scheduleCreditsRefresh() {
+  unawaited(_refreshCreditsFast());
+}
+
+
 Future<void> _fetchPaymentsInfo() async {
   try {
     final tok = widget.token.accessToken;
@@ -3608,64 +3661,6 @@ num? _readNum(dynamic obj, String camel, String snake) {
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Badge crediti per la topbar (null → non mostrare)
-// ─────────────────────────────────────────────────────────────
-Widget? _buildTopbarCreditsPill() {
-  final snap = BillingGlobals.notifier.value;
-
-  // Evita overflow su schermi molto stretti
-  final w = MediaQuery.of(context).size.width;
-  if (w < 360) return null;
-
-  // Durante il fetch non mostrare nulla (topbar pulita)
-  if (!snap.hasFetched || snap.isLoading) return null;
-
-  // In caso di errore, non mostrare (la topbar ha già il menu utente)
-  if (snap.error != null) return null;
-
-  // Nessun piano → piccolo badge "Free"
-  if (!snap.hasActiveSubscription) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: const Text('Free', style: TextStyle(fontSize: 12, color: Colors.black87)),
-    );
-  }
-
-  // Piano attivo → prova a leggere i crediti
-  final credits = snap.credits;
-  final remaining = _readNum(credits, 'remainingTotal', 'remaining_total');
-  final used      = _readNum(credits, 'usedTotal', 'used_total');
-  final provided  = _readNum(credits, 'providedTotal', 'provided_total');
-
-  final label = (remaining != null) ? 'Crediti: $remaining' : 'Crediti: —';
-  final tooltip = 'Restanti: ${remaining ?? '—'} • Usati: ${used ?? '—'} • Totali: ${provided ?? '—'}';
-
-  return Tooltip(
-    message: tooltip,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(Icons.attach_money_outlined, size: 14, color: Colors.black87),
-          SizedBox(width: 6),
-          // Il testo lo mettiamo sotto, così possiamo localizzare facilmente se servirà
-        ],
-      ),
-    ),
-  );
-}
 Widget _spinnerPill({
   required EdgeInsetsGeometry padding,
   required double borderRadius,
@@ -3762,8 +3757,8 @@ Widget _buildTopbarCreditsPillWithText({
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
-          const SizedBox(width: 8),
+          //Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
+          //const SizedBox(width: 8),
           Text('Crediti: 0', style: TextStyle(fontSize: fontSize, color: Colors.black87)),
         ],
       ),
@@ -3791,8 +3786,8 @@ Widget _buildTopbarCreditsPillWithText({
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
-          const SizedBox(width: 8),
+          //Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
+          //const SizedBox(width: 8),
           Text(text, style: TextStyle(fontSize: fontSize, color: Colors.black87)),
         ],
       ),
@@ -4563,15 +4558,25 @@ Future<void> _openBillingPageFromTopbar() async {
 
 
 
-// ⬅⬅⬅  QUI INSERIAMO IL BADGE CREDITI (grande + cliccabile)  ⬅⬅⬅
-// 🔸 Inserimento in top-bar (cliccabile + grande)
-Builder(
-  builder: (context) {
+ValueListenableBuilder<BillingSnapshot>(
+  valueListenable: BillingGlobals.notifier,
+  builder: (context, snap, _) {
+    // Se la tua _buildTopbarCreditsPillWithText legge BillingGlobals.snap
+    // internamente, non devi passare nulla: la sola ricostruzione basta.
+    // (In caso contrario, puoi estenderla per accettare credits/isLoading/error.)
     final pill = _buildTopbarCreditsPillWithText(
       fontSize: 14,
       iconSize: 18,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       borderRadius: 28,
+
+      // ───────────────────────────────────────────────────────────────
+      // Se la funzione supporta parametri dinamici, puoi sbloccarli qui:
+      // credits   : snap.credits?.remainingTotal,
+      // isLoading : snap.isLoading,
+      // hasPlan   : snap.hasActiveSubscription,
+      // errorText : snap.error,
+      // ───────────────────────────────────────────────────────────────
     );
 
     return Padding(
@@ -4590,12 +4595,8 @@ Builder(
       ),
     );
   },
-),
-
-
-
-
-
+)
+,
                             if (widget.showUserMenu)
                               Theme(
                                   data: Theme.of(context).copyWith(
@@ -6079,6 +6080,11 @@ final subId   = _readSubscriptionId(curPlan);
       // Ottieni un reader per leggere lo stream chunk-by-chunk
       final reader = js_util.callMethod(body, 'getReader', []);
       _streamReader = reader;
+
+      
+// ⬇⬇⬇  NEW — reset guard per “prima token”
+_didRefreshCreditsOnFirstToken = false;
+
       // Qui memorizziamo l'intero testo completo (con i widget originali)
       final StringBuffer fullOutput = StringBuffer();
 
@@ -6386,6 +6392,12 @@ final subId   = _readSubscriptionId(curPlan);
             final bytes = _convertJSArrayBufferToDartUint8List(value);
             final chunkString = utf8.decode(bytes);
 
+              // ⬇⬇⬇  NEW — refresh crediti alla *prima* token di testo dell'agente
+  if (!_didRefreshCreditsOnFirstToken  && chunkString.trim().isNotEmpty) {
+    _didRefreshCreditsOnFirstToken = true;
+    _scheduleCreditsRefresh(); // NON blocca lo stream
+  }
+  
             // Processa il chunk (token per token)
             final handled = _maybeHandleToolEvent(chunkString);
 

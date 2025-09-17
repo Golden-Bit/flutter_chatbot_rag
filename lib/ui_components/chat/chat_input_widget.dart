@@ -13,6 +13,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_app/context_api_sdk.dart';
 import 'package:flutter_app/ui_components/dialogs/showMediaUploadDialog.dart';
 
+// Converte qualunque numero in testo intero senza simboli/decimali
+String _fmtIntNoCurrency(num? v) => ((v ?? 0).round()).toString();
+
 /// ======================================================================
 /// 1) CACHE BASE64 (per non rifare la stessa chiamata /image/base64)
 /// ======================================================================
@@ -489,7 +492,7 @@ class ChatInputWidget extends StatelessWidget {
                                 ),
                               )
                             : Text(
-                                "\$${_liveCost.toStringAsFixed(4)}",
+                                _fmtIntNoCurrency(_liveCost),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,

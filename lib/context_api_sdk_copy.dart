@@ -9,6 +9,226 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 //import 'package:http/http.dart' as http;
 import 'dart:html' as html;
 
+// ───────────────────────────────────────────────────────────────────────────
+// PAYMENTS ▸ Models & enums
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Stato piano corrente (GET /payments/current_plan)
+class CurrentPlanResponse {
+  final String subscriptionId;
+  final String? status;
+  final String? planType;
+  final String? variant;
+  final String? pricingMethod;
+  final String? activePriceId;
+  final int? periodStart;   // epoch seconds
+  final int? periodEnd;     // epoch seconds
+
+  const CurrentPlanResponse({
+    required this.subscriptionId,
+    this.status,
+    this.planType,
+    this.variant,
+    this.pricingMethod,
+    this.activePriceId,
+    this.periodStart,
+    this.periodEnd,
+  });
+
+  factory CurrentPlanResponse.fromJson(Map<String, dynamic> j) =>
+      CurrentPlanResponse(
+        subscriptionId: j['subscription_id'],
+        status        : j['status'],
+        planType      : j['plan_type'],
+        variant       : j['variant'],
+        pricingMethod : j['pricing_method'],
+        activePriceId : j['active_price_id'],
+        periodStart   : j['period_start'] as int?,
+        periodEnd     : j['period_end']   as int?,
+      );
+}
+
+class UserCreditsResponse {
+  final num? providedTotal;
+  final num? usedTotal;
+  final num? remainingTotal;
+
+  const UserCreditsResponse({
+    this.providedTotal,
+    this.usedTotal,
+    this.remainingTotal,
+  });
+
+  factory UserCreditsResponse.fromJson(Map<String, dynamic> j) =>
+      UserCreditsResponse(
+        providedTotal : j['provided_total'],
+        usedTotal     : j['used_total'],
+        remainingTotal: j['remaining_total'],
+      );
+
+  // ✅ aggiunto
+  Map<String, dynamic> toJson() => {
+    'providedTotal'  : providedTotal,
+    'usedTotal'      : usedTotal,
+    'remainingTotal' : remainingTotal,
+  };
+}
+
+
+/// Intent per l’aggiornamento piano (POST /payments/deeplink/update)
+enum ChangeIntent { upgrade, downgrade, both }
+
+extension _ChangeIntentWire on ChangeIntent {
+  String get wire {
+    switch (this) {
+      case ChangeIntent.upgrade:   return 'upgrade';
+      case ChangeIntent.downgrade: return 'downgrade';
+      case ChangeIntent.both:      return 'both';
+    }
+  }
+  static ChangeIntent fromWire(String? s) {
+    switch (s) {
+      case 'upgrade':   return ChangeIntent.upgrade;
+      case 'downgrade': return ChangeIntent.downgrade;
+      case 'both':
+      default:          return ChangeIntent.both;
+    }
+  }
+}
+
+/// Discriminated union: esito checkout vs redirect al Billing Portal
+abstract class CheckoutOrPortal {
+  const CheckoutOrPortal();
+  factory CheckoutOrPortal.fromJson(Map<String, dynamic> j) {
+    final status = j['status'] as String?;
+    if (status == 'checkout')       return CheckoutSuccessResponse.fromJson(j);
+    if (status == 'portal_redirect') return PortalRedirectResponse.fromJson(j);
+    throw ApiException('Risposta inattesa da /payments/checkout: ${jsonEncode(j)}');
+  }
+}
+
+/// Variante "checkout" (successo creazione Checkout Session)
+class CheckoutSuccessResponse extends CheckoutOrPortal {
+  final String checkoutSessionId;
+  final String url;
+  final String? customerId;
+  final String? createdProductId;
+  final String? createdPriceId;
+
+  const CheckoutSuccessResponse({
+    required this.checkoutSessionId,
+    required this.url,
+    this.customerId,
+    this.createdProductId,
+    this.createdPriceId,
+  });
+
+  factory CheckoutSuccessResponse.fromJson(Map<String, dynamic> j) =>
+      CheckoutSuccessResponse(
+        checkoutSessionId: j['checkout_session_id'],
+        url              : j['url'],
+        customerId       : j['customer_id'],
+        createdProductId : j['created_product_id'],
+        createdPriceId   : j['created_price_id'],
+      );
+}
+
+/// Variante "portal_redirect"
+class PortalRedirectResponse extends CheckoutOrPortal {
+  final String reasonCode;
+  final String message;
+  final String portalUrl;
+  final String subscriptionId;
+  final String configurationId;
+
+  const PortalRedirectResponse({
+    required this.reasonCode,
+    required this.message,
+    required this.portalUrl,
+    required this.subscriptionId,
+    required this.configurationId,
+  });
+
+  factory PortalRedirectResponse.fromJson(Map<String, dynamic> j) =>
+      PortalRedirectResponse(
+        reasonCode      : j['reason_code'],
+        message         : j['message'],
+        portalUrl       : j['portal_url'],
+        subscriptionId  : j['subscription_id'],
+        configurationId : j['configuration_id'],
+      );
+}
+
+/// Output POST /payments/portal_session
+class PortalSessionResponse {
+  final String portalSessionId;
+  final String url;
+  final String configurationId;
+
+  const PortalSessionResponse({
+    required this.portalSessionId,
+    required this.url,
+    required this.configurationId,
+  });
+
+  factory PortalSessionResponse.fromJson(Map<String, dynamic> j) =>
+      PortalSessionResponse(
+        portalSessionId : j['portal_session_id'],
+        url             : j['url'],
+        configurationId : j['configuration_id'],
+      );
+}
+
+/// Output deeplink (update/cancel)
+class DeeplinkResponse {
+  final String deeplinkId;
+  final String url;
+  final String configurationId;
+
+  const DeeplinkResponse({
+    required this.deeplinkId,
+    required this.url,
+    required this.configurationId,
+  });
+
+  factory DeeplinkResponse.fromJson(Map<String, dynamic> j) =>
+      DeeplinkResponse(
+        deeplinkId      : j['deeplink_id'],
+        url             : j['url'],
+        configurationId : j['configuration_id'],
+      );
+}
+
+/// Output deeplink upgrade/downgrade
+enum ChangeKind { upgrade, downgrade }
+
+class DeeplinkUpgradeResponse extends DeeplinkResponse {
+  final String subscriptionId;
+  final ChangeKind changeKind;
+  final double? appliedDiscountPercent;
+
+  DeeplinkUpgradeResponse({
+    required super.deeplinkId,
+    required super.url,
+    required super.configurationId,
+    required this.subscriptionId,
+    required this.changeKind,
+    this.appliedDiscountPercent,
+  });
+
+  factory DeeplinkUpgradeResponse.fromJson(Map<String, dynamic> j) =>
+      DeeplinkUpgradeResponse(
+        deeplinkId             : j['deeplink_id'],
+        url                    : j['url'],
+        configurationId        : j['configuration_id'],
+        subscriptionId         : j['subscription_id'],
+        changeKind             : (j['change_kind'] == 'downgrade')
+                                    ? ChangeKind.downgrade
+                                    : ChangeKind.upgrade,
+        appliedDiscountPercent : (j['applied_discount_percent'] as num?)?.toDouble(),
+      );
+}
+
 
 class ImageBase64ResponseDto {
   final String url;
@@ -199,6 +419,11 @@ class ContextMetadata {
       customMetadata: json['custom_metadata'],
     );
   }
+}
+// NEW: 404 "nessun piano attivo" → eccezione funzionale, non errore bloccante
+class NoActiveSubscriptionException extends ApiException {
+  NoActiveSubscriptionException([String message = 'No active subscription'])
+      : super(message);
 }
 
 class FileUploadResponse {
@@ -583,7 +808,7 @@ class ContextApiSdk {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
     "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    //"chatbot_nlp_api": "http://127.0.0.1:8777"
+    //"chatbot_nlp_api": "http://127.0.0.1:8888"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
@@ -728,7 +953,8 @@ Future<void> uploadFileToContexts(
     String? description,
     required String fileName,
     Map<String, dynamic>? loaders,   
-   Map<String, dynamic>? loaderKwargs,   
+   Map<String, dynamic>? loaderKwargs,
+   String? subscriptionId,   
   }) async {
     if (baseUrl == null) await loadConfig();
 
@@ -745,6 +971,10 @@ Future<void> uploadFileToContexts(
 
   if (loaders      != null) request.fields['loaders']       = jsonEncode(loaders);
   if (loaderKwargs != null) request.fields['loader_kwargs'] = jsonEncode(loaderKwargs);
+  // Dentro il metodo, vicino agli altri fields:
+if (subscriptionId != null && subscriptionId.isNotEmpty) {
+  request.fields['subscription_id'] = subscriptionId;   // << NEW
+}
 
   request.files.add(
     http.MultipartFile.fromBytes('file', fileBytes, filename: fileName),
@@ -1551,5 +1781,281 @@ Future<Uint8List> fetchFileBytes(String fileId, {String? token}) async {
   }
 }
 
+
+  // ────────────────────────────────────────────────────────────────────────
+  // PAYMENTS ▸ API
+  // ────────────────────────────────────────────────────────────────────────
+
+/// GET /payments/current_plan
+Future<CurrentPlanResponse> getCurrentPlan(String token) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/payments/current_plan')
+      .replace(queryParameters: {'token': token});
+
+  final res = await http.get(uri);
+
+  if (res.statusCode == 200) {
+    return CurrentPlanResponse.fromJson(jsonDecode(res.body));
+  }
+
+  if (res.statusCode == 404) {
+    // NEW: 404 = nessuna subscription attiva → caso funzionale
+    // lo facciamo distinguere con una eccezione tipizzata
+    
+   print("#"*120);
+   print(res.statusCode);
+   print("#"*120);
+    throw NoActiveSubscriptionException();
+  }
+
+  // altre casistiche (401/403/500/…): errore reale
+  throw ApiException(
+    'Errore /payments/current_plan '
+    '(status=${res.statusCode}): ${res.body}',
+  );
+}
+
+/// GET /payments/current_plan  → null se non c’è un piano (404)
+Future<CurrentPlanResponse?> getCurrentPlanOrNull(String token) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/payments/current_plan')
+      .replace(queryParameters: {'token': token});
+
+  final res = await http.get(uri);
+
+  if (res.statusCode == 200) {
+    return CurrentPlanResponse.fromJson(jsonDecode(res.body));
+  }
+  if (res.statusCode == 404) {
+    // “nessuna subscription attiva” → caso funzionale
+    return null;
+  }
+
+  throw ApiException(
+    'Errore /payments/current_plan (status=${res.statusCode}): ${res.body}',
+  );
+}
+
+
+  /// GET /payments/credits
+  Future<UserCreditsResponse> getUserCredits(String token, {String? subscriptionId}) async {
+    if (baseUrl == null) await loadConfig();
+
+    final qp = <String, String>{'token': token};
+    if (subscriptionId != null && subscriptionId.isNotEmpty) {
+      qp['subscription_id'] = subscriptionId;
+    }
+
+    final uri = Uri.parse('$baseUrl/payments/credits').replace(queryParameters: qp);
+    final res = await http.get(uri);
+
+    if (res.statusCode == 200) {
+      return UserCreditsResponse.fromJson(jsonDecode(res.body));
+    }
+    throw ApiException('Errore /payments/credits: ${res.body}');
+  }
+
+  /// POST /payments/checkout  → può tornare "checkout" o "portal_redirect"
+  Future<CheckoutOrPortal> createCheckoutSessionVariant({
+    required String token,
+    required String planType,
+    required String variant,
+    String locale = 'it',
+    String? successUrl,
+    String? cancelUrl,
+  }) async {
+    if (baseUrl == null) await loadConfig();
+
+    final uri = Uri.parse('$baseUrl/payments/checkout');
+    final body = {
+      'token'      : token,
+      'plan_type'  : planType,
+      'variant'    : variant,
+      'locale'     : locale,
+      if (successUrl != null) 'success_url': successUrl,
+      if (cancelUrl  != null) 'cancel_url' : cancelUrl,
+    };
+
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    if (res.statusCode == 200) {
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
+      return CheckoutOrPortal.fromJson(j);
+    }
+    throw ApiException('Errore /payments/checkout: ${res.body}');
+  }
+
+/// POST /payments/portal_session
+Future<PortalSessionResponse> createPortalSession({
+  required String token,
+  String? returnUrl,
+  // [NEW] hint per saltare list/resources su L2
+  String? currentSubscriptionId,
+  String? currentPlanType,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/payments/portal_session');
+  final body = {
+    'token': token,
+    if (returnUrl != null) 'return_url': returnUrl,
+    // [NEW] hint → L2 li userà per evitare 2 round-trip a L1
+    if (currentSubscriptionId != null && currentSubscriptionId.isNotEmpty)
+      'current_subscription_id': currentSubscriptionId,
+    if (currentPlanType != null && currentPlanType.isNotEmpty)
+      'current_plan_type': currentPlanType,
+  };
+
+  final res = await http.post(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (res.statusCode == 200) {
+    return PortalSessionResponse.fromJson(jsonDecode(res.body));
+  }
+  throw ApiException('Errore /payments/portal_session: ${res.body}');
+}
+
+
+/// POST /payments/deeplink/update
+Future<DeeplinkResponse> createUpdateDeeplink({
+  required String token,
+  String? returnUrl,
+  ChangeIntent changeIntent = ChangeIntent.both,
+  List<String>? variantsOverride,
+  List<String>? variantsCatalog,
+  // [NEW] hint per saltare list/resources su L2
+  String? currentSubscriptionId,
+  String? currentPlanType,
+  String? currentVariant,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/payments/deeplink/update');
+  final body = {
+    'token': token,
+    if (returnUrl != null) 'return_url': returnUrl,
+    'change_intent': changeIntent.wire,
+    if (variantsOverride != null) 'variants_override': variantsOverride,
+    if (variantsCatalog  != null) 'variants_catalog' : variantsCatalog,
+
+    // [NEW] hint → L2 li userà per evitare 2 round-trip a L1
+    if (currentSubscriptionId != null && currentSubscriptionId.isNotEmpty)
+      'current_subscription_id': currentSubscriptionId,
+    if (currentPlanType != null && currentPlanType.isNotEmpty)
+      'current_plan_type': currentPlanType,
+    if (currentVariant != null && currentVariant.isNotEmpty)
+      'current_variant': currentVariant,
+  };
+
+  final res = await http.post(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (res.statusCode == 200) {
+    return DeeplinkResponse.fromJson(jsonDecode(res.body));
+  }
+  throw ApiException('Errore /payments/deeplink/update: ${res.body}');
+}
+
+
+/// POST /payments/deeplink/upgrade
+///
+/// Specifica EITHER `targetPriceId` OR (`targetPlanType` + `targetVariant`)
+Future<DeeplinkUpgradeResponse> createUpgradeDeeplink({
+  required String token,
+  String? returnUrl,
+  String? targetPriceId,
+  String? targetPlanType,
+  String? targetVariant,
+  // [NEW] hint per saltare list/resources su L2
+  String? currentSubscriptionId,
+  String? currentPlanType,
+  String? currentVariant,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  // Validazione client-side allineata al server
+  final hasPrice = (targetPriceId != null && targetPriceId.isNotEmpty);
+  final hasPlanAndVariant =
+      (targetPlanType != null && targetPlanType.isNotEmpty) &&
+      (targetVariant   != null && targetVariant.isNotEmpty);
+  if (!hasPrice && !hasPlanAndVariant) {
+    throw ApiException(
+      'Devi fornire targetPriceId oppure targetPlanType + targetVariant.',
+    );
+  }
+
+  final uri = Uri.parse('$baseUrl/payments/deeplink/upgrade');
+  final body = {
+    'token': token,
+    if (returnUrl != null) 'return_url': returnUrl,
+
+    // target by price OR by plan+variant
+    if (targetPriceId  != null) 'target_price_id'  : targetPriceId,
+    if (targetPlanType != null) 'target_plan_type' : targetPlanType,
+    if (targetVariant  != null) 'target_variant'   : targetVariant,
+
+    // [NEW] hint → L2 li userà per evitare 2 round-trip a L1
+    if (currentSubscriptionId != null && currentSubscriptionId.isNotEmpty)
+      'current_subscription_id': currentSubscriptionId,
+    if (currentPlanType != null && currentPlanType.isNotEmpty)
+      'current_plan_type': currentPlanType,
+    if (currentVariant != null && currentVariant.isNotEmpty)
+      'current_variant': currentVariant,
+  };
+
+  final res = await http.post(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (res.statusCode == 200) {
+    return DeeplinkUpgradeResponse.fromJson(jsonDecode(res.body));
+  }
+  throw ApiException('Errore /payments/deeplink/upgrade: ${res.body}');
+}
+
+  /// POST /payments/deeplink/cancel
+  Future<DeeplinkResponse> createCancelDeeplink({
+    required String token,
+    String? returnUrl,
+    bool immediate = true,
+    String? portalPreset,           // opzionale, per compatibilità
+    List<String>? variantsCatalog,  // opzionale
+  }) async {
+    if (baseUrl == null) await loadConfig();
+
+    final uri = Uri.parse('$baseUrl/payments/deeplink/cancel');
+    final body = {
+      'token'     : token,
+      'immediate' : immediate,
+      if (returnUrl   != null) 'return_url'     : returnUrl,
+      if (portalPreset!= null) 'portal_preset'  : portalPreset,
+      if (variantsCatalog != null) 'variants_catalog': variantsCatalog,
+    };
+
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    if (res.statusCode == 200) {
+      return DeeplinkResponse.fromJson(jsonDecode(res.body));
+    }
+    throw ApiException('Errore /payments/deeplink/cancel: ${res.body}');
+  }
 
 }

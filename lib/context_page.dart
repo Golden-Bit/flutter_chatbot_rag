@@ -991,6 +991,9 @@ String? _readSubscriptionId(dynamic plan) {
       await _apiSdk.uploadFileToContexts(
           fileBytes, contexts, widget.username, widget.token,
           description: description, fileName: fileName);
+
+              // ⬇⬇⬇ NEW: refresh crediti non-bloccante (fine upload sync)
+    _scheduleCreditsRefresh();
     } catch (e) {
       print('Errore caricamento file: $e');
     } finally {
@@ -1030,6 +1033,9 @@ final subId   = _readSubscriptionId(curPlan);
     loaders: loaders,                   // ⬅️ pass-through
     loaderKwargs: loaderKwargs,         // ⬅️ pass-through
   );
+
+    // ⬇⬇⬇ NEW: refresh crediti non-bloccante (fine upload async)
+  _scheduleCreditsRefresh();
 
   return resp.tasks; // 〈context, TaskIdsPerContext〉
 }
@@ -1080,6 +1086,8 @@ final subId   = _readSubscriptionId(curPlan);
             _savePendingJobs(_pendingJobs);
           });
         }
+
+        
       } catch (e) {
         debugPrint('Errore polling status: $e');
         timer?.cancel();
@@ -1121,6 +1129,46 @@ final subId   = _readSubscriptionId(curPlan);
       print('Errore eliminazione file: $e');
     }
   }
+
+// _DashboardScreenState
+
+bool _creditsRefreshInFlight = false;
+
+/// Refresh "leggero" dei crediti (non blocca la UI).
+Future<void> _refreshCreditsFast() async {
+  if (_creditsRefreshInFlight) return;
+  _creditsRefreshInFlight = true;
+  try {
+    final tok = widget.token;
+
+    // 1) Piano: preferisci quello già in BillingGlobals, altrimenti chiedi al backend
+    var plan = BillingGlobals.snap.plan;
+    plan ??= await _apiSdk.getCurrentPlanOrNull(tok);
+
+    if (plan == null) {
+      BillingGlobals.setNoPlan();
+      if (mounted) setState(() {}); // opzionale
+      return;
+    }
+
+    // 2) Crediti: passa subscription_id se disponibile (più veloce)
+    final subId   = _readSubscriptionId(plan);
+    final credits = await _apiSdk.getUserCredits(tok, subscriptionId: subId);
+
+    // 3) Aggiorna il notifier globale (la Top-Bar si aggiorna da sola)
+    BillingGlobals.setData(plan: plan, credits: credits);
+    if (mounted) setState(() {}); // opzionale
+  } catch (e) {
+    BillingGlobals.setError(e);   // errore "soft"
+  } finally {
+    _creditsRefreshInFlight = false;
+  }
+}
+
+/// Schedula senza await (non blocca nulla)
+void _scheduleCreditsRefresh() {
+  unawaited(_refreshCreditsFast());
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // UPLOAD “bloccante”: la pagina resta in attesa (niente polling)

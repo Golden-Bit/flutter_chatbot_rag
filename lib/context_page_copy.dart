@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_app/ui_components/dialogs/loader_config_dialog.dart';
 import 'package:flutter_app/ui_components/icons/cube.dart';
+import 'package:flutter_app/user_manager/state/billing_globals.dart';
 import 'package:flutter_app/utilities/localization.dart';
 import 'package:universal_html/html.dart' as html;
 import 'context_api_sdk.dart';
@@ -956,7 +957,18 @@ void _filterContexts() {
   });
 }
 
-
+String? _readSubscriptionId(dynamic plan) {
+  try {
+    final v = plan?.subscriptionId;
+    if (v is String) return v;
+  } catch (_) {}
+  try {
+    if (plan is Map && plan['subscription_id'] is String) {
+      return plan['subscription_id'] as String;
+    }
+  } catch (_) {}
+  return null;
+}
 
   // Funzione per caricare i file di un contesto specifico
   Future<List<Map<String, dynamic>>> _loadFilesForContext(
@@ -974,10 +986,14 @@ void _filterContexts() {
   // Funzione per caricare un file in più contesti
   Future<void> _uploadFile(Uint8List fileBytes, List<String> contexts,
       {String? description, required String fileName}) async {
+
     try {
       await _apiSdk.uploadFileToContexts(
           fileBytes, contexts, widget.username, widget.token,
           description: description, fileName: fileName);
+
+              // ⬇⬇⬇ NEW: refresh crediti non-bloccante (fine upload sync)
+    _scheduleCreditsRefresh();
     } catch (e) {
       print('Errore caricamento file: $e');
     } finally {
@@ -1002,16 +1018,24 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
   Map<String, dynamic>? loaders,        // ⬅️ NEW
   Map<String, dynamic>? loaderKwargs,   // ⬅️ NEW
 }) async {
+
+          final curPlan = BillingGlobals.snap.plan;
+final subId   = _readSubscriptionId(curPlan);
+
   final resp = await _apiSdk.uploadFileToContextsAsync(
     fileBytes,
     contexts,
     widget.username,
     widget.token,
+    subscriptionId: subId,
     description: description,
     fileName: fileName,
     loaders: loaders,                   // ⬅️ pass-through
     loaderKwargs: loaderKwargs,         // ⬅️ pass-through
   );
+
+    // ⬇⬇⬇ NEW: refresh crediti non-bloccante (fine upload async)
+  _scheduleCreditsRefresh();
 
   return resp.tasks; // 〈context, TaskIdsPerContext〉
 }
@@ -1062,6 +1086,8 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
             _savePendingJobs(_pendingJobs);
           });
         }
+
+        
       } catch (e) {
         debugPrint('Errore polling status: $e');
         timer?.cancel();
@@ -1103,6 +1129,46 @@ Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
       print('Errore eliminazione file: $e');
     }
   }
+
+// _DashboardScreenState
+
+bool _creditsRefreshInFlight = false;
+
+/// Refresh "leggero" dei crediti (non blocca la UI).
+Future<void> _refreshCreditsFast() async {
+  if (_creditsRefreshInFlight) return;
+  _creditsRefreshInFlight = true;
+  try {
+    final tok = widget.token;
+
+    // 1) Piano: preferisci quello già in BillingGlobals, altrimenti chiedi al backend
+    var plan = BillingGlobals.snap.plan;
+    plan ??= await _apiSdk.getCurrentPlanOrNull(tok);
+
+    if (plan == null) {
+      BillingGlobals.setNoPlan();
+      if (mounted) setState(() {}); // opzionale
+      return;
+    }
+
+    // 2) Crediti: passa subscription_id se disponibile (più veloce)
+    final subId   = _readSubscriptionId(plan);
+    final credits = await _apiSdk.getUserCredits(tok, subscriptionId: subId);
+
+    // 3) Aggiorna il notifier globale (la Top-Bar si aggiorna da sola)
+    BillingGlobals.setData(plan: plan, credits: credits);
+    if (mounted) setState(() {}); // opzionale
+  } catch (e) {
+    BillingGlobals.setError(e);   // errore "soft"
+  } finally {
+    _creditsRefreshInFlight = false;
+  }
+}
+
+/// Schedula senza await (non blocca nulla)
+void _scheduleCreditsRefresh() {
+  unawaited(_refreshCreditsFast());
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // UPLOAD “bloccante”: la pagina resta in attesa (niente polling)

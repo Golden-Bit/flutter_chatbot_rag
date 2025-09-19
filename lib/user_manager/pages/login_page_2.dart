@@ -1,15 +1,15 @@
-//import 'package:flutter_app/apps/enac_app/app.dart';
-import 'package:flutter_app/chatbot.dart';
-import 'package:flutter_app/databases_manager/database_service.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/get_user_info_request.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/sign_in_request.dart';
-import 'package:flutter_app/user_manager/pages/confirm_email_page.dart';
-import 'package:flutter_app/user_manager/pages/forgot_password_page.dart';
-import 'package:flutter_app/user_manager/pages/settings_page.dart';
+//import 'package:boxed_ai/apps/enac_app/app.dart';
+import 'package:boxed_ai/chatbot.dart';
+import 'package:boxed_ai/databases_manager/database_service.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/get_user_info_request.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/sign_in_request.dart';
+import 'package:boxed_ai/user_manager/pages/confirm_email_page.dart';
+import 'package:boxed_ai/user_manager/pages/forgot_password_page.dart';
+import 'package:boxed_ai/user_manager/pages/settings_page.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'dart:html' as html;  // Importa per accedere a localStorage
 import 'dart:convert';
 import 'package:crypto/crypto.dart';

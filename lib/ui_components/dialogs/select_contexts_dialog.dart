@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
-import 'package:flutter_app/context_api_sdk.dart';
-import 'package:flutter_app/utilities/localization.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/utilities/localization.dart';
 import 'package:intl/intl.dart';
 
 /// ─────────────────────────────────────────────────────────────────────────────

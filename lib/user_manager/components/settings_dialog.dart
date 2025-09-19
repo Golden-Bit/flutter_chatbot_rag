@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/context_api_sdk.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/components/securety_settings_content.dart';
-import 'package:flutter_app/user_manager/components/general_settings_content.dart';
-import 'package:flutter_app/user_manager/components/subscription_settings_content.dart';
-import 'package:flutter_app/user_manager/components/user_profile_settings_content.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/components/securety_settings_content.dart';
+import 'package:boxed_ai/user_manager/components/general_settings_content.dart';
+import 'package:boxed_ai/user_manager/components/subscription_settings_content.dart';
+import 'package:boxed_ai/user_manager/components/user_profile_settings_content.dart';
 
 /// Dialog che mostra le varie sezioni di impostazioni dell’app.
 /// Tutti i sotto-widget ricevono la **stessa** istanza di [CognitoApiClient]

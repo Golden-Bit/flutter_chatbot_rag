@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot.dart';
+import 'package:boxed_ai/chatbot.dart';
 import 'package:uuid/uuid.dart'; // dove risiede ChatBotPageState
 
 /// Widget che invia automaticamente una sequenza di messaggi all’assistente

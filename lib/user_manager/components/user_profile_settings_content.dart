@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/get_user_info_request.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/update_attribute_request.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_attribute.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/get_user_info_request.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/update_attribute_request.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_attribute.dart';
 
 /// Widget che mostra e consente di modificare dinamicamente gli attributi
 /// dell'utente memorizzati in Amazon Cognito.

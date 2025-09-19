@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/advanced_chart.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/custom_chart.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/market_overview.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/radar_chart.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/advanced_chart.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/custom_chart.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/market_overview.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/radar_chart.dart';
 // Assicurati di importare il file in cui è definito RadarChartWidget e RadarIndicatorData.
 
 

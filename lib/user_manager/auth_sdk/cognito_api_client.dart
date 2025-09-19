@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'dart:html' as html; // Necessario per modificare window.location in Flutter Web
 import 'models/change_password_request.dart';
 import 'models/confirm_forgot_password_request.dart';

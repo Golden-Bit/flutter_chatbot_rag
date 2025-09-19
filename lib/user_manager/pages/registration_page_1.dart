@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/user_manager/components/social_button.dart';
-import 'package:flutter_app/user_manager/pages/login_page_1.dart';
-import 'package:flutter_app/user_manager/pages/registration_page_2.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/user_manager/components/social_button.dart';
+import 'package:boxed_ai/user_manager/pages/login_page_1.dart';
+import 'package:boxed_ai/user_manager/pages/registration_page_2.dart';
 
 class RegistrationPage extends StatefulWidget {
   const RegistrationPage({Key? key}) : super(key: key);

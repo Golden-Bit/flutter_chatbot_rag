@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/change_password_request.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart'
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/change_password_request.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart'
     show showCognitoError;
 
 class SecuritySettingsContent extends StatefulWidget {

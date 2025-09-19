@@ -6,10 +6,10 @@
  *  ▸ Nessuna logica di business modificata
  * ───────────────────────────────────────────────────────────────────────── */
 import 'package:flutter/material.dart';
-import 'package:flutter_app/dual_pane_wrapper.dart';
-import 'package:flutter_app/chatbot.dart';                       // ChatBot
-import 'package:flutter_app/apps/enac_app/llogic_components/backend_sdk.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/dual_pane_wrapper.dart';
+import 'package:boxed_ai/chatbot.dart';                       // ChatBot
+import 'package:boxed_ai/apps/enac_app/llogic_components/backend_sdk.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';

@@ -10,8 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 // <-- aggiorna l'import col path reale dove hai lo SDK
-import 'package:flutter_app/context_api_sdk.dart';
-import 'package:flutter_app/ui_components/dialogs/showMediaUploadDialog.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/ui_components/dialogs/showMediaUploadDialog.dart';
 
 // Converte qualunque numero in testo intero senza simboli/decimali
 String _fmtIntNoCurrency(num? v) => ((v ?? 0).round()).toString();

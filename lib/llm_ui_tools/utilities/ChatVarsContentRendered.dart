@@ -3,8 +3,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter_app/ui_components/message/codeblock_md_builder.dart';
-import 'package:flutter_app/ui_components/message/table_md_builder.dart';
+import 'package:boxed_ai/ui_components/message/codeblock_md_builder.dart';
+import 'package:boxed_ai/ui_components/message/table_md_builder.dart';
 import 'package:flutter/material.dart';
 import '../../chatbot.dart';
 

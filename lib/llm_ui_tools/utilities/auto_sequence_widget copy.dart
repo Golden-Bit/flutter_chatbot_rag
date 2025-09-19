@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot.dart'; // dove risiede ChatBotPageState
+import 'package:boxed_ai/chatbot.dart'; // dove risiede ChatBotPageState
 
 /// Widget che invia automaticamente una sequenza di messaggi all’assistente
 /// (una volta sola) e permette all’utente di espandere/collassare la card per

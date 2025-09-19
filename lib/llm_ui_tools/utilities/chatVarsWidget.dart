@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';          // ← Clipboard
-import 'package:flutter_app/chatbot.dart';       // contiene ChatBotPageState
+import 'package:boxed_ai/chatbot.dart';       // contiene ChatBotPageState
 
 
 /// Restituisce sempre la stessa tonalità per la stessa **chiave**.

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/create_client_dialog.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/create_client_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 
-import 'package:flutter_app/apps/enac_app/llogic_components/backend_sdk.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/apps/enac_app/llogic_components/backend_sdk.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
 class _ClientSearchResult {
   final String id; // ← clientId vero

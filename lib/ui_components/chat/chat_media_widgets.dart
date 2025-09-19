@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_app/context_api_sdk.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
 
 /// Cache *semplice* in memoria.
 /// - key = URL immagine

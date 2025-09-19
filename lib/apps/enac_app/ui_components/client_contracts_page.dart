@@ -3,8 +3,8 @@
  *  – dettaglio cliente + lista contratti + “Nuovo contratto”
  * *****************************************************************/
 import 'package:flutter/material.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/create_contract_dialog.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/create_contract_dialog.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 

@@ -22,9 +22,9 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';          // debugPrint
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot.dart';
-import 'package:flutter_app/context_api_sdk.dart';
-import 'package:flutter_app/llm_ui_tools/tools.dart';
+import 'package:boxed_ai/chatbot.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/llm_ui_tools/tools.dart';
 
 /// ─────────────────────────────────────────────────────────────────
 /// Loader di default – Unstructured

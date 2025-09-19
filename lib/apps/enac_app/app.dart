@@ -2,17 +2,17 @@
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_app/apps/enac_app/llogic_components/backend_sdk.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/client_contracts_page.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/client_detail_page.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/client_page.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/contract_summary.dart';
-import 'package:flutter_app/dual_pane_wrapper.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/home_dashboard.dart';
-import 'package:flutter_app/apps/enac_app/ui_components/search_results.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
-import 'package:flutter_app/user_manager/components/settings_dialog.dart';
-import 'package:flutter_app/user_manager/pages/login_page_1.dart';
+import 'package:boxed_ai/apps/enac_app/llogic_components/backend_sdk.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/client_contracts_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/client_detail_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/client_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/contract_summary.dart';
+import 'package:boxed_ai/dual_pane_wrapper.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/home_dashboard.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/search_results.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/user_manager/components/settings_dialog.dart';
+import 'package:boxed_ai/user_manager/pages/login_page_1.dart';
 import 'package:google_fonts/google_fonts.dart'; // (resta se già usi GoogleFonts)
 
 // *** in HomeScaffold (state) ***

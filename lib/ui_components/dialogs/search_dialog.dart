@@ -1,6 +1,6 @@
 // search_dialog.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_app/utilities/localization.dart';
+import 'package:boxed_ai/utilities/localization.dart';
 import 'package:intl/intl.dart';
 
 

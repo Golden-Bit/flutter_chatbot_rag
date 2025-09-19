@@ -18,10 +18,10 @@
 // IMPORT
 //─────────────────────────────────────────────────────────────────────────────
 import 'package:flutter/material.dart';
-import 'package:flutter_app/chatbot.dart';
-import 'package:flutter_app/context_api_sdk.dart';
-import 'package:flutter_app/mini_chat.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/chatbot.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/mini_chat.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
 // (facoltativo) se la pagina vuole ricevere la chat‑key
 mixin ChatBotKeyConsumer on Widget {

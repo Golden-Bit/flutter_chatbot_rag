@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_app/user_manager/pages/login_page_1.dart';
-import 'package:flutter_app/user_manager/pages/registration_page_1.dart';
-import 'package:flutter_app/utilities/localization.dart';
+import 'package:boxed_ai/user_manager/pages/login_page_1.dart';
+import 'package:boxed_ai/user_manager/pages/registration_page_1.dart';
+import 'package:boxed_ai/utilities/localization.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

@@ -2,7 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_app/context_api_sdk.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:uuid/uuid.dart';
 
 /// ─────────────────── type-alias usati come callback ────────────────────

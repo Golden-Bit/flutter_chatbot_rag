@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/sign_up_request.dart';
-import 'package:flutter_app/user_manager/pages/confirm_email_page.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/sign_up_request.dart';
+import 'package:boxed_ai/user_manager/pages/confirm_email_page.dart';
 
 String generateUserName(String email) {
   final bytes = utf8.encode(email);

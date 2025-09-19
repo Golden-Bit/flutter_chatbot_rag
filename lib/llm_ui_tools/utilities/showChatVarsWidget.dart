@@ -2,8 +2,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_app/chatbot.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/ChatVarsContentRendered.dart';          // ← Clipboard
+import 'package:boxed_ai/chatbot.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/ChatVarsContentRendered.dart';          // ← Clipboard
 
 /// Restituisce sempre la stessa tonalità per la stessa **chiave**.
 /// Hue deterministico (0-359), saturazione e lightness fisse per avere

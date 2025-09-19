@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
-import 'package:flutter_app/context_api_sdk.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
 
 final ContextApiSdk _apiSdk = ContextApiSdk();
 

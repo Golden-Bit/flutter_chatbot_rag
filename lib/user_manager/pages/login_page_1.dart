@@ -2,14 +2,14 @@ import 'dart:convert';
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
-//import 'package:flutter_app/apps/enac_app/app.dart';
-import 'package:flutter_app/chatbot.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/get_user_info_request.dart';
-import 'package:flutter_app/user_manager/components/social_button.dart';
-import 'package:flutter_app/user_manager/pages/registration_page_1.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+//import 'package:boxed_ai/apps/enac_app/app.dart';
+import 'package:boxed_ai/chatbot.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/get_user_info_request.dart';
+import 'package:boxed_ai/user_manager/components/social_button.dart';
+import 'package:boxed_ai/user_manager/pages/registration_page_1.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'login_page_2.dart';
 
 class LoginPage extends StatefulWidget {

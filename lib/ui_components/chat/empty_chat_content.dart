@@ -1,7 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/ui_components/custom_components/prompts_config_v1.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/ui_components/custom_components/prompts_config_v1.dart';
 // prompts_config.dart contiene la lista "promptsData" con
 // { "categoryName", "icon", "examples": [...] }
 

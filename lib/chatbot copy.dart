@@ -4,29 +4,29 @@ import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/auto_sequence_widget.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/chatVarsWidget.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/js_runner_widget.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/showChatVarsWidget.dart';
-import 'package:flutter_app/llm_ui_tools/utilities/toolEventWidget.dart';
-import 'package:flutter_app/ui_components/chat/chat_input_widget.dart';
-import 'package:flutter_app/ui_components/chat/chat_media_widgets.dart';
-import 'package:flutter_app/ui_components/chat/empty_chat_content.dart';
-import 'package:flutter_app/ui_components/chat/utilities_functions/kb_utilities.dart';
-import 'package:flutter_app/ui_components/chat/utilities_functions/rename_chat_instructions.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/ui_components/dialogs/loader_config_dialog.dart';
-import 'package:flutter_app/ui_components/message/codeblock_md_builder.dart';
-import 'package:flutter_app/llm_ui_tools/tools.dart';
-import 'package:flutter_app/ui_components/buttons/blue_button.dart';
-import 'package:flutter_app/ui_components/dialogs/search_dialog.dart';
-import 'package:flutter_app/ui_components/dialogs/select_contexts_dialog.dart';
-import 'package:flutter_app/ui_components/message/table_md_builder.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/components/settings_dialog.dart';
-import 'package:flutter_app/user_manager/components/usage_analytics_dialog.dart';
-import 'package:flutter_app/user_manager/pages/billing_page.dart';
-import 'package:flutter_app/utilities/localization.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/auto_sequence_widget.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/chatVarsWidget.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/js_runner_widget.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/showChatVarsWidget.dart';
+import 'package:boxed_ai/llm_ui_tools/utilities/toolEventWidget.dart';
+import 'package:boxed_ai/ui_components/chat/chat_input_widget.dart';
+import 'package:boxed_ai/ui_components/chat/chat_media_widgets.dart';
+import 'package:boxed_ai/ui_components/chat/empty_chat_content.dart';
+import 'package:boxed_ai/ui_components/chat/utilities_functions/kb_utilities.dart';
+import 'package:boxed_ai/ui_components/chat/utilities_functions/rename_chat_instructions.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/ui_components/dialogs/loader_config_dialog.dart';
+import 'package:boxed_ai/ui_components/message/codeblock_md_builder.dart';
+import 'package:boxed_ai/llm_ui_tools/tools.dart';
+import 'package:boxed_ai/ui_components/buttons/blue_button.dart';
+import 'package:boxed_ai/ui_components/dialogs/search_dialog.dart';
+import 'package:boxed_ai/ui_components/dialogs/select_contexts_dialog.dart';
+import 'package:boxed_ai/ui_components/message/table_md_builder.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/components/settings_dialog.dart';
+import 'package:boxed_ai/user_manager/components/usage_analytics_dialog.dart';
+import 'package:boxed_ai/user_manager/pages/billing_page.dart';
+import 'package:boxed_ai/utilities/localization.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -38,7 +38,7 @@ import 'package:flutter/services.dart'
     show rootBundle; // Import necessario per caricare file JSON
 import 'dart:convert'; // Per il parsing JSON
 import 'context_api_sdk.dart'; // Importa lo script SDK
-import 'package:flutter_app/user_manager/auth_sdk/models/user_model.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'databases_manager/database_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:uuid/uuid.dart'; // Importa il pacchetto UUID (assicurati di averlo aggiunto a pubspec.yaml)
@@ -55,7 +55,7 @@ import 'package:markdown/markdown.dart' as md; // parse Element
 import 'dart:html' as html; // download CSV
 import 'package:collection/collection.dart';
 import 'dart:async';
-import 'package:flutter_app/user_manager/state/billing_globals.dart';
+import 'package:boxed_ai/user_manager/state/billing_globals.dart';
 
 /// ➊  Chiave che descrive come il messaggio deve apparire nella UI
 ///     'normal'      → si vede subito (default)

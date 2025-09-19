@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/ui_components/custom_components/general_components_v1.dart';
-import 'package:flutter_app/user_manager/auth_sdk/cognito_api_client.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/confirm_forgot_password_request.dart';
-import 'package:flutter_app/user_manager/auth_sdk/models/forgot_password_request.dart';
+import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/confirm_forgot_password_request.dart';
+import 'package:boxed_ai/user_manager/auth_sdk/models/forgot_password_request.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import 'package:flutter_app/user_manager/pages/login_page_2.dart';
+import 'package:boxed_ai/user_manager/pages/login_page_2.dart';
 
 String generateUserName(String email) {
   // Calcola l'hash SHA-256 dell'email

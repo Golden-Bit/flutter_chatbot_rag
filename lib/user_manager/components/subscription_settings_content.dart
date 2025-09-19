@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/context_api_sdk.dart';
-import 'package:flutter_app/user_manager/pages/billing_page.dart';
-import 'package:flutter_app/user_manager/pages/payment_page.dart';
-import 'package:flutter_app/user_manager/state/billing_globals.dart';
+import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/user_manager/pages/billing_page.dart';
+import 'package:boxed_ai/user_manager/pages/payment_page.dart';
+import 'package:boxed_ai/user_manager/state/billing_globals.dart';
 
 /// Mostra lo stato dell’abbonamento:
 /// - Spinner finché il fetch in ChatBotPage non è concluso

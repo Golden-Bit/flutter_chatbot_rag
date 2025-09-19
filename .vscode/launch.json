@@ -5,18 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "flutter_app",
+            "name": "Boxed-AI",
             "request": "launch",
             "type": "dart"
         },
         {
-            "name": "flutter_app (profile mode)",
+            "name": "Boxed-AI (profile mode)",
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile"
         },
         {
-            "name": "flutter_app (release mode)",
+            "name": "Boxed-AI (release mode)",
             "request": "launch",
             "type": "dart",
             "flutterMode": "release"

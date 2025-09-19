@@ -931,6 +931,9 @@ Future<Map<String, dynamic>?> _showLoaderConfigDialog(
         _filteredContexts = List.from(_gridContexts);
         _isCtxLoading     = false;                 // ✓ fine caricamento
       });
+      if (_nameSearchController.text.trim().isNotEmpty) {
+  _filterContexts();
+}
     } catch (e) {
       debugPrint('Errore nel recupero dei contesti: $e');
       if (mounted) setState(() => _isCtxLoading = false);

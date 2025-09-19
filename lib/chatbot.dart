@@ -385,6 +385,7 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
   }
 }
 
+
 /// Restituisce la coppia **icona + colore** in base all’estensione del file.
 Map<String, dynamic> fileIconFor(String fileName) {
   final ext = fileName.split('.').last.toLowerCase();

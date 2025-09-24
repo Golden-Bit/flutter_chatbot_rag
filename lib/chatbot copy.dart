@@ -385,6 +385,7 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
   }
 }
 
+
 /// Restituisce la coppia **icona + colore** in base all’estensione del file.
 Map<String, dynamic> fileIconFor(String fileName) {
   final ext = fileName.split('.').last.toLowerCase();
@@ -2361,8 +2362,8 @@ void clearUserInputPrefix() => _userInputPrefix = '';
         "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
         "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://127.0.0.1:8777",
-        "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        //"chatbot_nlp_api": "http://127.0.0.1:8888"
+        //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+        "chatbot_nlp_api": "http://127.0.0.1:8888"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {
@@ -3661,64 +3662,6 @@ num? _readNum(dynamic obj, String camel, String snake) {
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Badge crediti per la topbar (null → non mostrare)
-// ─────────────────────────────────────────────────────────────
-Widget? _buildTopbarCreditsPill() {
-  final snap = BillingGlobals.notifier.value;
-
-  // Evita overflow su schermi molto stretti
-  final w = MediaQuery.of(context).size.width;
-  if (w < 360) return null;
-
-  // Durante il fetch non mostrare nulla (topbar pulita)
-  if (!snap.hasFetched || snap.isLoading) return null;
-
-  // In caso di errore, non mostrare (la topbar ha già il menu utente)
-  if (snap.error != null) return null;
-
-  // Nessun piano → piccolo badge "Free"
-  if (!snap.hasActiveSubscription) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: const Text('Free', style: TextStyle(fontSize: 12, color: Colors.black87)),
-    );
-  }
-
-  // Piano attivo → prova a leggere i crediti
-  final credits = snap.credits;
-  final remaining = _readNum(credits, 'remainingTotal', 'remaining_total');
-  final used      = _readNum(credits, 'usedTotal', 'used_total');
-  final provided  = _readNum(credits, 'providedTotal', 'provided_total');
-
-  final label = (remaining != null) ? 'Crediti: $remaining' : 'Crediti: —';
-  final tooltip = 'Restanti: ${remaining ?? '—'} • Usati: ${used ?? '—'} • Totali: ${provided ?? '—'}';
-
-  return Tooltip(
-    message: tooltip,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(Icons.attach_money_outlined, size: 14, color: Colors.black87),
-          SizedBox(width: 6),
-          // Il testo lo mettiamo sotto, così possiamo localizzare facilmente se servirà
-        ],
-      ),
-    ),
-  );
-}
 Widget _spinnerPill({
   required EdgeInsetsGeometry padding,
   required double borderRadius,
@@ -3815,8 +3758,8 @@ Widget _buildTopbarCreditsPillWithText({
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
-          const SizedBox(width: 8),
+          //Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
+          //const SizedBox(width: 8),
           Text('Crediti: 0', style: TextStyle(fontSize: fontSize, color: Colors.black87)),
         ],
       ),
@@ -3844,8 +3787,8 @@ Widget _buildTopbarCreditsPillWithText({
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
-          const SizedBox(width: 8),
+          //Icon(Icons.attach_money_outlined, size: iconSize, color: Colors.black87),
+          //const SizedBox(width: 8),
           Text(text, style: TextStyle(fontSize: fontSize, color: Colors.black87)),
         ],
       ),

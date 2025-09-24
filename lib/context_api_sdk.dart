@@ -1363,6 +1363,48 @@ Future<List<DocumentModel>> listDocuments(
   throw ApiException('Errore elenco documenti: ${response.body}');
 }
 
+Future<List<DocumentModel>> listDocumentsResolved({
+  String? collectionName,
+  String? ctx,
+  String? filename,
+  String? prefix,
+  int skip = 0,
+  int limit = 10,
+  String? token,
+  void Function(int total)? onTotal,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  if ((collectionName == null || collectionName.isEmpty) &&
+      (ctx == null || filename == null)) {
+    throw ArgumentError("Serve 'collectionName' oppure 'ctx' + 'filename'.");
+  }
+
+  final query = <String, String>{
+    'skip' : skip.toString(),
+    'limit': limit.toString(),
+    if (prefix != null) 'prefix': prefix,
+    if (token  != null) 'token' : token,
+    if (collectionName != null && collectionName.isNotEmpty) 'collection_name': collectionName,
+    if (ctx != null) 'ctx': ctx!,
+    if (filename != null) 'filename': filename!,
+  };
+
+  final uri = Uri.parse('$baseUrl/documents').replace(queryParameters: query);
+  final response = await http.get(uri);
+
+  if (response.statusCode == 200) {
+    if (onTotal != null && response.headers.containsKey('x-total-count')) {
+      onTotal(int.tryParse(response.headers['x-total-count']!) ?? 0);
+    }
+    final utf8Body = utf8.decode(response.bodyBytes);
+    final data     = jsonDecode(utf8Body) as List<dynamic>;
+    return data.map((j) => DocumentModel.fromJson(j)).toList();
+  }
+
+  throw ApiException('Errore elenco documenti: ${response.body}');
+}
+
 
 /// Ritorna { estensione : [loader1, loader2, …] }
 Future<Map<String, List<String>>> getLoadersCatalog() async {

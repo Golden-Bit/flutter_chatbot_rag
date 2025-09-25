@@ -1,4 +1,6 @@
-//import 'package:boxed_ai/apps/enac_app/app.dart';
+import 'package:boxed_ai/apps/enac_app/app.dart';
+//import 'package:boxed_ai/apps/example_app_2/app.dart';
+//import 'package:boxed_ai/apps/example_app_3/app.dart';
 import 'package:boxed_ai/chatbot.dart';
 import 'package:boxed_ai/databases_manager/database_service.dart';
 import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
@@ -127,7 +129,7 @@ void _setError(String msg) => _errorMessage = msg;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => ChatBotPage(user: user, token: token), //HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (context) => HomeScaffold(user: user, token: token), // //HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
       } catch (e) {

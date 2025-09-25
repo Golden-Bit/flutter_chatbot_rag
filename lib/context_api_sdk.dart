@@ -322,9 +322,17 @@ class ToolParamSpec {
           'properties' : properties!.map((p) => p.toJson()).toList(),
       };
 
-  /* helper enum→string */
-  static String _enum2str(ParamType t) =>
-      t.toString().split('.').last;            // ParamType.string → "string"
+/* helper enum→string */
+static String _enum2str(ParamType t) {
+  switch (t) {
+    case ParamType.string:  return 'string';
+    case ParamType.integer: return 'int';     // <-- backend vuole "int"
+    case ParamType.number:  return 'float';   // <-- backend vuole "float"
+    case ParamType.boolean: return 'bool';    // <-- backend vuole "bool"
+    case ParamType.array:   return 'list';    // <-- backend vuole "list"
+    case ParamType.object:  return 'dict';    // <-- backend vuole "dict"
+  }
+}
 }
 
 // ── ToolSpec  (solo i campi richiesti dal backend) ────────────────────────
@@ -1155,6 +1163,10 @@ Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
     if (toolSpecs.isNotEmpty)
     'client_tool_specs': toolSpecs.map((t) => t.toJson()).toList(),
   };
+
+  print("#"*120);
+  print(body);
+  print("#"*120);
 
   try {
     // Effettua la richiesta POST

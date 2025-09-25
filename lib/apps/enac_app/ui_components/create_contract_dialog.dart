@@ -5,10 +5,11 @@
  *  ▸ Icona chat in alto a destra per aprire / chiudere il pane destro
  *  ▸ Nessuna logica di business modificata
  * ───────────────────────────────────────────────────────────────────────── */
+import 'package:boxed_ai/apps/enac_app/ui_components/contract_form_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
 import 'package:boxed_ai/chatbot.dart';                       // ChatBot
-import 'package:boxed_ai/apps/enac_app/llogic_components/backend_sdk.dart';
+import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -59,6 +60,7 @@ class CreateContractDialog extends StatefulWidget {
  *  S T A T E
  *════════════════════════════════════════════════════════════════════════*/
 class _CreateContractDialogState extends State<CreateContractDialog> {
+  final _contractPaneKey = GlobalKey<ContractFormPaneState>(); // NEW
   /*──── form: controller testo obbligatori / principali ──────────────────*/
   final _ctrl = <String, TextEditingController>{
     'tipo'         : TextEditingController(),
@@ -228,11 +230,12 @@ class _CreateContractDialogState extends State<CreateContractDialog> {
       content: SizedBox(
         width : 1000,   // spazio sufficiente per form + chat
         height: 620,
+
         child: DualPaneWrapper(
           controller : _paneCtrl,
           user       : widget.user,
           token      : widget.token,
-          leftChild  : _buildForm(),       // definito sotto
+          leftChild  : ContractFormPane(key: _contractPaneKey),       // definito sotto
         ),
       ),
       /*──────── bottoni azione ───────────────────────────────────────*/
@@ -384,93 +387,134 @@ class _CreateContractDialogState extends State<CreateContractDialog> {
   /*======================================================================
    *  SALVATAGGIO CONTRATTO
    *====================================================================*/
-  Future<void> _onCreatePressed() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    DateTime _parse(String s) => _fmt.parseStrict(s.trim());
-
-    final contratto = ContrattoOmnia8(
-      /*---- Identificativi ----*/
-      identificativi: Identificativi(
-        tipo          : _ctrl['tipo']!.text.trim(),
-        tpCar         : _ctrl['tpCar']!.text.trim().isEmpty ? null : _ctrl['tpCar']!.text.trim(),
-        ramo          : _ctrl['ramo']!.text.trim(),
-        compagnia     : _ctrl['compagnia']!.text.trim(),
-        numeroPolizza : _ctrl['numero']!.text.trim(),
-      ),
-      /*---- Unità vendita ----*/
-      unitaVendita: UnitaVendita(
-        puntoVendita : _ctrl['pv1']!.text.trim(),
-        puntoVendita2: _ctrl['pv2']!.text.trim(),
-        account      : _ctrl['account']!.text.trim(),
-        intermediario: _ctrl['intermediario']!.text.trim(),
-      ),
-      /*---- Amministrativi ----*/
-      amministrativi: Amministrativi(
-        effetto           : _parse(_effCtrl.text),
-        scadenza          : _parse(_scadCtrl.text),
-        dataEmissione     : _parse(_emisCtrl.text),
-        ultimaRataPagata  : _parse(_emisCtrl.text),
-        frazionamento     : _ctrl['fraz']!.text.trim(),
-        modalitaIncasso   : _ctrl['modIncasso']!.text.trim(),
-        compresoFirma     : false,
-        scadenzaOriginaria: _parse(_scadCtrl.text),
-        scadenzaMora      : _scMoraCtrl.text.isEmpty ? null : _parse(_scMoraCtrl.text),
-        numeroProposta    : _ctrl['numeroProposta']!.text.trim().isEmpty ? null : _ctrl['numeroProposta']!.text.trim(),
-        codConvenzione    : _ctrl['codConvenzione']!.text.trim().isEmpty ? null : _ctrl['codConvenzione']!.text.trim(),
-        scadenzaVincolo   : _scVinCtrl.text.isEmpty ? null : _parse(_scVinCtrl.text),
-        scadenzaCopertura : _scCopCtrl.text.isEmpty ? null : _parse(_scCopCtrl.text),
-        fineCoperturaProroga: _finePrCtrl.text.isEmpty ? null : _parse(_finePrCtrl.text),
-      ),
-      /*---- Premi ----*/
-      premi: Premi(
-        premio    : double.parse(_ctrl['premio']!.text.replaceAll(',', '.')),
-        netto     : double.parse(_ctrl['netto']!.text.replaceAll(',', '.')),
-        accessori : double.parse(_ctrl['accessori']!.text.replaceAll(',', '.')),
-        diritti   : double.parse(_ctrl['diritti']!.text.replaceAll(',', '.')),
-        imposte   : double.parse(_ctrl['imposte']!.text.replaceAll(',', '.')),
-        spese     : double.parse(_ctrl['spese']!.text.replaceAll(',', '.')),
-        fondo     : double.parse(_ctrl['fondo']!.text.replaceAll(',', '.')),
-        sconto    : double.tryParse(_ctrl['sconto']!.text.replaceAll(',', '.')),
-      ),
-      /*---- Rinnovo ----*/
-      rinnovo: Rinnovo(
-        rinnovo   : _rinCtrl['rinnovo']!.text.trim(),
-        disdetta  : _rinCtrl['disdetta']!.text.trim(),
-        giorniMora: _rinCtrl['gMora']!.text.trim(),
-        proroga   : _rinCtrl['proroga']!.text.trim(),
-      ),
-      /*---- Operatività ----*/
-      operativita: Operativita(
-        regolazione: _regolazione,
-        parametriRegolazione: ParametriRegolazione(
-          inizio  : _parse(_inizioRegCtrl.text),
-          fine    : _parse(_fineRegCtrl.text),
-          ultimaRegEmessa      : _ultRegCtrl.text.isEmpty ? null : _parse(_ultRegCtrl.text),
-          giorniInvioDati      : int.tryParse(_opCtrl['gInvio']!.text),
-          giorniPagReg         : int.tryParse(_opCtrl['gPag']!.text),
-          giorniMoraRegolazione: int.tryParse(_opCtrl['gMoraReg']!.text),
-          cadenzaRegolazione   : _opCtrl['cadReg']!.text.trim(),
-        ),
-      ),
-      /*---- RamiEl ----*/
-      ramiEl: RamiEl(descrizione: _ramiDescCtrl.text.trim()),
-    );
-
-    final contractId =
-        const Uuid().v4().replaceAll('-', '').substring(0, 12);
-
-    try {
-      await widget.sdk.createContract(
-        widget.user.username,
-        widget.clientId,
-        contratto,
-      );
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Errore creazione contratto: $e')));
-    }
+Future<void> _onCreatePressed() async {
+  final pane = _contractPaneKey.currentState;
+  if (pane == null) {
+    debugPrint('[CreateContractDialog] ERRORE: ContractFormPane non montato');
+    return;
   }
+
+  final m = pane.model;            // Map<String,String> (esposto dal pane)
+  final reg = pane.regolazione;    // bool (esposto dal pane)
+  debugPrint('[CreateContractDialog] model keys=${m.keys} regolazione=$reg');
+
+  // helper locali
+  String t(String k) => (m[k] ?? '').trim();
+  String? nn(String k) => t(k).isEmpty ? null : t(k);
+  DateTime? pd(String k) {
+    final s = t(k);
+    if (s.isEmpty) return null;
+    try {
+      return DateFormat('dd/MM/yyyy').parseStrict(s);
+    } catch (_) { return null; }
+  }
+  double pnum(String k) => double.parse((t(k).isEmpty ? '0' : t(k)).replaceAll(',', '.'));
+  int? pint(String k) => (t(k).isEmpty) ? null : int.tryParse(t(k));
+
+  // Validazioni minime (adatta a ciò che è richiesto dal backend)
+  final requiredFields = {
+    'tipo'        : t('tipo'),
+    'ramo'        : t('ramo'),
+    'compagnia'   : t('compagnia'),
+    'numero'      : t('numero'),
+    'effetto'     : t('effetto'),
+    'scadenza'    : t('scadenza'),
+    'fraz'        : t('fraz'),
+    'modIncasso'  : t('modIncasso'),
+    'pv1'         : t('pv1'),
+    'account'     : t('account'),
+    'intermediario': t('intermediario'),
+    'premio'      : t('premio'),
+    'netto'       : t('netto'),
+    'rami_desc'   : t('rami_desc'), // chiave che il pane deve esporre
+  };
+  final missing = requiredFields.entries.where((e) => e.value.isEmpty).map((e) => e.key).toList();
+  if (missing.isNotEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Compila i campi obbligatori: ${missing.join(', ')}')),
+    );
+    return;
+  }
+
+  final contratto = ContrattoOmnia8(
+    /*---- Identificativi ----*/
+    identificativi: Identificativi(
+      tipo          : t('tipo'),
+      tpCar         : nn('tpCar'),
+      ramo          : t('ramo'),
+      compagnia     : t('compagnia'),
+      numeroPolizza : t('numero'),
+    ),
+    /*---- Unità vendita ----*/
+    unitaVendita: UnitaVendita(
+      puntoVendita  : t('pv1'),
+      puntoVendita2 : t('pv2'),
+      account       : t('account'),
+      intermediario : t('intermediario'),
+    ),
+    /*---- Amministrativi ----*/
+    amministrativi: Amministrativi(
+      effetto             : pd('effetto')!,               // validato sopra
+      scadenza            : pd('scadenza')!,              // validato sopra
+      dataEmissione       : pd('emissione') ?? pd('effetto') ?? DateTime.now(),
+      ultimaRataPagata    : pd('emissione') ?? pd('effetto') ?? DateTime.now(),
+      frazionamento       : t('fraz'),
+      modalitaIncasso     : t('modIncasso'),
+      compresoFirma       : false,
+      scadenzaOriginaria  : pd('scadenza')!,
+      scadenzaMora        : pd('sc_mora'),
+      numeroProposta      : nn('numeroProposta'),
+      codConvenzione      : nn('codConvenzione'),
+      scadenzaVincolo     : pd('sc_vincolo'),
+      scadenzaCopertura   : pd('sc_copertura'),
+      fineCoperturaProroga: pd('fine_proroga'),
+    ),
+    /*---- Premi ----*/
+    premi: Premi(
+      premio    : pnum('premio'),
+      netto     : pnum('netto'),
+      accessori : pnum('accessori'),
+      diritti   : pnum('diritti'),
+      imposte   : pnum('imposte'),
+      spese     : pnum('spese'),
+      fondo     : pnum('fondo'),
+      sconto    : (t('sconto').isEmpty) ? null : pnum('sconto'),
+    ),
+    /*---- Rinnovo ----*/
+    rinnovo: Rinnovo(
+      rinnovo    : t('rinnovo'),
+      disdetta   : t('disdetta'),
+      giorniMora : t('gMora'),
+      proroga    : t('proroga'),
+    ),
+    /*---- Operatività ----*/
+    operativita: Operativita(
+      regolazione: reg,
+      parametriRegolazione: ParametriRegolazione(
+        inizio                 : pd('inizioReg') ?? pd('effetto')!,
+        fine                   : pd('fineReg')   ?? pd('scadenza')!,
+        ultimaRegEmessa        : pd('ultReg'),
+        giorniInvioDati        : pint('gInvio'),
+        giorniPagReg           : pint('gPag'),
+        giorniMoraRegolazione  : pint('gMoraReg'),
+        cadenzaRegolazione     : t('cadReg'),
+      ),
+    ),
+    /*---- RamiEl ----*/
+    ramiEl: RamiEl(descrizione: t('rami_desc')),
+  );
+
+  final contractId = const Uuid().v4().replaceAll('-', '').substring(0, 12);
+
+  try {
+    debugPrint('[CreateContractDialog] Salvo contratto $contractId per client ${widget.clientId}');
+    await widget.sdk.createContract(widget.user.username, widget.clientId, contratto);
+    if (mounted) Navigator.pop(context, true);
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text('Errore creazione contratto: $e')));
+  }
+}
+
 }

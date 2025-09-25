@@ -1,10 +1,11 @@
 // lib/apps/enac_app/ui_components/dialogs/create_client_dialog.dart
+import 'package:boxed_ai/apps/enac_app/ui_components/client_form_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 
-import 'package:boxed_ai/apps/enac_app/llogic_components/backend_sdk.dart';
+import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
 /*═══════════════════════════════════════════════════════════════════════════
@@ -42,6 +43,7 @@ class CreateClientDialog extends StatefulWidget {
 
 /*───────────────────────────────────────────────────────────────────────────*/
 class _CreateClientDialogState extends State<CreateClientDialog> {
+  final _clientPaneKey = GlobalKey<ClientFormPaneState>(); // NEW
   /*──────── form & dati ───────*/
   final _formKey = GlobalKey<FormState>();
   final _data = <String, String?>{
@@ -118,7 +120,7 @@ class _CreateClientDialogState extends State<CreateClientDialog> {
           user       : widget.user,
           token      : widget.token,
           // KEY opzionale se vuoi accedere al chatbot
-          leftChild  : _buildForm(),          // definito sotto
+          leftChild  : ClientFormPane(key: _clientPaneKey),          // definito sotto
         ),
       ),
       actions: [
@@ -174,33 +176,53 @@ class _CreateClientDialogState extends State<CreateClientDialog> {
       );
 
   /*──────── salvataggio ────────*/
-  Future<void> _onCreatePressed() async {
-    if (!_formKey.currentState!.validate()) return;
-    _formKey.currentState!.save();
-
-    final client = Client(
-      name            : _data['name']?.trim() ?? '',
-      address         : _data['address'],
-      taxCode         : _data['tax_code'],
-      vat             : _data['vat'],
-      phone           : _data['phone'],
-      email           : _data['email'],
-      sector          : _data['sector'],
-      legalRep        : _data['legal_rep'],
-      legalRepTaxCode : _data['legal_rep_tax_code'],
-    );
-
-    final clientId =
-        const Uuid().v4().replaceAll('-', '').substring(0, 12);
-
-    try {
-      await widget.sdk.createClient(widget.user.username, clientId, client);
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Errore creazione cliente: $e')),
-      );
-    }
+Future<void> _onCreatePressed() async {
+  final pane = _clientPaneKey.currentState;
+  if (pane == null) {
+    debugPrint('[CreateClientDialog] ERRORE: ClientFormPane non montato');
+    return;
   }
+
+  final m = pane.model; // Map<String, String>
+  String? nn(String? s) => (s == null || s.trim().isEmpty) ? null : s.trim();
+
+  // Validazioni minime (puoi estenderle a piacere)
+  if ((m['name'] ?? '').trim().isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Inserisci la ragione sociale')),
+    );
+    return;
+  }
+  if ((m['email'] ?? '').isNotEmpty && !m['email']!.contains('@')) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Email non valida')),
+    );
+    return;
+  }
+
+  final client = Client(
+    name            : (m['name'] ?? '').trim(),
+    address         : nn(m['address']),
+    taxCode         : nn(m['tax_code']),
+    vat             : nn(m['vat']),
+    phone           : nn(m['phone']),
+    email           : nn(m['email']),
+    sector          : nn(m['sector']),
+    legalRep        : nn(m['legal_rep']),
+    legalRepTaxCode : nn(m['legal_rep_tax_code']),
+  );
+
+  final clientId = const Uuid().v4().replaceAll('-', '').substring(0, 12);
+
+  try {
+    debugPrint('[CreateClientDialog] Salvo client: ${client.name}');
+    await widget.sdk.createClient(widget.user.username, clientId, client);
+    if (mounted) Navigator.pop(context, true);
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text('Errore creazione cliente: $e')));
+  }
+}
+
 }

@@ -169,7 +169,8 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
             //──── colonna sinistra (contenuto + pannello AI sovrapposto) ──
             SizedBox(
               width: leftW,
-              child: Stack(
+              child: RepaintBoundary( // ✅ ISOLAMENTO DESTRA
+                  child: Stack(
                 alignment: Alignment.topCenter,
                 children: [
                   // contenuto principale
@@ -197,7 +198,7 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
                   ),
                 ],
               ),
-            ),
+            )),
 
             //──── drag‑handle (solo se chat visibile) ────────────────────
             if (_chatVisible)
@@ -218,7 +219,8 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
               maintainSize: false,
               child: SizedBox(
                 width: rightW as double,
-                child: ChatBotPage(
+                child: RepaintBoundary( // ✅ ISOLAMENTO DESTRA
+                  child: ChatBotPage(
                   key          : _chatbotKey,
                   user         : widget.user,
                   token        : widget.token,
@@ -252,7 +254,7 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
                   ),
                 ),
               ),
-            ),
+            )),
           ],
         );
       },

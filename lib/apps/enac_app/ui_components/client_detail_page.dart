@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../llogic_components/backend_sdk.dart';   // contiene la classe Client
+import '../logic_components/backend_sdk.dart';   // contiene la classe Client
 
 /* ════════════════════════════════════════════════════════════════
  *  P A G I N A   D E T T A G L I O   C L I E N T E

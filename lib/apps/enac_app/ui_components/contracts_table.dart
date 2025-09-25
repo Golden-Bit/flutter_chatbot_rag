@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../llogic_components/backend_sdk.dart';
+import '../logic_components/backend_sdk.dart';
 
 class ContractsTable extends StatefulWidget {
   final String userId;

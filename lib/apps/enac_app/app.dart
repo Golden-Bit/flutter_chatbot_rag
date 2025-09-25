@@ -2,7 +2,7 @@
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
-import 'package:boxed_ai/apps/enac_app/llogic_components/backend_sdk.dart';
+import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/client_contracts_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/client_detail_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/client_page.dart';

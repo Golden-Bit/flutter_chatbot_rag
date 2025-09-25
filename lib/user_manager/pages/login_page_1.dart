@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:html' as html;
 
+//import 'package:boxed_ai/apps/example_app_2/app.dart';
+//import 'package:boxed_ai/apps/example_app_3/app.dart';
 import 'package:flutter/material.dart';
-//import 'package:boxed_ai/apps/enac_app/app.dart';
+import 'package:boxed_ai/apps/enac_app/app.dart';
 import 'package:boxed_ai/chatbot.dart';
 import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
@@ -129,8 +131,8 @@ class _LoginPageState extends State<LoginPage> {
     // Navigo sostituendo la pagina corrente
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
-    );
+      MaterialPageRoute(builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
+    ));
   }
 
   /// Quando l'utente clicca “Continua con Microsoft”, recupero l'URL di login da backend
@@ -200,7 +202,7 @@ class _LoginPageState extends State<LoginPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
         return;

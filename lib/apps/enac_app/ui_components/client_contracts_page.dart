@@ -8,7 +8,7 @@ import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
-import '../llogic_components/backend_sdk.dart';
+import '../logic_components/backend_sdk.dart';
 import 'contracts_table.dart';
 
 class ClientContractsPage extends StatefulWidget {

@@ -674,7 +674,7 @@ class _UserMenu extends StatelessWidget {
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold))),
           const SizedBox(width: 8),
-          const Text('Simone Sansalone', style: TextStyle(color: Colors.white)),
+          const Text('User Name', style: TextStyle(color: Colors.white)),
         ],
       ),
     );

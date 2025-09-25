@@ -222,7 +222,10 @@ bool _canSend() =>
       _startPolling();
     }
 
-    return Column(
+    return Material(
+       color: Colors.white,          // ← bianco “vero”
+       child: ColoredBox(
+         color: Colors.white, child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildHeader(),
@@ -232,7 +235,7 @@ bool _canSend() =>
           child: _buildExpandedBody(),
         ),
       ],
-    );
+    )));
   }
 
 /// Contenuto espanso (tutto ciò che stava prima fra `if (_expanded) ...`)

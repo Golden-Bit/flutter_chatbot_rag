@@ -121,6 +121,10 @@ class _CreateClientDialogState extends State<CreateClientDialog> {
           token      : widget.token,
           // KEY opzionale se vuoi accedere al chatbot
           leftChild  : ClientFormPane(key: _clientPaneKey),          // definito sotto
+             // ➜ AUTO-MSG alla chat al mount:
+         autoStartMessage  : "Da ora in poi dovrai aiutarmi con la compilazione di form utilizzando l'apposito Tool UI fornito, non appena te lo chiederò. rispondi solo affermativamente a tale messaggio, grazie !",
+         autoStartInvisible: false,
+         openChatOnMount   : false,
         ),
       ),
       actions: [

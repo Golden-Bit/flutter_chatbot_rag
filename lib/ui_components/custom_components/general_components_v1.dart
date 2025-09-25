@@ -27,13 +27,13 @@ dynamic smallFullLogo = // Titolo a sinistra
 dynamic assistantAvatar = CircleAvatar(
   backgroundColor: Colors.transparent,
   child: Image.network(
-    //'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
-    'https://i.imgur.com/thZjAGJ.png' ,//'https://static-00.iconduck.com/assets.00/openai-icon-2021x2048-4rpe5x7n.png',
+    'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
+    //'https://i.imgur.com/thZjAGJ.png' ,//'https://static-00.iconduck.com/assets.00/openai-icon-2021x2048-4rpe5x7n.png',
     height: 42,
     fit: BoxFit.contain,
     isAntiAlias: true,
   ),
 );
 
-//String assistantName = "boxed-ai";
-String assistantName = "assistant";
+String assistantName = "boxed-ai";
+//String assistantName = "assistant";

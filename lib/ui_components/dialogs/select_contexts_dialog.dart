@@ -474,50 +474,92 @@ void _applyFilters() {
       ),
     );
   }
+Widget _buildModelSelector() {
+  // elenco completo dei modelli supportati
+  const models = <String>[
+    //'gpt-5',
+    //'gpt-5-mini',
+    //'gpt-5-nano',
+    //'gpt-5-chat-latest',
+    //'gpt-5-codex',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4.1-nano',
+    'gpt-4o',
+    //'gpt-4o-2024-05-13',
+    'gpt-4o-mini',
+  ];
 
-  Widget _buildModelSelector() {
-    final models = ['gpt-4o', 'gpt-4o-mini'];
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: models.map((m) {
-        final selected = (_selectedModel == m);
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: InkWell(
-              onTap: () => setState(() => _selectedModel = m),
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  border: Border.all(
-                    color: selected ? Colors.blue : Colors.grey[200]!,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                alignment: Alignment.center,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    ClipOval(
-                      child: Image.network(
-                        'https://static.wixstatic.com/media/63b1fb_48896f0cf8684eb7805d2b5a980e2d19~mv2.png',
-                        width: 20,
-                        height: 20,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(m, style: const TextStyle(color: Colors.black)),
-                  ],
-                ),
-              ),
+  // se il valore iniziale non è nella lista, fallback al primo
+  if (!models.contains(_selectedModel)) {
+    _selectedModel = models.first;
+  }
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      // etichetta coerente con il resto dell'UI
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          'Model',
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.black12),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        padding: const EdgeInsets.all(8),
+        // altezza fissa con scroll verticale se serve
+        height: 140,
+        child: SingleChildScrollView(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: models.map((m) => _modelChip(m)).toList(),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+Widget _modelChip(String model) {
+  final selected = (_selectedModel == model);
+
+  return InkWell(
+    onTap: () => setState(() => _selectedModel = model),
+    borderRadius: BorderRadius.circular(8),
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        border: Border.all(
+          color: selected ? Colors.blue : Colors.grey[200]!,
+          width: 2,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipOval(
+            child: Image.network(
+              'https://static.wixstatic.com/media/63b1fb_48896f0cf8684eb7805d2b5a980e2d19~mv2.png',
+              width: 20,
+              height: 20,
+              fit: BoxFit.contain,
             ),
           ),
-        );
-      }).toList(),
-    );
-  }
+          const SizedBox(width: 6),
+          Text(model, style: const TextStyle(color: Colors.black)),
+        ],
+      ),
+    ),
+  );
+}
+
 }

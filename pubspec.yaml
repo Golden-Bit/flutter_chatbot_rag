@@ -87,12 +87,12 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.0
 
   # ⬇️ Configurazione del generatore (solo Web in questo esempio)
-#flutter_launcher_icons:
-#  web:
-#    generate: true
-#    image_path: assets/icons/app_icon.png   # percorso del PNG sorgente
-#    background_color: "#ffffff"             # colore di sfondo PWA (usato se l'icona è trasparente)
-#    theme_color: "#0f172a"                  # colore barra del browser / splash PWA
+flutter_launcher_icons:
+  web:
+    generate: true
+    image_path: assets/icons/app_icon.png   # percorso del PNG sorgente
+    background_color: "#ffffff"             # colore di sfondo PWA (usato se l'icona è trasparente)
+    theme_color: "#0f172a"                  # colore barra del browser / splash PWA
     
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

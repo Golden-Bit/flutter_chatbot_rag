@@ -64,16 +64,11 @@ class _SelectContextDialogContentState
   late String                _selectedModel;
   String _viewMode = 'kb'; // "kb" | "chat"
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  CHAT-INFO MAP   { chatId → {name, updatedAt} }
-  // ════════════════════════════════════════════════════════════════════════
-  late final Map<String, Map<String, String>> _chatInfo = {
-    for (final c in widget.chatHistory)
-      if (c['id'] != null) c['id']: {
-        'name'     : (c['name']      ?? '').toString(),
-        'updatedAt': (c['updatedAt'] ?? '').toString(),
-      }
-  };
+// ═════════ CHAT-INFO MAP { chatId → {name, updatedAt} } + cache
+late Map<String, Map<String, String>> _chatInfo;     // ← non più final
+final Map<String, String>    _chatNameCache      = {};
+final Map<String, DateTime?> _chatUpdatedAtCache = {};
+
 
   // ════════════════════════════════════════════════════════════════════════
   //  HELPERS
@@ -82,42 +77,79 @@ class _SelectContextDialogContentState
       (ctx.customMetadata?['chat_id']?.toString().trim().isNotEmpty ?? false);
 // ───────── helpers letti SEMPRE da localStorage ─────────
 String _chatNameById(String chatId) {
-  try {
-    // PROVA prima nella mappa passata dal costruttore (più fresca)
-    final n = _chatInfo[chatId]?['name'] ?? '';
-    if (n.isNotEmpty) return n;
+  // solo lookup in cache/map, niente jsonDecode né localStorage qui
+  return _chatNameCache[chatId] ?? _chatInfo[chatId]?['name'] ?? '';
+}
+Map<String, Map<String, String>> _buildChatInfoOnce() {
+  final result = <String, Map<String, String>>{};
 
-    // fallback: localStorage
-    final raw = html.window.localStorage['chatHistory'];
-    if (raw == null) return '';
-    final List list = jsonDecode(raw)['chatHistory'];
-    final chat = list.firstWhere((c) => c['id'] == chatId, orElse: () => null);
-    return chat != null ? (chat['name'] ?? '') : '';
-  } catch (_) {
-    return '';
+  // 1) fonte: widget.chatHistory (più fresca lato app)
+  for (final c in widget.chatHistory) {
+    final id = (c['id'] ?? '').toString();
+    if (id.isEmpty) continue;
+    final name = (c['name'] ?? '').toString();
+    final updatedAt = (c['updatedAt'] ?? '').toString();
+
+    result[id] = {'name': name, 'updatedAt': updatedAt};
+    if (name.isNotEmpty) _chatNameCache[id] = name;
+    if (updatedAt.isNotEmpty) {
+      _chatUpdatedAtCache[id] = DateTime.tryParse(updatedAt);
+    }
   }
+
+  // 2) merge UNA VOLTA con localStorage (fallback)
+  try {
+    final raw = html.window.localStorage['chatHistory'];
+    if (raw != null) {
+      final decoded = jsonDecode(raw);
+      final List list = decoded is Map ? (decoded['chatHistory'] ?? const []) : (decoded as List);
+
+      for (final c in list) {
+        final id = (c['id'] ?? '').toString();
+        if (id.isEmpty) continue;
+
+        final name = (c['name'] ?? '').toString();
+        String updatedAt = (c['updatedAt'] ?? '').toString();
+
+        // se manca updatedAt, prova dall’ultimo messaggio
+        if (updatedAt.isEmpty) {
+          final List msgs = (c['messages'] ?? const []) as List;
+          if (msgs.isNotEmpty) {
+            final last = msgs.last;
+            updatedAt = (last['createdAt'] ?? '').toString();
+          }
+        }
+
+        final cur = Map<String, String>.from(result[id] ?? const {});
+        if ((cur['name'] ?? '').isEmpty && name.isNotEmpty) {
+          cur['name'] = name;
+          _chatNameCache[id] = name;
+        }
+        if ((cur['updatedAt'] ?? '').isEmpty && updatedAt.isNotEmpty) {
+          cur['updatedAt'] = updatedAt;
+          _chatUpdatedAtCache[id] = DateTime.tryParse(updatedAt);
+        }
+        result[id] = cur;
+      }
+    }
+  } catch (_) {
+    // ignora errori di parsing/localStorage
+  }
+
+  return result;
 }
 
 DateTime? _chatLastMsgDate(String chatId) {
-  try {
-    // prima _chatInfo
-    final raw = _chatInfo[chatId]?['updatedAt'] ?? '';
-    if (raw.isNotEmpty) return DateTime.tryParse(raw);
+  // usa cache; se manca prova a parsare una volta la stringa in _chatInfo e memorizza
+  final cached = _chatUpdatedAtCache[chatId];
+  if (cached != null) return cached;
 
-    // fallback: localStorage
-    final store = html.window.localStorage['chatHistory'];
-    if (store == null) return null;
-    final List list = jsonDecode(store)['chatHistory'];
-    final chat = list.firstWhere((c) => c['id'] == chatId, orElse: () => null);
-    if (chat == null) return null;
-    final List msgs = chat['messages'] ?? const [];
-    if (msgs.isEmpty) return null;
-    final last = msgs.last;
-    return DateTime.tryParse(last['createdAt'] ?? '');
-  } catch (_) {
-    return null;
-  }
+  final raw = _chatInfo[chatId]?['updatedAt'] ?? '';
+  final dt  = raw.isNotEmpty ? DateTime.tryParse(raw) : null;
+  _chatUpdatedAtCache[chatId] = dt;     // memoize
+  return dt;
 }
+
 
 /// Ritorna il nome da mostrare. Se è una chat-KB ma la chat non esiste più,
 /// restituisce null → la KBox verrà esclusa dalla lista.
@@ -167,6 +199,7 @@ String? _displayName(ContextMetadata ctx) {
     _searchController = TextEditingController();
     _selectedContexts = List.from(widget.initialSelectedContexts);
     _selectedModel    = widget.initialModel;
+    _chatInfo = _buildChatInfoOnce();   // ← costruisce mappe e cache una sola volta
     _applyFilters();
   }
 

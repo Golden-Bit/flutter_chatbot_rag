@@ -131,7 +131,7 @@ class _LoginPageState extends State<LoginPage> {
     // Navigo sostituendo la pagina corrente
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
+      MaterialPageRoute(builder: (_) => ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
     ));
   }
 
@@ -202,7 +202,7 @@ class _LoginPageState extends State<LoginPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (_) => ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
         return;
@@ -365,11 +365,11 @@ class _LoginPageState extends State<LoginPage> {
                   onTap: () => _onSocialPressed('Microsoft'),
                 ),
                 const SizedBox(height: 12),
-                SocialButton(
+                /*SocialButton(
                   provider: SocialProvider.apple,
                   onTap: () => _onSocialPressed('Apple'),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 12),*/
                 if (_errorMessage.isNotEmpty) ...[
                   const SizedBox(height: 20),
                   Text(

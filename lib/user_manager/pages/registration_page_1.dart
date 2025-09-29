@@ -1,8 +1,10 @@
+import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
 import 'package:boxed_ai/user_manager/components/social_button.dart';
 import 'package:boxed_ai/user_manager/pages/login_page_1.dart';
 import 'package:boxed_ai/user_manager/pages/registration_page_2.dart';
+import 'dart:html' as html;
 
 class RegistrationPage extends StatefulWidget {
   const RegistrationPage({Key? key}) : super(key: key);
@@ -13,7 +15,7 @@ class RegistrationPage extends StatefulWidget {
 
 class _RegistrationPageState extends State<RegistrationPage> {
   final TextEditingController _emailController = TextEditingController();
-
+  final CognitoApiClient _apiClient = CognitoApiClient();
   bool _isLoading = false;
   String _errorMessage = '';
 
@@ -54,11 +56,29 @@ class _RegistrationPageState extends State<RegistrationPage> {
     );
   }
 
-  // Esempio di placeholders per i social login
-  void _onSocialPressed(String providerName) {
-    // In un contesto reale, potresti chiamare /v1/user/social/login-url?provider=providerName
-    // e poi aprire l'URL in un browser. Qui mostriamo solo un log:
-    debugPrint('Hai cliccato su registrazione con: $providerName');
+  /// Quando l'utente clicca “Continua con Microsoft”, recupero l'URL di login da backend
+  /// e ridirigo il browser verso quell'endpoint (Hosted UI Cognito → Azure AD).
+  Future<void> _onSocialPressed(String providerName) async {
+    if (providerName != 'Microsoft') {
+      // Per ora gestiamo solo Microsoft; per gli altri (Google/Apple) metti un fallback
+      debugPrint('Provider non gestito: $providerName');
+      return;
+    }
+    setState(() {
+      _errorMessage = '';
+      _isLoading = true;
+    });
+    try {
+      final loginUrl = await _apiClient.getAzureLoginUrl();
+      // Effettuo il redirect del browser intero verso Cognito Hosted UI
+      html.window.location.href = loginUrl;
+      // Non serve fare altro: verrà richiamato initState alla redirect
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Errore Invio al login federato: $e';
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -173,10 +193,10 @@ class _RegistrationPageState extends State<RegistrationPage> {
                 ),
                 const SizedBox(height: 12),
 
-                SocialButton(
+                /*SocialButton(
                   provider: SocialProvider.apple,
                   onTap: () => _onSocialPressed('Apple'),
-                ),
+                ),*/
 
                 // Mostra eventuali errori (es. registrazione fallita)
                 if (_errorMessage.isNotEmpty) ...[

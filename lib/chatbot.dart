@@ -314,6 +314,184 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
       _future = _fetch();
     });
   }
+// ──────────────────────────────────────────────────────────────
+// Helper: stringify di valori arbitrari (mappa/lista → JSON inline)
+// ──────────────────────────────────────────────────────────────
+String _stringify(dynamic v) {
+  try {
+    if (v == null) return '';
+    if (v is String) {
+      // comprimi le nuove linee per tenerlo in singola riga
+      return v.replaceAll('\n', ' ').replaceAll('\r', ' ').trim();
+    }
+    // qualsiasi altro tipo → JSON compatto (senza newline)
+    return jsonEncode(v);
+  } catch (_) {
+    // fallback super difensivo
+    return v.toString();
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Widget valore monoriga selezionabile con scroll orizzontale
+// tramite caret/drag (senza scrollbar visibile).
+// ──────────────────────────────────────────────────────────────
+Widget _valueCell(String value) {
+  // Controller effimero: ok perché il widget è read-only
+  final controller = TextEditingController(text: value);
+
+  return TextField(
+    controller: controller,
+    readOnly: true,
+    maxLines: 1,
+    minLines: 1,
+    // niente wrap: la riga si estende orizzontalmente e scorre al caret
+    expands: false,
+    enableInteractiveSelection: true,
+    // disabilita ogni "aiuto" di input (è solo display/copypaste)
+    enableSuggestions: false,
+    autocorrect: false,
+    // fisica standard senza scrollbar
+    scrollPhysics: const ClampingScrollPhysics(),
+    // cursore testuale (web/desktop) e comportamento classico
+    mouseCursor: SystemMouseCursors.text,
+    // stile monospace come per il JSON
+    style: const TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 12,
+      color: Colors.black87,
+    ),
+    // nessun bordo interno, padding minimo
+    decoration: const InputDecoration(
+      isDense: true,
+      border: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      contentPadding: EdgeInsets.zero,
+    ),
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// RIGA chiave/valore con valore selezionabile (no wrap) e
+// scorrimento orizzontale al movimento del cursore
+// ──────────────────────────────────────────────────────────────
+Widget _metaRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4.0),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // colonna chiave a larghezza fissa con ellissi
+        SizedBox(
+          width: 140,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              color: Colors.black87,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        // colonna valore: singola riga selezionabile (senza scrollbar)
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            clipBehavior: Clip.hardEdge, // evita overflow visivi
+            child: _valueCell(value),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Card del documento: page_content in alto + righe metadati
+// ──────────────────────────────────────────────────────────────
+Widget _docCard(DocumentModel d) {
+  final Map<String, dynamic> md =
+      (d.metadata ?? {}) as Map<String, dynamic>; // difensivo
+
+  // Prepara coppie chiave/valore: includi anche "type" come riga iniziale
+  final List<MapEntry<String, String>> rows = [
+    MapEntry('type', _stringify(d.type)),
+    ...md.entries.map(
+      (e) => MapEntry(e.key, _stringify(e.value)),
+    ),
+  ];
+
+  return Card(
+    elevation: 2,
+    margin: const EdgeInsets.symmetric(vertical: 8),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    child: Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── PAGE CONTENT ───────────────────────────────────────
+          const Text(
+            'page_content',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 180),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white, // grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  d.pageContent ?? '',
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── METADATA ───────────────────────────────────────────
+          const Text(
+            'metadata',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          // righe auto-generate per OGNI meta presente
+          ...rows.map((kv) => _metaRow(kv.key, kv.value)),
+        ],
+      ),
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -378,32 +556,27 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
                   width : double.infinity,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: isEmpty
-                      ? const Center(
-                          child: Text(
-                            '— Nessun documento disponibile —',
-                            style: TextStyle(
-                              fontStyle: FontStyle.italic,
-                              color: Colors.grey,
-                              fontSize: 13,
-                            ),
-                          ),
-                        )
-                      : Scrollbar(
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
-                            child: SelectableText(
-                              jsonStr,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize : 12,
-                              ),
-                            ),
-                          ),
-                        ),
+child: isEmpty
+    ? const Center(
+        child: Text(
+          '— Nessun documento disponibile —',
+          style: TextStyle(
+            fontStyle: FontStyle.italic,
+            color: Colors.grey,
+            fontSize: 13,
+          ),
+        ),
+      )
+    : Scrollbar(
+        thumbVisibility: true,
+        child: ListView.builder(
+          itemCount: docs.length,
+          itemBuilder: (context, i) => _docCard(docs[i]),
+        ),
+      ),
                 ),
               ),
             ],

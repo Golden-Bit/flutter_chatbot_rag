@@ -93,7 +93,7 @@ Widget _infoColumn(List<Widget> children) => Column(
       children: [
         /* ---------- intestazione cliente ---------- */
         FutureBuilder(
-          future: widget.sdk.getClient(widget.userId, widget.clientId),
+          future: widget.sdk.getEntity(widget.userId, widget.clientId),
           builder: (_, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return const SizedBox(

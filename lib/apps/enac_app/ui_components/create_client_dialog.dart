@@ -204,7 +204,7 @@ Future<void> _onCreatePressed() async {
     return;
   }
 
-  final client = Client(
+  final client = Entity(
     name            : (m['name'] ?? '').trim(),
     address         : nn(m['address']),
     taxCode         : nn(m['tax_code']),
@@ -220,7 +220,7 @@ Future<void> _onCreatePressed() async {
 
   try {
     debugPrint('[CreateClientDialog] Salvo client: ${client.name}');
-    await widget.sdk.createClient(widget.user.username, clientId, client);
+    await widget.sdk.createEntity(widget.user.username, clientId, client);
     if (mounted) Navigator.pop(context, true);
   } catch (e) {
     if (!mounted) return;

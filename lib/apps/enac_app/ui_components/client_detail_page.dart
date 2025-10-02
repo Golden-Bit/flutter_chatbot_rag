@@ -7,7 +7,7 @@ import '../logic_components/backend_sdk.dart';   // contiene la classe Client
  *  P A G I N A   D E T T A G L I O   C L I E N T E
  * ═════════════════════════════════════════════════════════════ */
 class ClientDetailPage extends StatefulWidget {
-  final Client client;
+  final Entity client;
   const ClientDetailPage({super.key, required this.client});
 
   @override
@@ -82,7 +82,7 @@ class _ClientDetailPageState extends State<ClientDetailPage>
   /* ────────────────────────────────────────────────────────────
    *  1️⃣  CARD ANAGRAFICA (stessa di ClientContractsPage)
    * ────────────────────────────────────────────────────────── */
-  Widget _topInfo(Client c) => Container(
+  Widget _topInfo(Entity c) => Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: const Color(0xFFE6F7E6),

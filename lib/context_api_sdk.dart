@@ -434,16 +434,19 @@ class NoActiveSubscriptionException extends ApiException {
       : super(message);
 }
 
+// CHANGED: aggiunto uploadTaskId (opzionale per retro-compat)
 class FileUploadResponse {
   final String fileId;
   final List<String> contexts;
+  final String? uploadTaskId;                  // NEW
 
-  FileUploadResponse({required this.fileId, required this.contexts});
+  FileUploadResponse({required this.fileId, required this.contexts, this.uploadTaskId});
 
   factory FileUploadResponse.fromJson(Map<String, dynamic> json) {
     return FileUploadResponse(
-      fileId: json['file_id'],
-      contexts: List<String>.from(json['contexts']),
+      fileId       : json['file_id'],
+      contexts     : List<String>.from(json['contexts']),
+      uploadTaskId : json['upload_task_id'],   // NEW (può essere null per /upload)
     );
   }
 }
@@ -491,28 +494,157 @@ class TaskIdsPerContext {
       );
 }
 
+// ==========================
+// TASKS (upload aggregato)
+// ==========================
+
+// NEW
+class PerContextStatusDto {
+  final String context;
+  final String loaderTaskId;
+  final String vectorTaskId;
+  final String loaderStatus;   // "PENDING" | "RUNNING" | "DONE" | "ERROR" | "COMPLETED"
+  final String vectorStatus;   // idem
+  final String? error;
+
+  const PerContextStatusDto({
+    required this.context,
+    required this.loaderTaskId,
+    required this.vectorTaskId,
+    required this.loaderStatus,
+    required this.vectorStatus,
+    this.error,
+  });
+
+  factory PerContextStatusDto.fromJson(Map<String, dynamic> j) => PerContextStatusDto(
+    context       : j['context'],
+    loaderTaskId  : j['loader_task_id'],
+    vectorTaskId  : j['vector_task_id'],
+    loaderStatus  : j['loader_status'] ?? 'PENDING',
+    vectorStatus  : j['vector_status'] ?? 'PENDING',
+    error         : j['error'],
+  );
+
+  Map<String, dynamic> toJson() => {
+    'context'       : context,
+    'loader_task_id': loaderTaskId,
+    'vector_task_id': vectorTaskId,
+    'loader_status' : loaderStatus,
+    'vector_status' : vectorStatus,
+    if (error != null) 'error': error,
+  };
+}
+
+// NEW
+class UploadTaskDto {
+  final String taskId;
+  final String kind;                 // "upload"
+  final String userId;
+  final String fileId;
+  final String originalFilename;
+  final String filenameSafe;
+  final List<String> contexts;
+  final Map<String, PerContextStatusDto> perContext;
+  final String status;               // "PENDING" | "RUNNING" | "ERROR" | "COMPLETED"
+  final double progress;             // 0.0 .. 100.0
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final bool read;
+  final String? error;
+
+  const UploadTaskDto({
+    required this.taskId,
+    required this.kind,
+    required this.userId,
+    required this.fileId,
+    required this.originalFilename,
+    required this.filenameSafe,
+    required this.contexts,
+    required this.perContext,
+    required this.status,
+    required this.progress,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.read,
+    this.error,
+  });
+
+  factory UploadTaskDto.fromJson(Map<String, dynamic> j) {
+    final perCtxRaw = (j['per_context'] as Map<String, dynamic>? ?? {});
+    final perCtx = perCtxRaw.map((k, v) => MapEntry(k, PerContextStatusDto.fromJson(Map<String, dynamic>.from(v))));
+    return UploadTaskDto(
+      taskId           : j['task_id'],
+      kind             : j['kind'] ?? 'upload',
+      userId           : j['user_id'],
+      fileId           : j['file_id'],
+      originalFilename : j['original_filename'],
+      filenameSafe     : j['filename_safe'],
+      contexts         : List<String>.from(j['contexts'] ?? const []),
+      perContext       : perCtx,
+      status           : j['status'] ?? 'PENDING',
+      progress         : (j['progress'] as num? ?? 0).toDouble(),
+      createdAt        : DateTime.parse(j['created_at']),
+      updatedAt        : DateTime.parse(j['updated_at']),
+      read             : j['read'] == true,
+      error            : j['error'],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'task_id'          : taskId,
+    'kind'             : kind,
+    'user_id'          : userId,
+    'file_id'          : fileId,
+    'original_filename': originalFilename,
+    'filename_safe'    : filenameSafe,
+    'contexts'         : contexts,
+    'per_context'      : perContext.map((k, v) => MapEntry(k, v.toJson())),
+    'status'           : status,
+    'progress'         : progress,
+    'created_at'       : createdAt.toIso8601String(),
+    'updated_at'       : updatedAt.toIso8601String(),
+    'read'             : read,
+    if (error != null) 'error': error,
+  };
+}
+
+// NEW
+class UserTasksResponseDto {
+  final List<UploadTaskDto> tasks;
+
+  const UserTasksResponseDto({required this.tasks});
+
+  factory UserTasksResponseDto.fromJson(Map<String, dynamic> j) => UserTasksResponseDto(
+    tasks: (j['tasks'] as List<dynamic>? ?? const [])
+        .map((e) => UploadTaskDto.fromJson(Map<String, dynamic>.from(e)))
+        .toList(),
+  );
+}
+
+// CHANGED: aggiunto uploadTaskId
 class AsyncFileUploadResponse extends FileUploadResponse {
   final Map<String, TaskIdsPerContext> tasks; // key = context-name
+  final String? uploadTaskId; // shadow per comodità d’uso (eredita già, ma esplicitiamo)
 
   AsyncFileUploadResponse({
     required super.fileId,
     required super.contexts,
     required this.tasks,
-  });
+    this.uploadTaskId,                               // NEW
+  }) : super(uploadTaskId: uploadTaskId);
 
   factory AsyncFileUploadResponse.fromJson(Map<String, dynamic> json) {
-
-    final raw = Map<String, dynamic>.from(json['tasks']);
-    final parsed = raw.map(
-      (ctx, t) => MapEntry(ctx, TaskIdsPerContext.fromJson(t)),
-    );
+    final raw = Map<String, dynamic>.from(json['tasks'] ?? const {});
+    final parsed = raw.map((ctx, t) => MapEntry(ctx, TaskIdsPerContext.fromJson(Map<String, dynamic>.from(t))));
     return AsyncFileUploadResponse(
-      fileId: json['file_id'],
-      contexts: List<String>.from(json['contexts']),
-      tasks: parsed,
+      fileId       : json['file_id'],
+      contexts     : List<String>.from(json['contexts'] ?? const []),
+      tasks        : parsed,
+      uploadTaskId : json['upload_task_id'],         // NEW
     );
   }
 }
+
 
 /// NEW: per /tasks_status
 class TaskStatusItem {
@@ -815,8 +947,8 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    //"chatbot_nlp_api": "http://127.0.0.1:8888"
+    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    "chatbot_nlp_api": "http://127.0.0.1:8888"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
@@ -2111,5 +2243,49 @@ Future<DeeplinkUpgradeResponse> createUpgradeDeeplink({
     }
     throw ApiException('Errore /payments/deeplink/cancel: ${res.body}');
   }
+
+// ==========================
+// USER TASKS ENDPOINTS
+// ==========================
+
+// NEW: GET /user_tasks/{user_id}?unread_only=true|false
+Future<UserTasksResponseDto> getUserTasks(String userId, {bool unreadOnly = false}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/user_tasks/$userId')
+      .replace(queryParameters: {
+        if (unreadOnly) 'unread_only': 'true',
+      });
+
+  final res = await http.get(uri);
+  if (res.statusCode == 200) {
+    return UserTasksResponseDto.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+  throw ApiException('Errore GET /user_tasks/$userId: ${res.body}');
+}
+
+// NEW: GET /user_tasks/{user_id}/unread  (auto-mark as read)
+Future<UserTasksResponseDto> getUserUnreadTasksAndMarkRead(String userId) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/user_tasks/$userId/unread');
+  final res = await http.get(uri);
+  if (res.statusCode == 200) {
+    return UserTasksResponseDto.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+  throw ApiException('Errore GET /user_tasks/$userId/unread: ${res.body}');
+}
+
+// NEW: GET /user_tasks/{user_id}/{task_id}  (ispezione singolo task)
+Future<UploadTaskDto> getSingleUserTask(String userId, String taskId) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/user_tasks/$userId/$taskId');
+  final res = await http.get(uri);
+  if (res.statusCode == 200) {
+    return UploadTaskDto.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+  throw ApiException('Errore GET /user_tasks/$userId/$taskId: ${res.body}');
+}
 
 }

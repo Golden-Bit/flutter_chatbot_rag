@@ -322,9 +322,17 @@ class ToolParamSpec {
           'properties' : properties!.map((p) => p.toJson()).toList(),
       };
 
-  /* helper enum→string */
-  static String _enum2str(ParamType t) =>
-      t.toString().split('.').last;            // ParamType.string → "string"
+/* helper enum→string */
+static String _enum2str(ParamType t) {
+  switch (t) {
+    case ParamType.string:  return 'string';
+    case ParamType.integer: return 'int';     // <-- backend vuole "int"
+    case ParamType.number:  return 'float';   // <-- backend vuole "float"
+    case ParamType.boolean: return 'bool';    // <-- backend vuole "bool"
+    case ParamType.array:   return 'list';    // <-- backend vuole "list"
+    case ParamType.object:  return 'dict';    // <-- backend vuole "dict"
+  }
+}
 }
 
 // ── ToolSpec  (solo i campi richiesti dal backend) ────────────────────────
@@ -1156,6 +1164,10 @@ Uri uri = Uri.parse('$baseUrl/files').replace(queryParameters: {
     'client_tool_specs': toolSpecs.map((t) => t.toJson()).toList(),
   };
 
+  print("#"*120);
+  print(body);
+  print("#"*120);
+
   try {
     // Effettua la richiesta POST
     final response = await http.post(
@@ -1356,6 +1368,48 @@ Future<List<DocumentModel>> listDocuments(
     }
 
     final utf8Body = utf8.decode(response.bodyBytes);   // forza UTF‑8
+    final data     = jsonDecode(utf8Body) as List<dynamic>;
+    return data.map((j) => DocumentModel.fromJson(j)).toList();
+  }
+
+  throw ApiException('Errore elenco documenti: ${response.body}');
+}
+
+Future<List<DocumentModel>> listDocumentsResolved({
+  String? collectionName,
+  String? ctx,
+  String? filename,
+  String? prefix,
+  int skip = 0,
+  int limit = 10,
+  String? token,
+  void Function(int total)? onTotal,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  if ((collectionName == null || collectionName.isEmpty) &&
+      (ctx == null || filename == null)) {
+    throw ArgumentError("Serve 'collectionName' oppure 'ctx' + 'filename'.");
+  }
+
+  final query = <String, String>{
+    'skip' : skip.toString(),
+    'limit': limit.toString(),
+    if (prefix != null) 'prefix': prefix,
+    if (token  != null) 'token' : token,
+    if (collectionName != null && collectionName.isNotEmpty) 'collection_name': collectionName,
+    if (ctx != null) 'ctx': ctx!,
+    if (filename != null) 'filename': filename!,
+  };
+
+  final uri = Uri.parse('$baseUrl/documents').replace(queryParameters: query);
+  final response = await http.get(uri);
+
+  if (response.statusCode == 200) {
+    if (onTotal != null && response.headers.containsKey('x-total-count')) {
+      onTotal(int.tryParse(response.headers['x-total-count']!) ?? 0);
+    }
+    final utf8Body = utf8.decode(response.bodyBytes);
     final data     = jsonDecode(utf8Body) as List<dynamic>;
     return data.map((j) => DocumentModel.fromJson(j)).toList();
   }

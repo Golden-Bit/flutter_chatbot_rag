@@ -1,6 +1,10 @@
 // main.dart
 import 'dart:html' as html;
 
+import 'package:boxed_ai/apps/enac_app/ui_components/claim_summary_panel.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/client_claims_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/client_titles_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/title_summary_page.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/client_contracts_page.dart';
@@ -28,13 +32,9 @@ _ContractSection _selContractSection = _ContractSection.riepilogo;
 /// Voci della sidebar (replicano lo screenshot)
 enum _SideItem {
   home,
-  portafoglio,
+  polizze,
+  proceduraGara,
   sinistri,
-  comunicazioni,
-  contabilita,
-  documentale,
-  report,
-  sistema,
 }
 
 enum _TopTab { docs, templates, contacts }
@@ -60,6 +60,7 @@ class _HomeScaffoldState extends State<HomeScaffold> {
   final DualPaneController _paneCtrl1 = DualPaneController();
   final DualPaneController _paneCtrl2 = DualPaneController();
   final DualPaneController _paneCtrl3 = DualPaneController();
+  final DualPaneController _paneCtrlTitles = DualPaneController();
   /* ----------------- STATO ------------------ */
   String? _selectedClientId;
   _SideItem _selectedSide = _SideItem.home;
@@ -84,6 +85,13 @@ late final Omnia8Sdk _sdk;
               // ← id del client aperto
 _ClientSection _selClientSection = _ClientSection.cliente;
 ContrattoOmnia8? _selectedContract;
+Titolo? _selectedTitle;                          // NEW
+Map<String, dynamic>? _selectedTitleRow;         // NEW
+final DualPaneController _paneCtrlClaims = DualPaneController();  // NEW
+
+Sinistro? _selectedClaim;                                         // NEW
+Map<String, dynamic>? _selectedClaimRow;                          // NEW
+
   /* ================= TOP‑BAR ================= */
   Widget _buildTopBar() {
     Widget tab(String label, _TopTab tab, {bool lock = false}) {
@@ -262,6 +270,7 @@ ContrattoOmnia8? _selectedContract;
             onTap: () => setState(() {
           _resetChats();                        // ← chiude e spegne icona
           _selContractSection = sec;
+          
         }),
         child: Container(
           width: double.infinity,
@@ -335,7 +344,18 @@ Widget _buildClientSideMenu() {
   Widget row(String txt, _ClientSection sec,
       {Widget? trailing}) =>
       InkWell(
-        onTap: () => setState(() => _selClientSection = sec),
+onTap: () => setState(() {
+  _resetChats();
+  _selClientSection = sec;
+  if (sec == _ClientSection.titoli) {           // NEW: reset vista summary
+    _selectedTitle = null;
+    _selectedTitleRow = null;
+  }
+    if (sec == _ClientSection.sinistri) {     // NEW
+    _selectedClaim = null;
+    _selectedClaimRow = null;
+  }
+}),
         child: Container(
           width: double.infinity,
           color: _selClientSection == sec
@@ -352,49 +372,47 @@ Widget _buildClientSideMenu() {
         ),
       );
 
-  return Container(
-    width: 220,
-    color: Colors.white,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => setState(() {
-                _resetChats(); 
-                 _selectedClientId = null;
-                 
-                 }),
-            ),
-            const Text('Risultati ricerca'),
-          ],
-        ),
-        const Divider(),
-        row('Cliente',    _ClientSection.cliente),
-        row('Progetti',   _ClientSection.progetti),
-        row('Richieste',  _ClientSection.richieste),
-        row('Contratti',  _ClientSection.contratti),
-        row('Titoli',     _ClientSection.titoli),
-        row('Movimenti',  _ClientSection.movimenti),
-        row('Sinistri',   _ClientSection.sinistri,
-            trailing: const Icon(Icons.chevron_right, size: 16)),
-        row('Documenti',  _ClientSection.documenti,
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade600,
-                  borderRadius: BorderRadius.circular(2)),
-              child: const Text('83',
-                  style: TextStyle(color: Colors.white, fontSize: 11)),
-            )),
-        row('Note',       _ClientSection.note),
-        row('Varie',      _ClientSection.varie),
-      ],
-    ),
-  );
+// 🔧 Dentro _buildClientSideMenu(), sostituisci la colonna delle voci
+return Container(
+  width: 220,
+  color: Colors.white,
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => setState(() {
+              _resetChats();
+              _selectedClientId = null; // torna ai risultati
+            }),
+          ),
+          const Text('Risultati ricerca'),
+        ],
+      ),
+      const Divider(),
+      row('Cliente',   _ClientSection.cliente),
+      row('Contratti', _ClientSection.contratti),
+      row('Titoli',    _ClientSection.titoli),
+      row('Sinistri',  _ClientSection.sinistri,
+          trailing: const Icon(Icons.chevron_right, size: 16)),
+      row('Documenti', _ClientSection.documenti
+          // facoltativo: badge conteggio
+          // trailing: Container(
+          //   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          //   decoration: BoxDecoration(
+          //     color: Colors.grey.shade600,
+          //     borderRadius: BorderRadius.circular(2)),
+          //   child: const Text('83',
+          //     style: TextStyle(color: Colors.white, fontSize: 11)),
+          // ),
+      ),
+    ],
+  ),
+);
+
 }
 
 Widget _buildSideMenu() {
@@ -429,25 +447,23 @@ Widget _buildSideMenu() {
       );
     }
 
-    return Container(
-      width: 220,
-      color: Colors.white,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 12),
-          _buildSideSearch(),
-          tile('Home', _SideItem.home),
-          tile('Portafoglio', _SideItem.portafoglio),
-          tile('Sinistri', _SideItem.sinistri),
-          tile('Comunicazioni', _SideItem.comunicazioni),
-          tile('Contabilità', _SideItem.contabilita),
-          tile('Documentale', _SideItem.documentale),
-          tile('Report', _SideItem.report),
-          tile('Sistema', _SideItem.sistema),
-        ],
-      ),
-    );
+// 🔧 Dentro _buildStandardSideMenu(), sostituisci il blocco dei "tile(...)"
+return Container(
+  width: 220,
+  color: Colors.white,
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const SizedBox(height: 12),
+      _buildSideSearch(),
+      tile('Home', _SideItem.home),
+      tile('Polizze', _SideItem.polizze),
+      tile('Procedura di Gara', _SideItem.proceduraGara),
+      tile('Sinistri', _SideItem.sinistri),
+    ],
+  ),
+);
+
   }
 
   /* ========== CONTENUTO PRINCIPALE ========== */
@@ -482,8 +498,8 @@ if (_selectedContract != null) {
 if (_selectedClientId != null) {
   switch (_selClientSection) {
 case _ClientSection.cliente:
-  return FutureBuilder<Client>(
-    future: _sdk.getClient(widget.user.username, _selectedClientId!),
+  return FutureBuilder<Entity>(
+    future: _sdk.getEntity(widget.user.username, _selectedClientId!),
     builder: (ctx, snap) {
       if (snap.connectionState != ConnectionState.done) {
         return const Center(child: CircularProgressIndicator());
@@ -517,12 +533,78 @@ case _ClientSection.contratti:
       });
     },
   ));
-    case _ClientSection.titoli:
-      return const Center(child: Text('Titoli – placeholder'));
+case _ClientSection.titoli:
+  if (_selectedTitle == null) {
+    // Lista titoli
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlTitles,
+      leftChild: ClientTitlesPage(
+        user: widget.user,
+        token: widget.token,
+        userId: widget.user.username,
+        clientId: _selectedClientId!,
+        sdk: _sdk,
+        onOpenTitle: (titolo, viewRow) {           // NEW: callback richiesto
+          setState(() {
+            _resetChats();
+            _selectedTitle    = titolo;
+            _selectedTitleRow = viewRow;
+          });
+        },
+      ),
+    );
+  } else {
+    // Summary titolo “incastrato” (niente Navigator, sidebar+topbar restano)
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlTitles,
+      leftChild: TitleSummaryPanel(
+        titolo: _selectedTitle!,
+        viewRow: _selectedTitleRow ?? const {},
+      ),
+    );
+  }
+
     case _ClientSection.movimenti:
       return const Center(child: Text('Movimenti – placeholder'));
-    case _ClientSection.sinistri:
-      return const Center(child: Text('Sinistri – placeholder'));
+case _ClientSection.sinistri:
+  if (_selectedClaim == null) {
+    // Lista sinistri
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlClaims,
+      leftChild: ClientClaimsPage(
+        user: widget.user,
+        token: widget.token,
+        userId: widget.user.username,
+        clientId: _selectedClientId!,
+        sdk: _sdk,
+        onOpenClaim: (sinistro, viewRow) {
+          setState(() {
+            _resetChats();
+            _selectedClaim    = sinistro;
+            _selectedClaimRow = viewRow;
+          });
+        },
+      ),
+    );
+  } else {
+    // Summary incastrato
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlClaims,
+      leftChild: ClaimSummaryPanel(
+        sinistro: _selectedClaim!,
+        viewRow : _selectedClaimRow ?? const {},
+      ),
+    );
+  }
+
     case _ClientSection.documenti:
       return const Center(child: Text('Documenti – placeholder'));
     case _ClientSection.note:
@@ -555,32 +637,34 @@ case _ClientSection.contratti:
   }
 
     // caso 2: mostra placeholder sezione
-    switch (_selectedSide) {
-      case _SideItem.home:
-        return const HomeDashboard(); // ⟵ nuovo widget
-      case _SideItem.portafoglio:
-        return const Center(
-            child: Text('Portafoglio – elenco polizze (placeholder)'));
-      case _SideItem.sinistri:
-        return const Center(
-            child: Text('Sinistri – gestione sinistri (placeholder)'));
-      case _SideItem.comunicazioni:
-        return const Center(
-            child: Text('Comunicazioni – messaggi (placeholder)'));
-      case _SideItem.contabilita:
-        return const Center(
-            child: Text('Contabilità – movimenti (placeholder)'));
-      case _SideItem.documentale:
-        return const Center(
-            child: Text('Documentale – archivio (placeholder)'));
-      case _SideItem.report:
-        return const Center(child: Text('Report – statistiche (placeholder)'));
-      case _SideItem.sistema:
-        return const Center(
-            child: Text('Sistema – impostazioni (placeholder)'));
-    }
-  }
+// 🔧 Dentro _buildContent(), sostituisci lo switch(_selectedSide) finale
+switch (_selectedSide) {
+  case _SideItem.home:
+    return HomeDashboard(
+      user: widget.user,
+      token: widget.token,
+      sdk: _sdk,
+      onOpenClient: (id) {
+        setState(() {
+          _resetChats();
+          _selectedClientId = id;                 // apri il cliente dalla Home
+          _selClientSection = _ClientSection.cliente;
+        });
+      },
+    );
+  case _SideItem.polizze:
+    // TODO: inserire pagina elenco polizze
+    return const Center(child: Text('Polizze – elenco polizze (placeholder)'));
 
+  case _SideItem.sinistri:
+    // TODO: pagina sinistri globale
+    return const Center(child: Text('Sinistri – gestione sinistri (placeholder)'));
+  case _SideItem.proceduraGara:
+    // TODO: inserire workflow/gare reali
+    return const Center(child: Text('Procedura di Gara – (placeholder)'));
+
+}
+  }
 
 @override
 void initState() {

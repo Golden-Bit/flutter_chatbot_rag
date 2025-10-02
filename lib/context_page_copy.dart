@@ -42,16 +42,31 @@ class MyApp extends StatelessWidget {
 class _PaginatedDocViewer extends StatefulWidget {
   final ContextApiSdk apiSdk;
   final String        token;
-  final String        collection;
+
+  /// ► Modalità A (legacy): passo direttamente la collection
+  final String?       collection;
+
+  /// ► Modalità B (nuova): passo sorgente per calcolare la collection lato server
+  final String?       ctx;
+  final String?       filename;
+
   final int           pageSize;
 
-  const _PaginatedDocViewer({
+  _PaginatedDocViewer({
     Key? key,
     required this.apiSdk,
     required this.token,
-    required this.collection,
+    this.collection,           // ← opzionale
+    this.ctx,                  // ← opzionale
+    this.filename,             // ← opzionale
     this.pageSize = 1,
-  }) : super(key: key);
+  }) : assert(
+         // almeno una delle due modalità deve essere valorizzata:
+         (collection != null && collection!.isNotEmpty) ||
+         ((ctx != null && ctx!.isNotEmpty) && (filename != null && filename!.isNotEmpty)),
+         "Devi fornire 'collection' oppure la coppia 'ctx' + 'filename'.",
+       ),
+       super(key: key);
 
   @override
   State<_PaginatedDocViewer> createState() => _PaginatedDocViewerState();
@@ -59,7 +74,7 @@ class _PaginatedDocViewer extends StatefulWidget {
 
 class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
   late Future<List<DocumentModel>> _future;
-  int  _page  = 0;        // 0‑based
+  int  _page  = 0;        // 0-based
   int? _total;
 
   @override
@@ -67,19 +82,215 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
     super.initState();
     _future = _fetch();           // ► prima pagina
   }
+// ──────────────────────────────────────────────────────────────
+// Helper: stringify di valori arbitrari (mappa/lista → JSON inline)
+// ──────────────────────────────────────────────────────────────
+String _stringify(dynamic v) {
+  try {
+    if (v == null) return '';
+    if (v is String) {
+      // comprimi le nuove linee per tenerlo in singola riga
+      return v.replaceAll('\n', ' ').replaceAll('\r', ' ').trim();
+    }
+    // qualsiasi altro tipo → JSON compatto (senza newline)
+    return jsonEncode(v);
+  } catch (_) {
+    // fallback super difensivo
+    return v.toString();
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Widget valore monoriga selezionabile con scroll orizzontale
+// tramite caret/drag (senza scrollbar visibile).
+// ──────────────────────────────────────────────────────────────
+Widget _valueCell(String value) {
+  // Controller effimero: ok perché il widget è read-only
+  final controller = TextEditingController(text: value);
+
+  return TextField(
+    controller: controller,
+    readOnly: true,
+    maxLines: 1,
+    minLines: 1,
+    // niente wrap: la riga si estende orizzontalmente e scorre al caret
+    expands: false,
+    enableInteractiveSelection: true,
+    // disabilita ogni "aiuto" di input (è solo display/copypaste)
+    enableSuggestions: false,
+    autocorrect: false,
+    // fisica standard senza scrollbar
+    scrollPhysics: const ClampingScrollPhysics(),
+    // cursore testuale (web/desktop) e comportamento classico
+    mouseCursor: SystemMouseCursors.text,
+    // stile monospace come per il JSON
+    style: const TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 12,
+      color: Colors.black87,
+    ),
+    // nessun bordo interno, padding minimo
+    decoration: const InputDecoration(
+      isDense: true,
+      border: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      contentPadding: EdgeInsets.zero,
+    ),
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// RIGA chiave/valore con valore selezionabile (no wrap) e
+// scorrimento orizzontale al movimento del cursore
+// ──────────────────────────────────────────────────────────────
+Widget _metaRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4.0),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // colonna chiave a larghezza fissa con ellissi
+        SizedBox(
+          width: 140,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              color: Colors.black87,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        // colonna valore: singola riga selezionabile (senza scrollbar)
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            clipBehavior: Clip.hardEdge, // evita overflow visivi
+            child: _valueCell(value),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Card del documento: page_content in alto + righe metadati
+// ──────────────────────────────────────────────────────────────
+Widget _docCard(DocumentModel d) {
+  final Map<String, dynamic> md =
+      (d.metadata ?? {}) as Map<String, dynamic>; // difensivo
+
+  // Prepara coppie chiave/valore: includi anche "type" come riga iniziale
+  final List<MapEntry<String, String>> rows = [
+    MapEntry('type', _stringify(d.type)),
+    ...md.entries.map(
+      (e) => MapEntry(e.key, _stringify(e.value)),
+    ),
+  ];
+
+  return Card(
+    elevation: 2,
+    margin: const EdgeInsets.symmetric(vertical: 8),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    child: Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── PAGE CONTENT ───────────────────────────────────────
+          const Text(
+            'page_content',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 180),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white, // grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  d.pageContent ?? '',
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── METADATA ───────────────────────────────────────────
+          const Text(
+            'metadata',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          // righe auto-generate per OGNI meta presente
+          ...rows.map((kv) => _metaRow(kv.key, kv.value)),
+        ],
+      ),
+    ),
+  );
+}
+
 
   /*──────── helper API (skip / limit fissi) ────────*/
   Future<List<DocumentModel>> _fetch() async {
+    final skip  = _page * widget.pageSize;
+    final limit = widget.pageSize;
+
+    // ► Se ho ctx+filename → nuova API che risolve lato server (hash 15 + "_collection")
+    if ((widget.ctx != null && widget.ctx!.isNotEmpty) &&
+        (widget.filename != null && widget.filename!.isNotEmpty)) {
+      return widget.apiSdk.listDocumentsResolved(
+        ctx   : widget.ctx,
+        filename: widget.filename,
+        token : widget.token,
+        skip  : skip,
+        limit : limit,
+        onTotal: (t) => _total = t,
+      );
+    }
+
+    // ► Altrimenti fallback legacy su collection (compatibilità)
     return widget.apiSdk.listDocuments(
-      widget.collection,
+      widget.collection!,
       token : widget.token,
-      skip  : _page * widget.pageSize,
-      limit : widget.pageSize,        // sempre = pageSize
+      skip  : skip,
+      limit : limit,              // sempre = pageSize
       onTotal: (t) => _total = t,
     );
   }
 
-  /*──────── cambio pagina (con guard‑rail) ────────*/
+  /*──────── cambio pagina (con guard-rail) ────────*/
   void _go(int delta) {
     final next = _page + delta;
     if (next < 0) return;                                   // < 0
@@ -106,7 +317,7 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
             return Text('Errore caricamento documenti: ${snap.error}');
           }
 
-          final docs    = snap.data!;
+          final docs    = snap.data ?? const <DocumentModel>[];
           final isEmpty = docs.isEmpty;
 
           final jsonStr = isEmpty
@@ -133,14 +344,14 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
                   ),
                   Text(
                     _total == null
-                      ? 'Pagina ${_page + 1}'
-                      : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
+                      ? 'Pagina ${_page + 1}'
+                      : 'Pagina ${_page + 1} / ${(_total! / widget.pageSize).ceil()}',
                     style: const TextStyle(fontSize: 13),
                   ),
                   IconButton(
                     tooltip : 'Pagina successiva',
                     icon    : const Icon(Icons.arrow_forward_ios, size: 16),
-                    onPressed: (isEmpty || docs.length < widget.pageSize)
+                    onPressed: (isEmpty || (_total != null && (_page + 1) * widget.pageSize >= _total!))
                       ? null
                       : () => _go(1),
                   ),
@@ -154,32 +365,28 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
                   width : double.infinity,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: isEmpty
-                      ? const Center(
-                          child: Text(
-                            '— Nessun documento disponibile —',
-                            style: TextStyle(
-                              fontStyle: FontStyle.italic,
-                              color: Colors.grey,
-                              fontSize: 13,
-                            ),
-                          ),
-                        )
-                      : Scrollbar(
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
-                            child: SelectableText(
-                              jsonStr,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize : 12,
-                              ),
-                            ),
-                          ),
-                        ),
+child: isEmpty
+    ? const Center(
+        child: Text(
+          '— Nessun documento disponibile —',
+          style: TextStyle(
+            fontStyle: FontStyle.italic,
+            color: Colors.grey,
+            fontSize: 13,
+          ),
+        ),
+      )
+    : Scrollbar(
+        thumbVisibility: true,
+        child: ListView.builder(
+          itemCount: docs.length,
+          itemBuilder: (context, i) => _docCard(docs[i]),
+        ),
+      ),
+
                 ),
               ),
             ],
@@ -189,6 +396,7 @@ class _PaginatedDocViewerState extends State<_PaginatedDocViewer> {
     );
   }
 }
+
 
 /// Restituisce {icon, color} in base all’estensione del file.
 Map<String, dynamic> fileIconFor(String fileName) {
@@ -300,11 +508,17 @@ List<ContextMetadata> _contexts = [];
 // ──────────────────────────────────────────────────────────────
   String _fileIdFrom(Map<String, dynamic> file) => file['name'] ?? '';
 
-  String _collectionNameFrom(Map<String, dynamic> file) {
-    final raw = file['name'] ?? '';
-    // es.: "ctx/filename.pdf"  →  "ctxfilename.pdf_collection"
-    return raw.replaceAll('/', '') + '_collection';
-  }
+String _extractCtx(String rawPath) {
+  final i = rawPath.indexOf('/');
+  return i < 0 ? rawPath : rawPath.substring(0, i);
+}
+
+String _extractFilename(String rawPath, String fallbackUiName) {
+  // rawPath tipicamente "ctx/filename.ext"; se manca "/", ripiega su titolo UI
+  final i = rawPath.indexOf('/');
+  return i < 0 ? fallbackUiName : rawPath.substring(i + 1);
+}
+
 // → tutte le KB, comprese quelle-chat (già esistente)
 List<ContextMetadata> _allContexts = [];
 
@@ -319,7 +533,9 @@ List<ContextMetadata> _gridContexts = [];
   UI ▸ dialog di anteprima file con paginazione (freccia ← / →)
 ───────────────────────────────────────────────────────────────────────────*/
 void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
-  final collection = _collectionNameFrom(file);
+  final raw = (file['name'] as String?) ?? '';
+  final ctx = _extractCtx(raw);
+  final fname = _extractFilename(raw, fileName);
 
   showDialog(
     context: context,
@@ -343,18 +559,19 @@ void _showFilePreviewDialog(Map<String, dynamic> file, String fileName) {
           IconButton(
             tooltip: 'Scarica JSON documenti',
             icon   : const Icon(Icons.download),
-            onPressed: () => _downloadDocumentsJson(collection, fileName),
+            onPressed: () => _downloadDocumentsJsonByName(ctx, fname, fileName),
           ),
         ],
       ),
 
       /*──────────────────────── corpo paginato (Stateful) ──────────────────────*/
-      content: _PaginatedDocViewer(
-        apiSdk     : _apiSdk,
-        token      : widget.token,              // stringa token
-        collection : collection,
-        pageSize   : 1,                         // mostra 1 doc per pagina
-      ),
+ content: _PaginatedDocViewer(
+   apiSdk   : _apiSdk,
+   token    : widget.token,
+   ctx      : ctx,          // ← NEW
+   filename : fname,        // ← NEW
+   pageSize : 1,
+ ),
 
       actions: [
         TextButton(
@@ -1005,10 +1222,10 @@ TextButton(
     );
   }
 
-  Future<void> _downloadDocumentsJson(
-      String collection, String baseFileName) async {
-    // 1) scarica i documenti
-    final docs = await _apiSdk.listDocuments(collection, token: widget.token);
+Future<void> _downloadDocumentsJsonByName(String ctx, String fname, String baseFileName) async {
+  final docs = await _apiSdk.listDocumentsResolved(
+    ctx: ctx, filename: fname, token: widget.token,
+  );
 
     // 2) serializza con indentazione
     final jsonStr = const JsonEncoder.withIndent('  ').convert(

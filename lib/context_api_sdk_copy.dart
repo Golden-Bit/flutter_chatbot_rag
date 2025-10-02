@@ -815,8 +815,8 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    "chatbot_nlp_api": "http://127.0.0.1:8888"
+    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    //"chatbot_nlp_api": "http://127.0.0.1:8888"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'

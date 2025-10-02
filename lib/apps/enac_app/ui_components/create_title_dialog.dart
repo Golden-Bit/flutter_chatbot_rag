@@ -235,7 +235,7 @@ class _CreateTitleDialogState extends State<CreateTitleDialog> {
             entityId: widget.entityId,
           ),
           autoStartMessage:
-              "Da ora in poi dovrai aiutarmi con la compilazione dei titoli usando l'apposito Tool UI; rispondi solo 'OK' a questo messaggio iniziale.",
+              "Da ora in poi dovrai aiutarmi con la compilazione dei titoli usando l'apposito Tool UI; rispondi solo 'OK' a questo messaggio iniziale. ",
           autoStartInvisible: false,
           openChatOnMount: false,
         ),

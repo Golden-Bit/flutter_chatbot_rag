@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
+import 'package:boxed_ai/services/lang_auto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/llm_ui_tools/utilities/auto_sequence_widget.dart';
@@ -6164,24 +6165,86 @@ void _listen() async {
 }
 
 
-  // Funzione per il Text-to-Speech
-  Future<void> _speak(String message) async {
-    if (message.isNotEmpty) {
-      await _flutterTts.setLanguage(_selectedLanguage); // Lingua personalizzata
-      await _flutterTts.setPitch(_pitch);
-      await _flutterTts.setSpeechRate(_speechRate); // Velocità personalizzata
-      await _flutterTts.setVolume(_volume); // Volume personalizzato
-      await _flutterTts.speak(message);
+// Funzione per il Text-to-Speech con auto-rilevamento lingua
+Future<void> _speak(String message) async {
+  final text = (message).trim();
+  if (text.isEmpty) return;
+
+  try {
+    // interrompi eventuale parlato in corso
+    await _flutterTts.stop();
+
+    // 1) Decidi quale lingua usare:
+    //    - se _selectedLanguage è 'auto' (o vuota/null), rileva dal testo
+    //    - altrimenti rispetta la lingua scelta dall’utente
+    String? languageToSet;
+
+    final sel = (_selectedLanguage ?? '').trim();
+    final isAuto = sel.isEmpty || sel.toLowerCase() == 'auto';
+
+    if (isAuto) {
+      // Rilevamento lingua dal contenuto
+      final code = await LangAuto.detectLangCode(text); // es. 'it', 'en', 'und'
+      if (code != null && code != 'und') {
+        languageToSet = await LangAuto.pickBestTtsLocale(_flutterTts, code); // es. 'it-IT'
+      }
+    } else {
+      languageToSet = sel; // forza la lingua scelta manualmente
+    }
+
+    // 2) Applica lingua e (se possibile) voce coerente
+    if (languageToSet != null && languageToSet.isNotEmpty) {
+      try {
+        await _flutterTts.setLanguage(languageToSet);
+        final voice = await LangAuto.pickBestTtsVoice(_flutterTts, languageToSet);
+        if (voice != null) {
+          // Esempio: {"name": "...", "locale": "it-IT"}
+          await _flutterTts.setVoice(voice);
+        }
+      } catch (_) {
+        // Se il device non supporta quella locale/voce, si prosegue con default corrente
+      }
+    }
+
+    // 3) Parametri utente
+    await _flutterTts.setPitch(_pitch);
+    await _flutterTts.setSpeechRate(_speechRate);
+    await _flutterTts.setVolume(_volume);
+
+    // (facoltativo ma utile) aspetta il completamento per gestire _isPlaying
+    await _flutterTts.awaitSpeakCompletion(true);
+
+    // 4) Parla + stato UI
+    setState(() {
+      _isPlaying = true;
+    });
+
+    await _flutterTts.speak(text);
+
+    // 5) Quando finisce, aggiorna lo stato (proteggi con mounted)
+    _flutterTts.setCompletionHandler(() {
+      if (!mounted) return;
+      setState(() {
+        _isPlaying = false;
+      });
+    });
+  } catch (_) {
+    // Fallback: prova comunque a parlare con le impostazioni correnti
+    try {
       setState(() {
         _isPlaying = true;
       });
+      await _flutterTts.speak(text);
       _flutterTts.setCompletionHandler(() {
+        if (!mounted) return;
         setState(() {
           _isPlaying = false;
         });
       });
-    }
+    } catch (_) {}
   }
+}
+
 
   // Funzione per copiare il messaggio negli appunti
   void _copyToClipboard(String message) {

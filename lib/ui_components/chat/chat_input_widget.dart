@@ -521,22 +521,45 @@ class ChatInputWidget extends StatelessWidget {
                                     onPressed: _stopStreaming,
                                   )
                                 // nessuno stream → mic / send
-                                : (_controller.text.isEmpty
-                                    ? IconButton(
-                                        icon: Icon(_isListening
-                                            ? Icons.mic_off
-                                            : Icons.mic),
-                                        tooltip:
-                                            localizations.enable_mic,
-                                        onPressed: _listen,
-                                      )
-                                    : IconButton(
-                                        icon: const Icon(Icons.send),
-                                        tooltip:
-                                            localizations.send_message,
-                                        onPressed: () => _handleUserInput(
-                                            _controller.text),
-                                      )),
+                                : // Pulsante finale
+isSending
+    ? const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 8.0),
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      )
+    : _isStreaming
+        // streaming in corso → STOP ▢
+        ? IconButton(
+            icon: const Icon(Icons.stop, size: 24),
+            tooltip: 'Interrompi risposta',
+            onPressed: _stopStreaming,
+          )
+        // nessuno stream
+        : (_isListening
+            // ───────────── NUOVO COMPORTAMENTO ─────────────
+            // se sto ascoltando → resta microfono per disattivare
+            ? IconButton(
+                icon: const Icon(Icons.mic_off, color: Colors.red),
+                tooltip: localizations.disable_mic ?? 'Disattiva microfono',
+                onPressed: _listen, // premendo richiama stop
+              )
+            // se NON sto ascoltando → regola standard
+            : (_controller.text.isEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.mic),
+                    tooltip: localizations.enable_mic,
+                    onPressed: _listen,
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.send),
+                    tooltip: localizations.send_message,
+                    onPressed: () => _handleUserInput(_controller.text),
+                  ))),
+
                       ],
                     ),
                   ),

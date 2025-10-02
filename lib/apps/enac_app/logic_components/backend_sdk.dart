@@ -791,7 +791,7 @@ class Omnia8Sdk {
   final Map<String, String> defaultHeaders;
 
   Omnia8Sdk({
-    this.baseUrl = 'https://www.goldbitweb.com/enac-api', //'http://127.0.0.1:8111',
+    this.baseUrl = 'https://www.goldbitweb.com/enac-api/', //'http://127.0.0.1:8111',
     http.Client? httpClient,
     Map<String, String>? headers,
   })  : _http = httpClient ?? http.Client(),
@@ -803,14 +803,27 @@ class Omnia8Sdk {
   /// Chiude il client HTTP.
   void dispose() => _http.close();
 
-  Uri _buildUri(String path, [Map<String, dynamic>? query]) {
-    final q = <String, String>{};
-    query?.forEach((k, v) {
-      if (v == null) return;
-      q[k] = v.toString();
-    });
-    return Uri.parse(baseUrl).resolveUri(Uri(path: path, queryParameters: q));
-  }
+Uri _buildUri(String path, [Map<String, dynamic>? query]) {
+  // 1) normalizza la base: forziamo il trailing slash
+  final base = Uri.parse(baseUrl);
+  final normalizedBase = base.replace(
+    path: base.path.endsWith('/') ? base.path : '${base.path}/',
+  );
+
+  // 2) normalizza il child: rimuovi l'eventuale leading slash
+  final childPath = path.startsWith('/') ? path.substring(1) : path;
+
+  // 3) prepara i query params come stringhe
+  final qp = <String, String>{};
+  (query ?? {}).forEach((k, v) {
+    if (v != null) qp[k] = v.toString();
+  });
+
+  // 4) risolvi come *relativo* sulla base normalizzata
+  final child = Uri(path: childPath, queryParameters: qp);
+  return normalizedBase.resolveUri(child);
+}
+
 
   Future<dynamic> _request(
     String method,

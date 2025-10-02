@@ -3331,181 +3331,209 @@ Future<void> _toggleTts(String text) async {
     }
   }
 
-// ────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────
 // 3. FUNZIONE RISCRITTA: usa il merge ↑ e gestisce il nuovo tipo
+//     + TTS TOGGLE (volume_up ↔ volume_off) per ogni messaggio
 // ────────────────────────────────────────────────────────────────────
-  List<Widget> _buildMessagesList(double containerWidth) {
-    final loc = LocalizationProvider.of(context);
+List<Widget> _buildMessagesList(double containerWidth) {
+  final loc = LocalizationProvider.of(context);
 
-
+  // Filtra messaggi invisibili e comprime le sequenze
   final displayMsgs = _mergeSequences(
-  messages.where((m) => m[kMsgVisibility] != kVisInvisible).toList());
+    messages.where((m) => m[kMsgVisibility] != kVisInvisible).toList(),
+  );
 
+  final widgets = <Widget>[];
 
-    final widgets = <Widget>[];
+  for (int i = 0; i < displayMsgs.length; i++) {
+    final message = displayMsgs[i];
+    final role = message['role'] as String? ?? 'assistant';
 
-    for (int i = 0; i < displayMsgs.length; i++) {
-      final message = displayMsgs[i];
-      final role = message['role'] as String? ?? 'assistant';
-
-      // ───── date-separator identico a prima ───────────────
-      final DateTime parsedTime =
-          DateTime.tryParse(message['createdAt'] ?? '') ?? DateTime.now();
-      if (i == 0 ||
-          !_isSameDay(
-            parsedTime,
-            DateTime.tryParse(displayMsgs[i - 1]['createdAt'] ?? '') ??
-                parsedTime,
-          )) {
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Center(
-              child: Text(
-                _getDateSeparator(parsedTime),
-                style: const TextStyle(
-                  fontSize: 12.0,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey,
-                ),
-              ),
-            ),
-          ),
-        );
-      }
-
-      // ───── CASE 1: messaggio “sequence” raggruppato ───────
-      if (role == 'sequence') {
-        widgets.add(
-          _SequenceCard(
-            key: ValueKey('${_getCurrentChatId()}_${message['sequenceId']}'),
-            seqMsg: message,
-            containerWidth: containerWidth,
-            buildMixedContent: (msg) => _buildMixedContent(msg),
-          ),
-        );
-        continue;
-      }
-
-      // ───── CASE 2: messaggi normali (stesso layout di prima) ─────
-      final bool isUser = (role == 'user');
-      final String formattedTime = DateFormat('h:mm a').format(parsedTime);
-
+    // ───── separatore data (identico a prima) ─────
+    final DateTime parsedTime =
+        DateTime.tryParse(message['createdAt'] ?? '') ?? DateTime.now();
+    if (i == 0 ||
+        !_isSameDay(
+          parsedTime,
+          DateTime.tryParse(displayMsgs[i - 1]['createdAt'] ?? '') ??
+              parsedTime,
+        )) {
       widgets.add(
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ConstrainedBox(
-                constraints:
-                    BoxConstraints(maxWidth: containerWidth, minWidth: 200),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12.0),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16.0),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black12,
-                        blurRadius: 4.0,
-                        offset: Offset(2, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // RIGA 1: Avatar, nome e orario
-                      Row(
-                        children: [
-                          if (!isUser)
-                            CircleAvatar(
-                              backgroundColor: Colors.transparent,
-                              child: assistantAvatar,
-                            )
-                          else
-                            CircleAvatar(
-                              backgroundColor: _avatarBackgroundColor
-                                  .withOpacity(_avatarBackgroundOpacity),
-                              child: Icon(
-                                Icons.person,
-                                color: _avatarIconColor
-                                    .withOpacity(_avatarIconOpacity),
-                              ),
-                            ),
-                          const SizedBox(width: 8.0),
-                          Text(
-                            isUser ? widget.user.username : assistantName,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 4),
-                          const VerticalDivider(
-                            thickness: 1,
-                            color: Colors.black,
-                            width: 4,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            formattedTime,
-                            style: const TextStyle(
-                                fontSize: 12, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8.0),
-                      // RIGA 2: Contenuto del messaggio (Markdown + widget)
-                      _buildMixedContent(message),
-                      const SizedBox(height: 8.0),
-                      // RIGA 3: Icone azione
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.copy, size: 14),
-                            tooltip: loc.copy,
-                            onPressed: () =>
-                                _copyToClipboard(message['content'] ?? ''),
-                          ),
-                          if (!isUser) ...[
-                            IconButton(
-                              icon: const Icon(Icons.thumb_up, size: 14),
-                              tooltip: loc.positive_feedback,
-                              onPressed: () => print(
-                                  "Feedback positivo: ${message['content']}"),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.thumb_down, size: 14),
-                              tooltip: loc.negative_feedback,
-                              onPressed: () => print(
-                                  "Feedback negativo: ${message['content']}"),
-                            ),
-                          ],
-                          IconButton(
-                            icon: const Icon(Icons.volume_up, size: 14),
-                            tooltip: loc.volume,
-                            onPressed: () => _speak(message['content'] ?? ''),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.info_outline, size: 14),
-                            tooltip: loc.messageInfoTitle,
-                            onPressed: () => _showMessageInfoDialog(message),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+          child: Center(
+            child: Text(
+              _getDateSeparator(parsedTime),
+              style: const TextStyle(
+                fontSize: 12.0,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
               ),
-            ],
+            ),
           ),
         ),
       );
     }
-    return widgets;
+
+    // ───── CASE 1: super-messaggio “sequence” ─────
+    if (role == 'sequence') {
+      widgets.add(
+        _SequenceCard(
+          key: ValueKey('${_getCurrentChatId()}_${message['sequenceId']}'),
+          seqMsg: message,
+          containerWidth: containerWidth,
+          buildMixedContent: (msg) => _buildMixedContent(msg),
+        ),
+      );
+      continue;
+    }
+
+    // ───── CASE 2: messaggi normali ─────
+    final bool isUser = (role == 'user');
+    final String formattedTime = DateFormat('h:mm a').format(parsedTime);
+
+    // NEW (TTS): testo su cui applicare il toggle
+    // Se il messaggio è "placeholder", leggi il displayText; altrimenti content
+    final String msgText = (message[kMsgVisibility] == kVisPlaceholder)
+        ? (message[kMsgDisplayText] ?? '')
+        : (message['content'] ?? '');
+
+    // NEW (TTS): sto leggendo proprio questo messaggio?
+    final bool isThisPlaying = _isPlaying && _currentTtsText == msgText;
+
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: containerWidth, minWidth: 200),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16.0),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 4.0,
+                      offset: Offset(2, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // RIGA 1: Avatar, nome e orario
+                    Row(
+                      children: [
+                        if (!isUser)
+                          CircleAvatar(
+                            backgroundColor: Colors.transparent,
+                            child: assistantAvatar,
+                          )
+                        else
+                          CircleAvatar(
+                            backgroundColor: _avatarBackgroundColor
+                                .withOpacity(_avatarBackgroundOpacity),
+                            child: Icon(
+                              Icons.person,
+                              color: _avatarIconColor
+                                  .withOpacity(_avatarIconOpacity),
+                            ),
+                          ),
+                        const SizedBox(width: 8.0),
+                        Text(
+                          isUser ? widget.user.username : assistantName,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 4),
+                        const VerticalDivider(
+                          thickness: 1,
+                          color: Colors.black,
+                          width: 4,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          formattedTime,
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8.0),
+
+                    // RIGA 2: Contenuto (Markdown + widget)
+                    _buildMixedContent(message),
+                    const SizedBox(height: 8.0),
+
+                    // RIGA 3: Icone azione
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 14),
+                          tooltip: loc.copy,
+                          onPressed: () =>
+                              _copyToClipboard(message['content'] ?? ''),
+                        ),
+                        if (!isUser) ...[
+                          IconButton(
+                            icon: const Icon(Icons.thumb_up, size: 14),
+                            tooltip: loc.positive_feedback,
+                            onPressed: () => print(
+                              "Feedback positivo: ${message['content']}",
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.thumb_down, size: 14),
+                            tooltip: loc.negative_feedback,
+                            onPressed: () => print(
+                              "Feedback negativo: ${message['content']}",
+                            ),
+                          ),
+                        ],
+
+                        // ───────────────────────────────────────────────
+                        // NEW (TTS TOGGLE):
+                        //  - icona cambia: volume_up ↔ volume_off
+                        //  - click: _toggleTts(msgText)
+                        // ───────────────────────────────────────────────
+                        IconButton(
+                          icon: Icon(
+                            isThisPlaying ? Icons.volume_off : Icons.volume_up,
+                            size: 14,
+                          ),
+                          tooltip: isThisPlaying
+                              // se non hai loc.stop_tts, sostituisci con stringa fissa
+                              ? (loc.stop_tts ?? 'Stop lettura')
+                              : loc.volume,
+                          onPressed: () => _toggleTts(msgText),
+                        ),
+
+                        IconButton(
+                          icon: const Icon(Icons.info_outline, size: 14),
+                          tooltip: loc.messageInfoTitle,
+                          onPressed: () => _showMessageInfoDialog(message),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
+
+  return widgets;
+}
+
 
   Future<void> _archiveChat(int index) async {
     final localizations = LocalizationProvider.of(context);

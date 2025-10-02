@@ -1785,6 +1785,18 @@ String get edit_knowledge_box {
         return 'Stop response';
     }
   }
+    /// Tooltip per stoppare lo streaming della risposta
+  String get stop_tts {
+    switch (language) {
+      case Language.italian:
+        return 'Arresta lettura';
+      case Language.spanish:
+        return 'Detener lectura';
+      case Language.english:
+      default:
+        return 'Stop reading';
+    }
+  }
 }
 
 

@@ -2985,6 +2985,34 @@ void _kickoffPaymentsFetch() {
     _speech = stt.SpeechToText();
     _flutterTts = FlutterTts();
 
+_flutterTts.setStartHandler(() {
+  if (mounted) setState(() => _isPlaying = true);
+});
+_flutterTts.setCompletionHandler(() {
+  if (mounted) {
+    setState(() {
+      _isPlaying = false;
+      _currentTtsText = null;
+    });
+  }
+});
+_flutterTts.setCancelHandler(() {
+  if (mounted) {
+    setState(() {
+      _isPlaying = false;
+      _currentTtsText = null;
+    });
+  }
+});
+_flutterTts.setErrorHandler((msg) {
+  if (mounted) {
+    setState(() {
+      _isPlaying = false;
+      _currentTtsText = null;
+    });
+  }
+});
+
     // ────────────────────────────────────────────────────────────────
     // ⑤ listener & scroll
     // ────────────────────────────────────────────────────────────────
@@ -3034,6 +3062,57 @@ void _kickoffPaymentsFetch() {
     await _loadConfig();
     await _loadAvailableContexts();
   }
+
+// ───────────────────────────────────────────────
+// NEW: stato avanzato per TTS (testo correntemente letto)
+//      e helper per fermare STT/TTS ovunque serva
+// ───────────────────────────────────────────────
+String? _currentTtsText; // quale messaggio sta leggendo ora?
+
+Future<void> _stopListeningIfActive() async {
+  if (_isListening) {
+    setState(() => _isListening = false);
+    try {
+      await _speech.stop();
+    } catch (_) {
+      try { await _speech.cancel(); } catch (_) {}
+    }
+  }
+}
+
+Future<void> _stopTts() async {
+  try {
+    await _flutterTts.stop();
+  } catch (_) {}
+  if (mounted) {
+    setState(() {
+      _isPlaying = false;
+      _currentTtsText = null;
+    });
+  }
+}
+
+/// Toggle TTS per un testo specifico:
+/// - se sta già leggendo proprio questo testo → stop
+/// - se sta leggendo altro → stop e riparti da capo con questo
+/// - se non sta leggendo → parti
+Future<void> _toggleTts(String text) async {
+  // se sto già leggendo proprio questo testo → ferma
+  if (_isPlaying && _currentTtsText == text) {
+    await _stopTts();
+    return;
+  }
+
+  // se sto leggendo altro → ferma e riparti da capo con 'text'
+  if (_isPlaying && _currentTtsText != text) {
+    await _stopTts();
+  }
+
+  // avvia nuova lettura
+  _currentTtsText = text;
+  await _speak(text); // riusa la tua funzione
+}
+
 
   /*@override
   void initState() {
@@ -3747,6 +3826,8 @@ void _kickoffPaymentsFetch() {
   void dispose() {
     _notifPoller?.cancel();
     _removeOverlay();
+      try { _speech.stop(); } catch (_) {}
+  try { _flutterTts.stop(); } catch (_) {}
     super.dispose();
   }
 
@@ -5639,6 +5720,10 @@ showDialog(
     String  visibility = kVisNormal,
     String? displayText,
   }) async {
+
+      // ── NEW: spegni lo STT se attivo prima di procedere
+  await _stopListeningIfActive();
+  
     if (input.isEmpty) return;
 
     if (_isSending || _isStreaming) return; // debounce
@@ -6032,23 +6117,24 @@ final response = await _withRetry(
     }
   }
 
-  // Funzione per iniziare o fermare l'ascolto
-  void _listen() async {
-    if (!_isListening) {
-      bool available = await _speech.initialize();
-      if (available) {
-        setState(() => _isListening = true);
-        _speech.listen(onResult: (val) {
-          setState(() {
-            _controller.text = val.recognizedWords;
-          });
+void _listen() async {
+  if (!_isListening) {
+    bool available = await _speech.initialize();
+    if (available) {
+      setState(() => _isListening = true);
+      _speech.listen(onResult: (val) {
+        if (!_isListening) return; // NEW: se nel frattempo l'ho fermato, ignora
+        setState(() {
+          _controller.text = val.recognizedWords;
         });
-      }
-    } else {
-      setState(() => _isListening = false);
-      _speech.stop();
+      });
     }
+  } else {
+    setState(() => _isListening = false);
+    _speech.stop();
   }
+}
+
 
   // Funzione per il Text-to-Speech
   Future<void> _speak(String message) async {

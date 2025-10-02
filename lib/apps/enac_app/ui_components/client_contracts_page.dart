@@ -17,7 +17,7 @@ class ClientContractsPage extends StatefulWidget {
   final String userId;
   final String clientId;
   final Omnia8Sdk sdk;
-  final void Function(ContrattoOmnia8) onOpenContract;
+final void Function(String contractId, ContrattoOmnia8 c) onOpenContract;
 
   const ClientContractsPage({
     super.key,

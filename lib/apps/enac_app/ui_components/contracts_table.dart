@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-
 import '../logic_components/backend_sdk.dart';
 
 class ContractsTable extends StatefulWidget {
   final String userId;
   final String clientId;
   final Omnia8Sdk sdk;
-  final void Function(ContrattoOmnia8)? onOpenContract;
+
+  // ⬇⬇⬇ FIRMA AGGIORNATA: passa anche contractId
+  final void Function(String contractId, ContrattoOmnia8 c)? onOpenContract;
 
   const ContractsTable({
     super.key,
@@ -21,14 +22,21 @@ class ContractsTable extends StatefulWidget {
   State<ContractsTable> createState() => _ContractsTableState();
 }
 
+/* Riga “forte” con ID + oggetto */
+class _Row {
+  final String id;
+  final ContrattoOmnia8 c;
+  _Row(this.id, this.c);
+}
+
 class _ContractsTableState extends State<ContractsTable> {
   // Stato paginazione
   final int _pageSize = 10;
   List<String> _allIds = [];
   int _nextIndex = 0;
 
-  // Stato dati caricati
-  final List<ContrattoOmnia8> _contracts = [];
+  // ⬇⬇⬇ Prima avevi List<ContrattoOmnia8>; ora teniamo ID+Contratto
+  final List<_Row> _rows = [];
 
   // Stato UI
   bool _isInitialLoading = true;
@@ -44,15 +52,14 @@ class _ContractsTableState extends State<ContractsTable> {
   }
 
   /* ------------------------------------------------------------------
-   *  CARICAMENTO INIZIALE: prende tutti gli ID (tollerante ai 404)
-   *  poi carica la prima pagina di 10 contratti
+   *  CARICAMENTO INIZIALE
    * ----------------------------------------------------------------*/
   Future<void> _initLoad() async {
     setState(() {
       _isInitialLoading = true;
       _error = null;
       _allIds = [];
-      _contracts.clear();
+      _rows.clear();
       _nextIndex = 0;
     });
 
@@ -64,7 +71,6 @@ class _ContractsTableState extends State<ContractsTable> {
         await _loadMore();
       }
     } on ApiException catch (e) {
-      // 404 = nessun contratto
       if (e.statusCode == 404) {
         _allIds = [];
         _error = null;
@@ -85,7 +91,7 @@ class _ContractsTableState extends State<ContractsTable> {
   bool get _hasMore => _nextIndex < _allIds.length;
 
   /* ------------------------------------------------------------------
-   *  CARICA ALTRI 10 CONTRATTI (tollerante ai 404)
+   *  CARICA ALTRI 10 CONTRATTI
    * ----------------------------------------------------------------*/
   Future<void> _loadMore() async {
     if (_isLoadingMore || !_hasMore) return;
@@ -97,7 +103,7 @@ class _ContractsTableState extends State<ContractsTable> {
 
     final end = (_nextIndex + _pageSize).clamp(0, _allIds.length);
     for (int i = _nextIndex; i < end; i++) {
-      final contractId = _allIds[i]; // <— è una stringa, non un oggetto
+      final contractId = _allIds[i]; // <— stringa ID
       try {
         final c = await widget.sdk.getContract(
           widget.userId,
@@ -106,13 +112,11 @@ class _ContractsTableState extends State<ContractsTable> {
         );
         if (mounted) {
           setState(() {
-            _contracts.add(c);
+            _rows.add(_Row(contractId, c)); // <— salvi coppia (id, contratto)
           });
         }
       } on ApiException catch (e) {
-        // 404 = contratto orfano → lo saltiamo
         if (e.statusCode != 404) {
-          // non blocchiamo la pagina, ma segnaliamo l'ultimo errore
           _error = 'Errore nel caricamento contratto $contractId: ${e.message}';
         }
       } catch (e) {
@@ -131,22 +135,24 @@ class _ContractsTableState extends State<ContractsTable> {
   /* ------------------------------------------------------------------
    *  HELPERS
    * ----------------------------------------------------------------*/
-  String _fmtDate(DateTime? d) => d == null ? '' : DateFormat('dd/MM/yyyy').format(d);
+  String _fmtDate(DateTime? d) =>
+      d == null ? '' : DateFormat('dd/MM/yyyy').format(d);
 
-  num _money(String? s) {
-    if (s == null) return 0.0;
-    // Le API usano stringhe tipo "1234.56"
-    return double.tryParse(s) ?? 0.0;
+  num _money(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v;
+    return double.tryParse(v.toString()) ?? 0.0;
   }
 
   /* ------------------------------------------------------------------
-   *  RIGA TABELLA (null-safe)
+   *  RIGA TABELLA (usa _Row per avere anche l'ID)
    * ----------------------------------------------------------------*/
-  DataRow _row(BuildContext context, ContrattoOmnia8 c) {
-    final id = c.identificativi; // non-null (required nel modello)
-    final amm = c.amministrativi; // può essere null
-    final premi = c.premi; // può essere null
-    final ramiEl = c.ramiEl; // può essere null
+  DataRow _row(BuildContext context, _Row r) {
+    final c   = r.c;
+    final id  = c.identificativi; // non-null (required nel modello)
+    final amm = c.amministrativi; // nullable
+    final premi = c.premi;        // nullable
+    final ramiEl = c.ramiEl;      // nullable
 
     return DataRow(cells: [
       const DataCell(Icon(Icons.description_outlined, size: 18)),
@@ -164,7 +170,7 @@ class _ContractsTableState extends State<ContractsTable> {
         IconButton(
           icon: const Icon(Icons.search, size: 20),
           tooltip: 'Dettaglio contratto',
-          onPressed: () => widget.onOpenContract?.call(c),
+          onPressed: () => widget.onOpenContract?.call(r.id, r.c), // ⬅️ PASSA ID + OGGETTO
         ),
       ),
     ]);
@@ -179,11 +185,11 @@ class _ContractsTableState extends State<ContractsTable> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error != null && _contracts.isEmpty) {
+    if (_error != null && _rows.isEmpty) {
       return Center(child: Text(_error!));
     }
 
-    if (_contracts.isEmpty) {
+    if (_rows.isEmpty) {
       return const Center(child: Text('Nessun contratto'));
     }
 
@@ -211,7 +217,7 @@ class _ContractsTableState extends State<ContractsTable> {
                 DataColumn(label: Text('PREMIO')),
                 DataColumn(label: SizedBox()), // lente
               ],
-              rows: _contracts.map((c) => _row(context, c)).toList(),
+              rows: _rows.map((r) => _row(context, r)).toList(),
             ),
           ),
         );
@@ -222,7 +228,7 @@ class _ContractsTableState extends State<ContractsTable> {
       padding: const EdgeInsets.only(top: 12),
       child: Column(
         children: [
-          if (_error != null) // mostra eventuali errori non-bloccanti dell’ultimo batch
+          if (_error != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(

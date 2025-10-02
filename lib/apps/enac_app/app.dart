@@ -54,6 +54,8 @@ class HomeScaffold extends StatefulWidget {
 }
 
 class _HomeScaffoldState extends State<HomeScaffold> {
+// in _HomeScaffoldState
+String? _selectedContractId;
 
   bool _chatsOpen = false;
 
@@ -300,20 +302,22 @@ Map<String, dynamic>? _selectedClaimRow;                          // NEW
                         IconButton(
               icon: const Icon(Icons.arrow_back),
               tooltip: 'Risultati ricerca',
-              onPressed: () => setState(() {
-                _resetChats(); 
-                _selectedContract = null;
-                _selectedClientId = null;          // ⬅️ torni ai risultati
-              }),
+onPressed: () => setState(() {
+  _resetChats(); 
+  _selectedContract   = null;
+  _selectedContractId = null;   // ⬅️ aggiunto
+  _selectedClientId   = null;
+}),
             ),
             IconButton(
               icon: const Icon(Icons.arrow_back),
               tooltip: 'Contratti',
-              onPressed: () => setState(() {
-                _resetChats(); 
-                _selectedContract = null;          // ⬅️ torni a lista contratti
-                _selClientSection = _ClientSection.contratti;
-              }),
+onPressed: () => setState(() {
+  _resetChats(); 
+  _selectedContract   = null;
+  _selectedContractId = null;   // ⬅️ aggiunto
+  _selClientSection   = _ClientSection.contratti;
+}),
             ),
             const Text('Contratti'),
           ],
@@ -475,12 +479,21 @@ return Container(
 // ---------- vista CONTRATTO ----------
 if (_selectedContract != null) {
   switch (_selContractSection) {
-    case _ContractSection.riepilogo:
-      return DualPaneWrapper(
-      user: widget.user,
-      token: widget.token,
-  controller : _paneCtrl3,
-  leftChild  :ContractDetailPage(contratto: _selectedContract!));
+case _ContractSection.riepilogo:
+  return DualPaneWrapper(
+    user: widget.user,
+    token: widget.token,
+    controller: _paneCtrl3,
+    leftChild: ContractDetailPage(
+      contratto : _selectedContract!,
+      sdk       : _sdk,
+      user      : widget.user,
+      userId    : widget.user.username,
+      entityId  : _selectedClientId!,     // cliente corrente
+      contractId: _selectedContractId!,   // <-- serve per le API Documenti
+      initialTab: 0,                      // Riepilogo
+    ),
+  );
 
     case _ContractSection.titoli:
       return const Center(child: Text('Titoli – placeholder'));
@@ -525,13 +538,14 @@ case _ClientSection.contratti:
     userId: widget.user.username,
     clientId: _selectedClientId!,
     sdk: _sdk,
-    onOpenContract: (c) {
-      setState(() {
-        _resetChats();                        // ⬅️ NEW
-        _selectedContract   = c;
-        _selContractSection = _ContractSection.riepilogo;
-      });
-    },
+onOpenContract: (String contractId, ContrattoOmnia8 c) {
+  setState(() {
+    _resetChats();
+    _selectedContractId = contractId;   // ⬅️ salvi anche l’ID
+    _selectedContract   = c;
+    _selContractSection = _ContractSection.riepilogo;
+  });
+},
   ));
 case _ClientSection.titoli:
   if (_selectedTitle == null) {
@@ -587,13 +601,24 @@ case _ClientSection.sinistri:
           setState(() {
             _resetChats();
             _selectedClaim    = sinistro;
-            _selectedClaimRow = viewRow;
+            _selectedClaimRow = viewRow; // deve contenere contract_id e claim_id
           });
         },
       ),
     );
   } else {
     // Summary incastrato
+    final String contractId = (
+      _selectedClaimRow?['contract_id'] ??
+      _selectedClaimRow?['contractId']
+    )?.toString() ?? '';
+
+    final String claimId = (
+      _selectedClaimRow?['claim_id'] ??
+      _selectedClaimRow?['ClaimId']  ??
+      _selectedClaimRow?['id']
+    )?.toString() ?? '';
+
     return DualPaneWrapper(
       user: widget.user,
       token: widget.token,
@@ -601,9 +626,17 @@ case _ClientSection.sinistri:
       leftChild: ClaimSummaryPanel(
         sinistro: _selectedClaim!,
         viewRow : _selectedClaimRow ?? const {},
+        // ↓↓↓ nuovi parametri richiesti dal pannello ↓↓↓
+        sdk: _sdk,
+        user: widget.user,
+        userId: widget.user.username,
+        entityId: _selectedClientId!,
+        contractId: contractId,
+        claimId: claimId,
       ),
     );
   }
+
 
     case _ClientSection.documenti:
       return const Center(child: Text('Documenti – placeholder'));

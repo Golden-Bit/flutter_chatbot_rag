@@ -66,7 +66,7 @@ dependencies:
   dropdown_button2: ^2.3.9
   shared_preferences: ^2.2.2
   expressions: ^0.2.5+2
-  google_mlkit_language_id: ^0.13.0
+  flutter_langdetect: ^0.0.2
   #syncfusion_flutter_xlsio: ^26.2.10
   #open_file: ^3.4.0
   #excel: ^4.0.6

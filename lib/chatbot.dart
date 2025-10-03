@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:io';
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:boxed_ai/services/lang_auto.dart';
@@ -2011,7 +2012,7 @@ void clearUserInputPrefix() => _userInputPrefix = '';
   bool _isPlaying = false; // Stato per controllare se TTS è in esecuzione
 
   // Variabili di personalizzazione TTS
-  String _selectedLanguage = "en-US";
+  String _selectedLanguage = "auto";
   double _speechRate = 0.5; // Velocità di lettura
   double _pitch = 1.0; // Pitch (intonazione)
   double _volume = 0.5; // Volume
@@ -6165,85 +6166,200 @@ void _listen() async {
 }
 
 
-// Funzione per il Text-to-Speech con auto-rilevamento lingua
+// Funzione per il Text-to-Speech con auto-rilevamento lingua + LOG dettagliati
 Future<void> _speak(String message) async {
+  void _log(String m) => debugPrint('[TTS] $m');
+
   final text = (message).trim();
-  if (text.isEmpty) return;
+  if (text.isEmpty) {
+    _log('Testo vuoto: esco.');
+    return;
+  }
+
+  _log('----- SPEAK START -----');
+  _log('Text (first 120): "${text.length > 120 ? text.substring(0, 120) + '…' : text}"');
+  _log('_selectedLanguage: ${_selectedLanguage ?? '<null>'}');
+  //_log('Platform: ${Platform.isAndroid ? 'Android' : Platform.isIOS ? 'iOS' : 'other'}');
 
   try {
     // interrompi eventuale parlato in corso
-    await _flutterTts.stop();
+    try {
+      await _flutterTts.stop();
+      _log('stop(): OK');
+    } catch (e, st) {
+      _log('stop() error: $e\n$st');
+    }
 
-    // 1) Decidi quale lingua usare:
-    //    - se _selectedLanguage è 'auto' (o vuota/null), rileva dal testo
-    //    - altrimenti rispetta la lingua scelta dall’utente
+    // Info engine (Android) / voci (iOS/Android)
+    try {
+      final engines = await _flutterTts.getEngines;
+      _log('getEngines: ${engines is List ? engines : '<no-list>'}');
+      final defEngine = await _flutterTts.getDefaultEngine;
+      _log('getDefaultEngine: $defEngine');
+    } catch (_) {
+      // non tutti i device/OS espongono getEngines
+    }
+
+    // 0) Elenco lingue disponibili
+    List<dynamic> langsRaw = const [];
+    try {
+      langsRaw = await _flutterTts.getLanguages;
+      _log('getLanguages(): ${langsRaw.length} totali');
+      final hasIt = langsRaw.any((l) => l.toString().toLowerCase().startsWith('it'));
+      _log('Lingua italiana disponibile? ${hasIt ? 'SI' : 'NO'}');
+      if (!kReleaseMode) {
+        // Mostra qualche lingua significativa
+        final sample = langsRaw.take(8).map((e) => e.toString()).toList();
+        _log('Sample langs: $sample');
+      }
+    } catch (e, st) {
+      _log('getLanguages() error: $e\n$st');
+    }
+
+    // 1) Decidi la lingua
     String? languageToSet;
-
     final sel = (_selectedLanguage ?? '').trim();
     final isAuto = sel.isEmpty || sel.toLowerCase() == 'auto';
+    _log('isAuto: $isAuto');
 
     if (isAuto) {
-      // Rilevamento lingua dal contenuto
       final code = await LangAuto.detectLangCode(text); // es. 'it', 'en', 'und'
+      _log('detectLangCode: ${code ?? '<null>'}');
       if (code != null && code != 'und') {
         languageToSet = await LangAuto.pickBestTtsLocale(_flutterTts, code); // es. 'it-IT'
+        _log('pickBestTtsLocale($code) -> $languageToSet');
+
+        // Fallback "intelligente": se ML dice 'it' ma non troviamo una locale, prova 'it-IT'
+        if ((languageToSet == null || languageToSet.isEmpty) && code.toLowerCase() == 'it') {
+          languageToSet = 'it-IT';
+          _log('Fallback manuale a it-IT');
+        }
+      } else {
+        _log('Lingua non determinata: uso impostazioni correnti dell\'engine');
       }
     } else {
       languageToSet = sel; // forza la lingua scelta manualmente
+      _log('Manual override -> $languageToSet');
     }
 
-    // 2) Applica lingua e (se possibile) voce coerente
+    // 1.b Verifica disponibilità
     if (languageToSet != null && languageToSet.isNotEmpty) {
       try {
-        await _flutterTts.setLanguage(languageToSet);
-        final voice = await LangAuto.pickBestTtsVoice(_flutterTts, languageToSet);
-        if (voice != null) {
-          // Esempio: {"name": "...", "locale": "it-IT"}
-          await _flutterTts.setVoice(voice);
+        final isAvail = await _flutterTts.isLanguageAvailable(languageToSet);
+        _log('isLanguageAvailable("$languageToSet"): $isAvail');
+        if (isAvail != true) {
+          // prova a degradare ad "it" se arriva "it-IT" non disponibile
+          final base = languageToSet.split('-').first;
+          final alt = langsRaw.cast<dynamic>().map((e) => e.toString()).firstWhere(
+                (l) => l.toLowerCase().startsWith('${base.toLowerCase()}-'),
+                orElse: () => '',
+              );
+          if (alt.isNotEmpty) {
+            _log('Locale non disponibile, fallback a "$alt"');
+            languageToSet = alt;
+          } else {
+            _log('Nessuna variante disponibile per "$languageToSet": userò il default engine.');
+            languageToSet = null; // lascia default
+          }
         }
-      } catch (_) {
-        // Se il device non supporta quella locale/voce, si prosegue con default corrente
+      } catch (e, st) {
+        _log('isLanguageAvailable() error: $e\n$st');
       }
     }
 
+    // 2) Seleziona VOCE coerente con la locale (prima la voce, poi lingua)
+    Map<String, String>? chosenVoice;
+    if (languageToSet != null && languageToSet.isNotEmpty) {
+      try {
+        final voices = await _flutterTts.getVoices;
+        final vCount = voices is List ? voices.length : -1;
+        _log('getVoices(): $vCount disponibili');
+        if (voices is List) {
+          // filtra voci italiane per debug
+          final itVoices = voices
+              .whereType<Map>()
+              .where((v) => (v['locale']?.toString().toLowerCase() ?? '')
+                  .startsWith('it'))
+              .take(5)
+              .toList();
+          _log('Prime 5 voci IT: ${itVoices.map((v) => v['name']).toList()}');
+
+          // voce migliore per la locale
+          chosenVoice = await LangAuto.pickBestTtsVoice(_flutterTts, languageToSet);
+          _log('pickBestTtsVoice("$languageToSet") -> ${chosenVoice ?? '<null>'}');
+          if (chosenVoice != null) {
+            await _flutterTts.setVoice(chosenVoice);
+            _log('setVoice(${chosenVoice['name']}/${chosenVoice['locale']}): OK');
+          }
+        }
+      } catch (e, st) {
+        _log('getVoices()/setVoice() error: $e\n$st');
+      }
+
+      // Importante: alcune engines sovrascrivono la lingua quando si setta la voce.
+      // Reimpostiamo la lingua dopo setVoice per sicurezza.
+      try {
+        await _flutterTts.setLanguage(languageToSet);
+        _log('setLanguage("$languageToSet"): OK');
+      } catch (e, st) {
+        _log('setLanguage("$languageToSet") error: $e\n$st');
+      }
+    } else {
+      _log('Nessuna languageToSet: uso lingua/voce di default del motore.');
+    }
+
     // 3) Parametri utente
-    await _flutterTts.setPitch(_pitch);
-    await _flutterTts.setSpeechRate(_speechRate);
-    await _flutterTts.setVolume(_volume);
-
-    // (facoltativo ma utile) aspetta il completamento per gestire _isPlaying
-    await _flutterTts.awaitSpeakCompletion(true);
-
-    // 4) Parla + stato UI
-    setState(() {
-      _isPlaying = true;
-    });
-
-    await _flutterTts.speak(text);
-
-    // 5) Quando finisce, aggiorna lo stato (proteggi con mounted)
-    _flutterTts.setCompletionHandler(() {
-      if (!mounted) return;
-      setState(() {
-        _isPlaying = false;
-      });
-    });
-  } catch (_) {
-    // Fallback: prova comunque a parlare con le impostazioni correnti
     try {
-      setState(() {
-        _isPlaying = true;
-      });
-      await _flutterTts.speak(text);
+      await _flutterTts.setPitch(_pitch);
+      await _flutterTts.setSpeechRate(_speechRate);
+      await _flutterTts.setVolume(_volume);
+      _log('Params -> pitch: $_pitch, rate: $_speechRate, volume: $_volume');
+    } catch (e, st) {
+      _log('Set params error: $e\n$st');
+    }
+
+    // 4) Completamento e stato
+    try {
+      await _flutterTts.awaitSpeakCompletion(true);
+      _log('awaitSpeakCompletion(true): OK');
+    } catch (e, st) {
+      _log('awaitSpeakCompletion(true) error: $e\n$st');
+    }
+
+    if (mounted) {
+      setState(() => _isPlaying = true);
+    }
+    _log('speak(): CHIAMATA');
+
+    final result = await _flutterTts.speak(text);
+    _log('speak() returned: $result');
+
+    _flutterTts.setCompletionHandler(() {
+      _log('onCompletion()');
+      if (!mounted) return;
+      setState(() => _isPlaying = false);
+      _log('----- SPEAK END -----');
+    });
+  } catch (e, st) {
+    _log('ERRORE GENERALE in _speak: $e\n$st');
+    // Fallback minimo
+    try {
+      if (mounted) setState(() => _isPlaying = true);
+      final r = await _flutterTts.speak(text);
+      _log('Fallback speak() returned: $r');
       _flutterTts.setCompletionHandler(() {
+        _log('onCompletion() [fallback]');
         if (!mounted) return;
-        setState(() {
-          _isPlaying = false;
-        });
+        setState(() => _isPlaying = false);
+        _log('----- SPEAK END (fallback) -----');
       });
-    } catch (_) {}
+    } catch (e2, st2) {
+      _log('Fallback speak() error: $e2\n$st2');
+      if (mounted) setState(() => _isPlaying = false);
+    }
   }
 }
+
 
 
   // Funzione per copiare il messaggio negli appunti

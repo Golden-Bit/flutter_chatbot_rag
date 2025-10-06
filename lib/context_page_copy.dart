@@ -561,6 +561,23 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final ContextApiSdk _apiSdk = ContextApiSdk();
 
+
+// NEW ── Helpers prefisso & stati
+String _ctxWithUserPrefix(String rawCtx) => '${widget.username}-$rawCtx';
+
+String _stripUserPrefix(String ctxFull) {
+  final pref = '${widget.username}-';
+  return ctxFull.startsWith(pref) ? ctxFull.substring(pref.length) : ctxFull;
+}
+
+bool _isActiveTop(String s) => s == 'PENDING' || s == 'RUNNING';
+
+bool _isActivePerCtx(PerContextStatusDto pc) {
+  bool a(String s) => s == 'PENDING' || s == 'RUNNING';
+  return a(pc.loaderStatus) || a(pc.vectorStatus);
+}
+
+
 // --- elenco “visibile” filtrato (senza KB-di-chat)
   List<ContextMetadata> _contexts = [];
 
@@ -695,12 +712,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   late Map<String, PendingUploadJob> _pendingJobs;
+// ▼ Persistenza “upload completati” (chiave = ctx|file)
+static const _prefsCompletedKey = 'kb_completed_uploads';
+Set<String> _completedUploads = <String>{};
+
+String _completedKey(String ctx, String fileName) =>
+    '${ctx.toLowerCase()}|${fileName.toLowerCase()}';
+
+Future<void> _saveCompletedUploads() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setStringList(_prefsCompletedKey, _completedUploads.toList());
+}
+
+Future<Set<String>> _loadCompletedUploads() async {
+  final prefs = await SharedPreferences.getInstance();
+  final list = prefs.getStringList(_prefsCompletedKey) ?? const <String>[];
+  return list.toSet();
+}
+
+// NEW ── Ricostruisce spinner/polling dai task attivi sul server
+Future<void> _reconcilePendingUploadsFromServer() async {
+  try {
+    final resp = await _apiSdk.getUserTasks(widget.username, unreadOnly: false);
+    if (resp.tasks.isEmpty) return;
+
+    for (final t in resp.tasks) {
+      if (!_isActiveTop(t.status)) continue;              // solo PENDING/RUNNING
+      final fileName = t.originalFilename;
+
+      for (final e in t.perContext.entries) {
+        final ctxFull = e.key;                            // es. "user-ctx"
+        final pc = e.value;
+        if (!_isActivePerCtx(pc)) continue;               // salta già finiti
+
+        final ctxPath = _stripUserPrefix(ctxFull);
+        final tids = TaskIdsPerContext(
+          loaderTaskId: pc.loaderTaskId,
+          vectorTaskId: pc.vectorTaskId,
+        );
+
+        final exists = _pendingJobs.values.any((j) =>
+          j.contextPath == ctxPath &&
+          j.fileName == fileName &&
+          (j.tasksPerCtx[ctxPath]?.loaderTaskId == tids.loaderTaskId) &&
+          (j.tasksPerCtx[ctxPath]?.vectorTaskId == tids.vectorTaskId)
+        );
+        if (exists) {
+          if (mounted) {
+            setState(() {
+              _isLoadingMap[ctxPath] = true;
+              _loadingFileNamesMap[ctxPath] = fileName;
+            });
+          }
+          continue;
+        }
+
+        final jobId = const Uuid().v4();
+        final job = PendingUploadJob(
+          jobId: jobId,
+          chatId: '',
+          contextPath: ctxPath,
+          fileName: fileName,
+          uploadTaskId: t.taskId,                    // ← salva id aggregato
+          tasksPerCtx: { ctxPath: tids },
+        );
+
+        _pendingJobs[jobId] = job;
+        if (mounted) {
+          setState(() {
+            _isLoadingMap[ctxPath] = true;
+            _loadingFileNamesMap[ctxPath] = fileName;
+          });
+        }
+
+        await _savePendingJobs(_pendingJobs);
+        _monitorUploadTasks(jobId, job.tasksPerCtx);
+      }
+    }
+  } catch (e) {
+    debugPrint('Reconciliazione server-side: $e');
+  }
+}
+
 
   @override
   void initState() {
     super.initState();
     _restorePendingState(); // ①
-    _loadContexts(); // carica i contesti appena parte la pagina
+      _loadContexts().then((_) => _reconcilePendingUploadsFromServer()); // NEW // carica i contesti appena parte la pagina
   }
 
   @override
@@ -712,21 +811,136 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose(); // ⬅️ sempre per ultimo
   }
 
-  Future<void> _restorePendingState() async {
-    _pendingJobs = await _loadPendingJobs();
+  // === NEW: fallback – controlla i documenti indicizzati per ctx/filename
+// Idempotente: massimo 1 doc-probe per jobId
+void _startDocProbe(String jobId) {
+  // se è già attivo, non far nulla
+  if (_pollers.containsKey('docprobe:$jobId')) return;
 
-    // (re)-inizia spinner e polling per i job ancora attivi
-    for (final entry in _pendingJobs.values) {
-      setState(() {
-        _isLoadingMap[entry.contextPath] = true;
-        _loadingFileNamesMap[entry.contextPath] = entry.fileName;
-      });
+  final job = _pendingJobs[jobId];
+  if (job == null) return;
 
-      _monitorUploadTasks(entry.jobId, entry.tasksPerCtx); // 👈 jobId
+  // kill preventivo (nel caso in passato si sia persa la reference)
+  _pollers.remove('docprobe:$jobId')?.cancel();
+
+  final ctxFull = _ctxWithUserPrefix(job.contextPath);
+  final fname   = job.fileName;
+
+  final timer = Timer.periodic(const Duration(seconds: 5), (_) async {
+    try {
+      // Se la rotella non è più presente su questo ctx, termina
+      if (!_isLoadingMap.containsKey(job.contextPath)) {
+        _pollers.remove('docprobe:$jobId')?.cancel();
+        return;
+      }
+
+      final docs = await _apiSdk.listDocumentsResolved(
+        ctx: ctxFull,
+        filename: fname,
+        token: widget.token,
+        skip: 0,
+        limit: 1,
+      );
+
+      if (docs.isNotEmpty) {
+        // ✅ documenti presenti ⇒ upload ok ⇒ chiudi spinner e job
+        await _completeJobAndClearUi(jobId);
+      }
+    } catch (e) {
+      debugPrint('Doc-probe error for $ctxFull/$fname: $e');
+      // riproverà al tick successivo
+    }
+  });
+
+  _pollers['docprobe:$jobId'] = timer;
+}
+
+
+// === NEW: chiude in modo atomico job + spinner + persistenze
+// === NEW: chiude in modo atomico job + spinner + persistenze
+Future<void> _completeJobAndClearUi(String jobId) async {
+  // 1) spegni SEMPRE i timer (status + doc-probe), anche se il job non esiste più
+  _pollers.remove(jobId)?.cancel();
+  _pollers.remove('docprobe:$jobId')?.cancel();
+
+  // 2) se il job non esiste più, non c'è altro da fare
+  final job = _pendingJobs[jobId];
+  if (job == null) return;
+
+  final ctxPath = job.contextPath;
+  final ckey = _completedKey(ctxPath, job.fileName);
+
+  _completedUploads.add(ckey);
+  await _saveCompletedUploads();
+
+  if (mounted) {
+    setState(() {
+      _isLoadingMap.remove(ctxPath);
+      _loadingFileNamesMap.remove(ctxPath);
+      _pendingJobs.remove(jobId);
+    });
+  }
+  await _savePendingJobs(_pendingJobs);
+}
+
+
+Future<void> _restorePendingState() async {
+  _pendingJobs = await _loadPendingJobs();
+  _completedUploads = await _loadCompletedUploads();
+
+  final toRemove = <String>[];
+
+  // Preflight per ogni job
+  for (final job in _pendingJobs.values) {
+    final ckey = _completedKey(job.contextPath, job.fileName);
+
+    // A) già marcato come completato ⇒ niente spinner, rimuovi
+    if (_completedUploads.contains(ckey)) {
+      toRemove.add(job.jobId);
+      continue;
     }
 
-    await _loadContexts(); // carica la lista KB dopo aver sistemato gli spinner
+    // B) one-shot status check al backend
+    var stillActive = true;
+    try {
+      final statusResp = await _apiSdk.getTasksStatus(job.tasksPerCtx.values);
+      final allDoneOrError = statusResp.statuses.values
+          .every((s) => s.status == 'DONE' || s.status == 'COMPLETED' || s.status == 'ERROR');
+      if (allDoneOrError) {
+        _completedUploads.add(ckey);
+        await _saveCompletedUploads();
+        toRemove.add(job.jobId);
+        stillActive = false;
+      }
+    } catch (e) {
+      debugPrint('Preflight status error for job ${job.jobId}: $e');
+      // in caso d’errore, assumiamo che possa essere ancora attivo
+    }
+
+    // C) se davvero attivo, mostra spinner e riparti col monitor
+    if (stillActive) {
+      if (mounted) {
+        setState(() {
+          _isLoadingMap[job.contextPath] = true;
+          _loadingFileNamesMap[job.contextPath] = job.fileName;
+        });
+      }
+      _monitorUploadTasks(job.jobId, job.tasksPerCtx);
+    }
   }
+
+  // Ripulisci i pending che non lo sono più
+  if (toRemove.isNotEmpty) {
+    for (final id in toRemove) {
+      _pendingJobs.remove(id);
+    }
+    await _savePendingJobs(_pendingJobs);
+  }
+
+  // ricarica la lista KB dopo aver sistemato gli spinner
+  await _loadContexts();
+}
+
 
   /// Restituisce un'icona basata sull'estensione del file.
   Map<String, dynamic> _getIconForFileType(String fileName) {
@@ -852,106 +1066,87 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// Restituisce la mappa <context → taskIds> così chi la chiama può
-  /// avviare il polling.  Ora accetta anche `loaders` e `loaderKwargs`
-  /// per passare le configurazioni personalizzate al backend.
-  Future<Map<String, TaskIdsPerContext>> _uploadFileAsync(
-    Uint8List fileBytes,
-    List<String> contexts, {
-    String? description,
-    required String fileName,
-    Map<String, dynamic>? loaders, // ⬅️ NEW
-    Map<String, dynamic>? loaderKwargs, // ⬅️ NEW
-  }) async {
-    final curPlan = BillingGlobals.snap.plan;
-    final subId = _readSubscriptionId(curPlan);
+// ─────────────────────────────────────────────────────────────────────────────
+// CHANGED ▸ Helper upload async verso il backend
+// - Ora restituisce un record con { Map<String, TaskIdsPerContext> tasks, String? uploadTaskId }
+// - Propaga subscriptionId (se presente), loaders e loaderKwargs
+// - Esegue il refresh non-bloccante dei crediti
+// ─────────────────────────────────────────────────────────────────────────────
+Future<({ Map<String, TaskIdsPerContext> tasks, String? uploadTaskId })> _uploadFileAsync(
+  Uint8List fileBytes,
+  List<String> contexts, {
+  String? description,
+  required String fileName,
+  Map<String, dynamic>? loaders,
+  Map<String, dynamic>? loaderKwargs,
+}) async {
+  final curPlan = BillingGlobals.snap.plan;
+  final subId = _readSubscriptionId(curPlan);
 
-    final resp = await _apiSdk.uploadFileToContextsAsync(
-      fileBytes,
-      contexts,
-      widget.username,
-      widget.token,
-      subscriptionId: subId,
-      description: description,
-      fileName: fileName,
-      loaders: loaders, // ⬅️ pass-through
-      loaderKwargs: loaderKwargs, // ⬅️ pass-through
-    );
+  final resp = await _apiSdk.uploadFileToContextsAsync(
+    fileBytes,
+    contexts,
+    widget.username,
+    widget.token,
+    subscriptionId: subId,
+    description: description,
+    fileName: fileName,
+    loaders: loaders,           // pass-through
+    loaderKwargs: loaderKwargs, // pass-through
+  );
 
-    // ⬇⬇⬇ NEW: refresh crediti non-bloccante (fine upload async)
-    _scheduleCreditsRefresh();
+  // Refresh "leggero" dei crediti (non blocca la UI)
+  _scheduleCreditsRefresh();
 
-    return resp.tasks; // 〈context, TaskIdsPerContext〉
-  }
+  // Ritorna il Dart record con tasks + uploadTaskId
+  return (tasks: resp.tasks, uploadTaskId: resp.uploadTaskId);
+}
+
 
   /// Polla /tasks_status ogni 3 s finché tutti i task sono DONE/ERROR.
   /// Polla /tasks_status ogni 3 s finché TUTTI i task del job sono DONE/ERROR.
   /// Alla fine rimuove lo spinner dal Knowledge-Box collegato
   /// e cancella il job da `_pendingJobs`.
-  void _monitorUploadTasks(
-    String jobId,
-    Map<String, TaskIdsPerContext> tasksPerCtx,
-  ) {
-    const pollInterval = Duration(seconds: 3);
-    Timer? timer;
+void _monitorUploadTasks(
+  String jobId,
+  Map<String, TaskIdsPerContext> tasksPerCtx,
+) {
+  const pollInterval = Duration(seconds: 3);
 
-    timer = Timer.periodic(pollInterval, (_) async {
-      try {
-        // 1. – richiede lo stato di TUTTI i task del job
-        final statusResp = await _apiSdk.getTasksStatus(tasksPerCtx.values);
+  // Evita duplicati: se esiste già un status-poller per questo job, cancellalo
+  _pollers.remove(jobId)?.cancel();
 
-        // 2. – log minimale di debug
-        statusResp.statuses.forEach((id, st) => debugPrint(
-            '[$id] → ${st.status}${st.error != null ? " | ${st.error}" : ""}'));
-
-        // 3. – verifica se tutti sono DONE o ERROR
-        final allDoneOrError = statusResp.statuses.values
-            .every((s) => s.status == 'DONE' || s.status == 'ERROR');
-
-        if (!allDoneOrError) return; // → continua a pollare
-
-        // 4. – se siamo qui, il job è completato/errore  ► stop timer
-        timer?.cancel();
-
-        // 5. – dati utili
-        final job = _pendingJobs[jobId];
-        final ctxPath = job?.contextPath ?? '<unknown>';
-
-        debugPrint('📁  Upload completato su $ctxPath (jobId=$jobId)');
-
-        if (mounted) {
-          setState(() {
-            // rimuove lo spinner dal KB interessato
-            _isLoadingMap.remove(ctxPath);
-            _loadingFileNamesMap.remove(ctxPath);
-
-            // elimina il job da memoria + SharedPreferences
-            _pendingJobs.remove(jobId);
-            _savePendingJobs(_pendingJobs);
-          });
-        }
-      } catch (e) {
-        debugPrint('Errore polling status: $e');
-        timer?.cancel();
-
-        final job = _pendingJobs[jobId];
-        final ctxPath = job?.contextPath ?? '<unknown>';
-
-        // rimuove comunque lo spinner in caso di eccezione
-        if (mounted) {
-          setState(() {
-            _isLoadingMap.remove(ctxPath);
-            _loadingFileNamesMap.remove(ctxPath);
-            _pendingJobs.remove(jobId);
-            _savePendingJobs(_pendingJobs);
-          });
-        }
-      }
-    });
-
-    // salva il timer per eventuale cancellazione manuale
-    _pollers[jobId] = timer!;
+  // Avvia (se non già attivo) il doc-probe come fallback
+  if (!_pollers.containsKey('docprobe:$jobId')) {
+    _startDocProbe(jobId);
   }
+
+  final timer = Timer.periodic(pollInterval, (_) async {
+    try {
+      final statusResp = await _apiSdk.getTasksStatus(tasksPerCtx.values);
+
+      statusResp.statuses.forEach((id, st) => debugPrint(
+          '[$id] → ${st.status}${st.error != null ? " | ${st.error}" : ""}'));
+
+      final allDoneOrError = statusResp.statuses.values
+          .every((s) => s.status == 'DONE' || s.status == 'COMPLETED' || s.status == 'ERROR');
+
+      if (!allDoneOrError) return;
+
+      // ✅ Tutti i task terminati
+      await _completeJobAndClearUi(jobId);
+    } catch (e) {
+      debugPrint('Errore polling status: $e');
+      // Chiudi comunque in modo coerente (il doc-probe avrebbe chiuso lo spinner)
+      await _completeJobAndClearUi(jobId);
+    }
+  });
+
+  _pollers[jobId] = timer;
+}
+
+
+
 
   // Funzione per eliminare un contesto
   Future<void> _deleteContext(String contextName) async {
@@ -1045,74 +1240,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// UPLOAD “async”: ottiene i task-id, li traccia con un jobId univoco
-// ──────────────────────────────────────────────────────────────────────────────
-  void _uploadFileForContextAsync(String contextPath) async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result == null || result.files.first.bytes == null) {
-      debugPrint('Nessun file selezionato');
-      return;
-    }
+// ─────────────────────────────────────────────────────────────────────────────
+// CHANGED ▸ Upload async per una singola Knowledge Box
+// - Apre il dialog di configurazione loader
+// - Mostra lo spinner sulla KB
+// - Pulisce il flag "completed" se ri-carichi lo stesso nome file
+// - Chiama la nuova _uploadFileAsync (che restituisce un record {tasks, uploadTaskId})
+// - Salva il job in _pendingJobs includendo uploadTaskId
+// - Notifica il padre (se serve) e avvia il polling
+// ─────────────────────────────────────────────────────────────────────────────
+void _uploadFileForContextAsync(String contextPath) async {
+  final result = await FilePicker.platform.pickFiles();
+  if (result == null || result.files.isEmpty || result.files.first.bytes == null) {
+    debugPrint('Nessun file selezionato');
+    return;
+  }
 
-    // ① apre dialog di configurazione
-    final cfg = await showLoaderConfigDialog(
-      context,
-      result.files.first.name,
-      result.files.first.bytes!,
-    );
-    if (cfg == null) return; // utente ha annullato
+  final Uint8List fileBytes = result.files.first.bytes!;
+  final String fileName = result.files.first.name;
 
-    // 0. Spinner sul KB
+  // ① apre dialog di configurazione (loaders / loader_kwargs)
+  final cfg = await showLoaderConfigDialog(
+    context,
+    fileName,
+    fileBytes,
+  );
+  if (cfg == null) return; // utente ha annullato
+
+  // 0) Spinner sul KB
+  if (mounted) {
     setState(() {
       _isLoadingMap[contextPath] = true;
-      _loadingFileNamesMap[contextPath] = result.files.first.name;
+      _loadingFileNamesMap[contextPath] = fileName;
     });
+  }
 
-    try {
-      // 1. Genera un UUID v4 per l’intero job
-      final String jobId = const Uuid().v4();
+  // Se sto ricaricando lo stesso nome file su questo ctx, rimuovo il vecchio flag "completed"
+  final forgetKey = _completedKey(contextPath, fileName);
+  _completedUploads.remove(forgetKey);
+  await _saveCompletedUploads();
 
-      // 2. Chiamata POST /upload_async
-      final tasksPerCtx = await _uploadFileAsync(
-        result.files.first.bytes!,
-        [contextPath],
-        fileName: result.files.first.name,
-        loaders: cfg['loaders'],
-        loaderKwargs: cfg['loader_kwargs'],
-      );
+  try {
+    // 1) Genera un UUID v4 per l’intero job
+    final String jobId = const Uuid().v4();
 
-      // 3. Salva in memoria + SharedPreferences (keyed su jobId)
-      _pendingJobs[jobId] = PendingUploadJob(
-        jobId: jobId,
-        chatId: '',
-        contextPath: contextPath,
-        fileName: result.files.first.name,
-        tasksPerCtx: tasksPerCtx,
-      );
-      await _savePendingJobs(_pendingJobs);
+    // 2) Chiamata POST /upload_async (nuova firma: ritorna un record)
+    final resultUpload = await _uploadFileAsync(
+      fileBytes,
+      [contextPath],
+      fileName: fileName,
+      loaders: cfg['loaders'],
+      loaderKwargs: cfg['loader_kwargs'],
+      // (opzionale) se il tuo dialog restituisce anche una descrizione, puoi passare:
+      // description: cfg['description'],
+    );
 
-      // 4. Notifica il padre (Dashboard / ChatBotPage, ecc.)
-      widget.onNewPendingJob?.call(
-        jobId,
-        '',
-        contextPath,
-        result.files.first.name,
-        tasksPerCtx,
-      );
+    // 3) Salva in memoria + SharedPreferences (keyed su jobId), includendo uploadTaskId
+    _pendingJobs[jobId] = PendingUploadJob(
+      jobId: jobId,
+      chatId: '',
+      contextPath: contextPath,
+      fileName: fileName,
+      tasksPerCtx: resultUpload.tasks,
+      uploadTaskId: resultUpload.uploadTaskId, // NEW
+    );
+    await _savePendingJobs(_pendingJobs);
 
-      // 5. Avvia il polling finché tutti i task sono DONE/ERROR
-      _monitorUploadTasks(jobId, tasksPerCtx);
-    } catch (e) {
-      debugPrint('Errore durante il caricamento async: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingMap.remove(contextPath);
-          _loadingFileNamesMap.remove(contextPath);
-        });
-      }
+    // 4) Notifica il padre (Dashboard / ChatBotPage, ecc.)
+    widget.onNewPendingJob?.call(
+      jobId,
+      '',
+      contextPath,
+      fileName,
+      resultUpload.tasks,
+    );
+
+    // 5) Avvia il polling finché tutti i task sono DONE/COMPLETED/ERROR
+    _monitorUploadTasks(jobId, resultUpload.tasks);
+  } catch (e) {
+    debugPrint('Errore durante il caricamento async: $e');
+    if (mounted) {
+      setState(() {
+        _isLoadingMap.remove(contextPath);
+        _loadingFileNamesMap.remove(contextPath);
+      });
     }
   }
+}
+
 
   Widget _buildSearchAreaWithTitle() {
     final localizations = LocalizationProvider.of(context);

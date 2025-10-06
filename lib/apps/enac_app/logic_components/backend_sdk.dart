@@ -791,7 +791,7 @@ class Omnia8Sdk {
   final Map<String, String> defaultHeaders;
 
   Omnia8Sdk({
-    this.baseUrl = 'https://www.goldbitweb.com/enac-api/', //'http://127.0.0.1:8111',
+    this.baseUrl = 'https://www.goldbitweb.com/enac-api/', //'https://www.goldbitweb.com/enac-api/', //'http://127.0.0.1:8111',
     http.Client? httpClient,
     Map<String, String>? headers,
   })  : _http = httpClient ?? http.Client(),
@@ -1335,4 +1335,224 @@ Uri _buildUri(String path, [Map<String, dynamic>? query]) {
     ) as Map<String, dynamic>;
     return data;
   }
+
+  // -------- Derived Views (Contracts) -----------------------------------
+/// Vista contratti per una singola entità, costruita client-side
+/// proiettando i campi più utili per la UI.
+Future<List<Map<String, dynamic>>> viewEntityContracts(
+  String userId,
+  String entityId,
+) async {
+  final ids = await listContracts(userId, entityId);
+  final rows = <Map<String, dynamic>>[];
+
+  // fetch in piccoli lotti per non saturare la rete
+  const chunk = 10;
+  for (var i = 0; i < ids.length; i += chunk) {
+    final slice = ids.sublist(i, (i + chunk > ids.length) ? ids.length : i + chunk);
+
+    final contracts = await Future.wait(slice.map((cid) async {
+      try {
+        final c = await getContract(userId, entityId, cid);
+        return MapEntry(cid, c);
+      } catch (_) {
+        return null; // skip in caso d'errore su uno specifico contratto
+      }
+    }));
+
+    for (final pair in contracts) {
+      if (pair == null) continue;
+      final cid = pair.key;
+      final c   = pair.value;
+
+      final amm   = c.amministrativi;
+      final premi = c.premi;
+
+      rows.add({
+        'entity_id'     : entityId,
+        'contract_id'   : cid,
+        'compagnia'     : c.identificativi.compagnia,
+        'numero_polizza': c.identificativi.numeroPolizza,
+        'ramo'          : c.identificativi.ramo,
+        'decorrenza'    : _dateToIsoOpt(amm?.effetto),
+        'scadenza'      : _dateToIsoOpt(amm?.scadenza),
+        'premio'        : premi?.premio,
+        'premio_annuo'  : premi?.premio,
+        'stato'         : c.rinnovo?.rinnovo, // se presente/ha senso
+      });
+    }
+  }
+
+  return rows;
+}
+
+/// Vista contratti globale (tutte le entità dell’utente), aggregata client-side.
+Future<List<Map<String, dynamic>>> viewAllContracts(String userId) async {
+  final entityIds = await listEntities(userId);
+  final out = <Map<String, dynamic>>[];
+  for (final eid in entityIds) {
+    try {
+      final rows = await viewEntityContracts(userId, eid);
+      out.addAll(rows);
+    } catch (_) {
+      // ignora singola entità in errore
+    }
+  }
+  return out;
+}
+
+/// Vista TITOLI per un contratto specifico (proiezione client-side)
+Future<List<Map<String, dynamic>>> viewContractTitles(
+  String userId,
+  String entityId,
+  String contractId,
+) async {
+  // carico il contratto una sola volta per campi condivisi (compagnia, polizza, rischio…)
+  ContrattoOmnia8? contratto;
+  try {
+    contratto = await getContract(userId, entityId, contractId);
+  } catch (_) {
+    // opzionale: puoi ignorare se il BE non espone il contratto
+  }
+
+  final titleIds = await listTitles(userId, entityId, contractId);
+  final out = <Map<String, dynamic>>[];
+
+  const chunk = 10;
+  for (var i = 0; i < titleIds.length; i += chunk) {
+    final slice = titleIds.sublist(i, (i + chunk > titleIds.length) ? titleIds.length : i + chunk);
+
+    final fetched = await Future.wait(slice.map((tid) async {
+      try {
+        final t = await getTitle(userId, entityId, contractId, tid);
+        return MapEntry(tid, t);
+      } catch (_) {
+        return null; // skip singolo elemento in errore
+      }
+    }));
+
+    for (final p in fetched) {
+      if (p == null) continue;
+      final tid = p.key;
+      final t   = p.value;
+
+      final rischio = contratto?.ramiEl?.descrizione ?? contratto?.identificativi.ramo ?? '';
+      final compagnia = contratto?.identificativi.compagnia ?? '';
+      final numPolizza = contratto?.identificativi.numeroPolizza ?? '';
+
+      out.add({
+        // identificativi e riferimenti
+        'entity_id'     : entityId,
+        'contract_id'   : contractId,
+        'title_id'      : tid,
+        'id'            : tid,         // alias comodo
+        'TitleId'       : tid,         // altro alias
+
+        // contesto contratto utile alla UI
+        'compagnia'     : compagnia,
+        'numero_polizza': numPolizza,
+        'rischio'       : rischio,
+
+        // campi del titolo (con alias)
+        'tipo'            : t.tipo,
+        'effetto_titolo'  : _dateToIsoOpt(t.effettoTitolo),
+        'scadenza_titolo' : _dateToIsoOpt(t.scadenzaTitolo),
+        'stato'           : t.stato,
+        'pv'              : t.pv,
+        'PV'              : t.pv,              // alias
+        'pv2'             : t.pv2,
+        'PV2'             : t.pv2,             // alias
+        'premio_lordo'    : t.premioLordo,
+        'PremioLordo'     : t.premioLordo,     // alias
+        'premio'          : t.premioLordo,     // fallback usato in alcune viste
+      });
+    }
+  }
+
+  return out;
+}
+
+/// Vista SINISTRI per un contratto specifico (proiezione client-side)
+Future<List<Map<String, dynamic>>> viewContractClaims(
+  String userId,
+  String entityId,
+  String contractId,
+) async {
+  // carico il contratto una volta per info condivise
+  ContrattoOmnia8? contratto;
+  try {
+    contratto = await getContract(userId, entityId, contractId);
+  } catch (_) {}
+
+  final claimIds = await listClaims(userId, entityId, contractId);
+  final out = <Map<String, dynamic>>[];
+
+  const chunk = 10;
+  for (var i = 0; i < claimIds.length; i += chunk) {
+    final slice = claimIds.sublist(i, (i + chunk > claimIds.length) ? claimIds.length : i + chunk);
+
+    final fetched = await Future.wait(slice.map((cid) async {
+      try {
+        final c = await getClaim(userId, entityId, contractId, cid);
+        return MapEntry(cid, c);
+      } catch (_) {
+        return null;
+      }
+    }));
+
+    for (final p in fetched) {
+      if (p == null) continue;
+      final claimId = p.key;
+      final s       = p.value;
+
+      final compagnia  = s.compagnia ?? contratto?.identificativi.compagnia ?? '';
+      final numPolizza = s.numeroPolizza ?? contratto?.identificativi.numeroPolizza ?? '';
+      final rischio    = s.rischio ?? contratto?.ramiEl?.descrizione ?? contratto?.identificativi.ramo ?? '';
+
+      out.add({
+        // riferimenti
+        'entity_id'   : entityId,
+        'contract_id' : contractId,
+        'claim_id'    : claimId,
+        'id'          : claimId,        // alias
+        'SinistroId'  : claimId,        // alias
+
+        // contesto contratto utile alla UI
+        'compagnia'      : compagnia,
+        'numero_polizza' : numPolizza,
+        'rischio'        : rischio,
+
+        // campi sinistro (con alias compatibili con le tabelle)
+        'esercizio'        : s.esercizio,
+        'Esercizio'        : s.esercizio,                 // alias
+        'numero_sinistro'  : s.numeroSinistro,
+        'NumeroSinistro'   : s.numeroSinistro,            // alias
+        'num_sinistro'     : s.numeroSinistro,            // alias
+        'data_avvenimento' : _dateToIsoOpt(s.dataAvvenimento),
+        'DataAvvenimento'  : _dateToIsoOpt(s.dataAvvenimento), // alias
+
+        // l’SDK del modello base non ha importo: lo lasciamo nullo (la UI gestisce '—')
+        'importo_liquidato': null,
+        'ImportoLiquidato' : null,
+        'importo'          : null,
+
+        'targa'           : s.targa ?? '',
+        'Targa'           : s.targa ?? '',                // alias
+        'dinamica'        : s.dinamica ?? '',
+        'Dinamica'        : s.dinamica ?? '',
+        'danneggiamento'  : s.dinamica ?? '',             // alias alternativo usato in alcune viste
+        'stato_compagnia' : s.statoCompagnia ?? '',
+        'StatoCompagnia'  : s.statoCompagnia ?? '',
+        'codice_stato'    : s.codiceStato ?? '',
+        'CodiceStato'     : s.codiceStato ?? '',
+        'data_apertura'   : _dateToIsoOpt(s.dataApertura, dateOnly: false),
+        'data_chiusura'   : _dateToIsoOpt(s.dataChiusura, dateOnly: false),
+      });
+    }
+  }
+
+  return out;
+}
+
+
 }

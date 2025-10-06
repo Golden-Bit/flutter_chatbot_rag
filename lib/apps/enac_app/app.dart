@@ -1,16 +1,23 @@
 // main.dart
 import 'dart:html' as html;
 
-import 'package:boxed_ai/apps/enac_app/ui_components/claim_summary_panel.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/client_claims_page.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/client_titles_page.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/title_summary_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/claim/all_claims_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/claim/claim_summary_panel.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/claim/client_claims_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/claim/contract_claims_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/contracts/all_contracts_table.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_detail_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_models.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/titles/client_titles_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/titles/contract_titles_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/titles/title_summary_page.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/client_contracts_page.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/client_detail_page.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/client_page.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/contract_summary.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/contracts/client_contracts_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/clients/client_detail_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/clients/client_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/contracts/contract_summary.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/home_dashboard.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/search_results.dart';
@@ -33,8 +40,8 @@ _ContractSection _selContractSection = _ContractSection.riepilogo;
 enum _SideItem {
   home,
   polizze,
-  proceduraGara,
   sinistri,
+  proceduraGara,
 }
 
 enum _TopTab { docs, templates, contacts }
@@ -59,11 +66,21 @@ String? _selectedContractId;
 
   bool _chatsOpen = false;
 
+// Id usati quando apro il dettaglio da "Tutti i sinistri"
+String? _selectedClaimId;          // id sinistro selezionato (globale)
+String? _selectedClaimEntityId;    // entityId del sinistro selezionato (globale)
+
   final DualPaneController _paneCtrl1 = DualPaneController();
   final DualPaneController _paneCtrl2 = DualPaneController();
   final DualPaneController _paneCtrl3 = DualPaneController();
   final DualPaneController _paneCtrlTitles = DualPaneController();
+  final DualPaneController _paneCtrlPolicies = DualPaneController();
+  // Controller per la vista "Tutti i sinistri"
+final DualPaneController _paneCtrlAllClaims = DualPaneController();
+// state in _HomeScaffoldState
+final DualPaneController _paneCtrlGare = DualPaneController();
   /* ----------------- STATO ------------------ */
+  Gara? _selectedGara; 
   String? _selectedClientId;
   _SideItem _selectedSide = _SideItem.home;
   _TopTab _selectedTab = _TopTab.docs;
@@ -84,6 +101,20 @@ late final Omnia8Sdk _sdk;
       _chatsOpen = false;
     }
   }
+
+  // Badge numerico uniforme per "Documenti"
+Widget _docBadge(int n) => Container(
+  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  decoration: BoxDecoration(
+    color: Colors.grey.shade600,
+    borderRadius: BorderRadius.circular(2),
+  ),
+  child: Text(
+    '$n',
+    style: const TextStyle(color: Colors.white, fontSize: 11),
+  ),
+);
+
               // ← id del client aperto
 _ClientSection _selClientSection = _ClientSection.cliente;
 ContrattoOmnia8? _selectedContract;
@@ -266,29 +297,30 @@ Map<String, dynamic>? _selectedClaimRow;                          // NEW
         color: act ? Colors.blue : Colors.grey.shade700,
       );
 
-  Widget row(String txt, _ContractSection sec,
-      {Widget? trailing}) =>
-      InkWell(
-            onTap: () => setState(() {
-          _resetChats();                        // ← chiude e spegne icona
-          _selContractSection = sec;
-          
-        }),
-        child: Container(
-          width: double.infinity,
-          color: _selContractSection == sec
-              ? const Color(0xFFE8F0FE)
-              : Colors.transparent,
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-          child: Row(
-            children: [
-              Text(txt, style: st(_selContractSection == sec)),
-              const Spacer(),
-              if (trailing != null) trailing,
-            ],
-          ),
-        ),
-      );
+Widget row(String txt, _ContractSection sec, {Widget? trailing}) => InkWell(
+  onTap: () => setState(() {
+    _resetChats();
+    _selContractSection = sec;
+    if (sec == _ContractSection.titoli) {   // reset selezione summary titolo
+      _selectedTitle = null;
+      _selectedTitleRow = null;
+    }
+    if (sec == _ContractSection.sinistri) { // reset selezione summary sinistro
+      _selectedClaim = null;
+      _selectedClaimRow = null;
+    }
+  }),
+  child: Container(
+    width: double.infinity,
+    color: _selContractSection == sec ? const Color(0xFFE8F0FE) : Colors.transparent,
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+    child: Row(children: [
+      Text(txt, style: st(_selContractSection == sec)),
+      const Spacer(),
+      if (trailing != null) trailing,
+    ]),
+  ),
+);
 
   return Container(
     width: 220,
@@ -326,8 +358,8 @@ onPressed: () => setState(() {
         row('Riepilogo', _ContractSection.riepilogo),
         row('Titoli',    _ContractSection.titoli),
         row('Sinistri',  _ContractSection.sinistri),
-        row('Documenti', _ContractSection.documenti,
-            trailing: const Text('1', style: TextStyle(fontSize: 11))),
+row('Documenti', _ContractSection.documenti,
+    trailing: _docBadge(0)),
         row('Note',      _ContractSection.note),
         row('Varie',     _ContractSection.varie),
       ],
@@ -400,19 +432,10 @@ return Container(
       row('Cliente',   _ClientSection.cliente),
       row('Contratti', _ClientSection.contratti),
       row('Titoli',    _ClientSection.titoli),
-      row('Sinistri',  _ClientSection.sinistri,
-          trailing: const Icon(Icons.chevron_right, size: 16)),
-      row('Documenti', _ClientSection.documenti
-          // facoltativo: badge conteggio
-          // trailing: Container(
-          //   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          //   decoration: BoxDecoration(
-          //     color: Colors.grey.shade600,
-          //     borderRadius: BorderRadius.circular(2)),
-          //   child: const Text('83',
-          //     style: TextStyle(color: Colors.white, fontSize: 11)),
-          // ),
-      ),
+row('Sinistri',  _ClientSection.sinistri),              // ← niente chevron
+row('Documenti', _ClientSection.documenti,              // ← badge fisso a 0
+    trailing: _docBadge(0),
+),
     ],
   ),
 );
@@ -437,11 +460,33 @@ Widget _buildSideMenu() {
       final active = _selectedSide == item;
       return InkWell(
         splashFactory: NoSplash.splashFactory,
-      onTap: () => setState(() {
-        _resetChats();          // ⬅️ NEW
-        _selectedSide = item;
-        _searchQuery = null;
-      }),
+onTap: () => setState(() {
+  _resetChats();
+  _selectedSide = item;
+  _searchQuery = null;
+
+  // quando apro la sezione Sinistri globale, azzero eventuali selezioni
+  if (item == _SideItem.sinistri) {
+    _selectedClientId = null;
+    _selClientSection = _ClientSection.cliente;
+    _selectedClaim = null;
+    _selectedClaimRow = null;
+    _selectedClaimId = null;
+    _selectedClaimEntityId = null;
+    _selectedContractId = null;
+  }
+        // ✅ QUI l'inserimento per "Procedure di Gara"
+      if (item == _SideItem.proceduraGara) {
+        _selectedGara = null;        // reset selezione gara
+        // (opzionale) pulizie extra se vuoi partire “pulito”
+        // _selectedClientId = null;
+        // _selectedContract = null;
+        // _selectedContractId = null;
+        // _selectedClaim = null;
+        // _selectedClaimRow = null;
+      }
+}),
+
         child: Container(
           width: double.infinity,
           color: active ? const Color(0xFFE8F0FE) : Colors.transparent,
@@ -462,8 +507,8 @@ return Container(
       _buildSideSearch(),
       tile('Home', _SideItem.home),
       tile('Polizze', _SideItem.polizze),
-      tile('Procedura di Gara', _SideItem.proceduraGara),
       tile('Sinistri', _SideItem.sinistri),
+      tile('Procedura di Gara', _SideItem.proceduraGara),
     ],
   ),
 );
@@ -495,10 +540,83 @@ case _ContractSection.riepilogo:
     ),
   );
 
-    case _ContractSection.titoli:
-      return const Center(child: Text('Titoli – placeholder'));
-    case _ContractSection.sinistri:
-      return const Center(child: Text('Sinistri – placeholder'));
+case _ContractSection.titoli:
+  if (_selectedTitle == null) {
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrl3,
+      leftChild: ContractTitlesPage(
+        userId    : widget.user.username,
+        entityId  : _selectedClientId!,        // cliente corrente
+        contractId: _selectedContractId!,      // contratto corrente
+        sdk       : _sdk,
+        onOpenTitle: (titolo, viewRow) {
+          setState(() {
+            _resetChats();
+            _selectedTitle    = titolo;
+            _selectedTitleRow = viewRow;
+          });
+        },
+      ),
+    );
+  } else {
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrl3,
+      leftChild: TitleSummaryPanel(
+        titolo : _selectedTitle!,
+        viewRow: _selectedTitleRow ?? const {},
+      ),
+    );
+  }
+
+case _ContractSection.sinistri:
+  if (_selectedClaim == null) {
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrl3,
+      leftChild: ContractClaimsPage(
+        userId    : widget.user.username,
+        entityId  : _selectedClientId!,
+        contractId: _selectedContractId!,
+        sdk       : _sdk,
+        onOpenClaim: (sinistro, viewRow) {
+          setState(() {
+            _resetChats();
+            _selectedClaim    = sinistro;
+            _selectedClaimRow = viewRow; // contiene già contract_id e claim_id
+          });
+        },
+      ),
+    );
+  } else {
+    final String contractId = _selectedContractId!;
+    final String claimId = (
+      _selectedClaimRow?['claim_id'] ??
+      _selectedClaimRow?['id'] ??
+      ''
+    ).toString();
+
+    return DualPaneWrapper(
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrl3,
+      leftChild: ClaimSummaryPanel(
+        sinistro  : _selectedClaim!,
+        viewRow   : _selectedClaimRow ?? const {},
+        sdk       : _sdk,
+        user      : widget.user,
+        userId    : widget.user.username,
+        entityId  : _selectedClientId!,
+        contractId: contractId,
+        claimId   : claimId,
+      ),
+    );
+  }
+
     case _ContractSection.documenti:
       return const Center(child: Text('Documenti – placeholder'));
     case _ContractSection.note:
@@ -649,25 +767,80 @@ case _ClientSection.sinistri:
 
 
   // 2) risultati di ricerca
-  if (_searchQuery != null)  {
-    return DualPaneWrapper(
-      user: widget.user,
-      token: widget.token,
-  controller : _paneCtrl2,
-  leftChild  : SearchResultsPanel(
+// dentro _buildContent()
+// ...
+if (_searchQuery != null)  {
+  return DualPaneWrapper(
+    user: widget.user,
+    token: widget.token,
+    controller: _paneCtrl2,
+    leftChild: SearchResultsPanel(
       query: _searchQuery!,
       user: widget.user,
       token: widget.token,
       sdk: _sdk,
-        onOpenClient: (id) {
-          setState(() {
-            _resetChats();                    // ⬅️ NEW
-            _selectedClientId = id;
-            _selClientSection = _ClientSection.cliente;
-          });
-        },
-    ));
-  }
+
+      // ERA già presente
+      onOpenClient: (id) {
+        setState(() {
+          _resetChats();
+          _selectedClientId = id;
+          _selClientSection = _ClientSection.cliente;
+          // pulizia di selezioni precedenti
+          _selectedContract = null;
+          _selectedContractId = null;
+          _selectedClaim = null;
+          _selectedClaimRow = null;
+        });
+      },
+
+      // ✨ NUOVO: click su CONTRATTO dai risultati
+      onOpenContract: (entityId, contractId, contratto) {
+        setState(() {
+          _resetChats();
+
+          // fai entrare nel contesto CONTRATTO → Riepilogo
+          _selectedClientId   = entityId;            // serve per documenti
+          _selectedContractId = contractId;
+          _selectedContract   = contratto;           // oggetto pieno dal fetch eseguito nel panel
+          _selContractSection = _ContractSection.riepilogo;
+
+          // pulizia di eventuali sinistri selezionati
+          _selectedClaim = null;
+          _selectedClaimRow = null;
+          _selClientSection = _ClientSection.cliente;
+        });
+      },
+
+      // ✨ NUOVO: click su SINISTRO dai risultati
+      onOpenClaim: (entityId, contractId, claimId, viewRow, sinistro) {
+        setState(() {
+          _resetChats();
+
+          // entra nel contesto CLIENTE → Sinistri (mostra subito il Summary)
+          _selectedClientId = entityId;
+          _selClientSection = _ClientSection.sinistri;
+
+          _selectedClaim    = sinistro ?? ClaimSummaryPanel.claimFromViewRow(viewRow);
+          _selectedClaimRow = {
+            ...viewRow,
+            'contract_id': contractId,
+            'claim_id'   : claimId,
+          };
+
+          // (facoltativo ma utile se poi navighi tra documenti, ecc.)
+          _selectedContractId    = contractId;
+          _selectedClaimId       = claimId;
+          _selectedClaimEntityId = entityId;
+
+          // nessun contratto “incastrato” in questo flusso
+          _selectedContract = null;
+        });
+      },
+    ),
+  );
+}
+
 
     // caso 2: mostra placeholder sezione
 // 🔧 Dentro _buildContent(), sostituisci lo switch(_selectedSide) finale
@@ -685,16 +858,84 @@ switch (_selectedSide) {
         });
       },
     );
-  case _SideItem.polizze:
-    // TODO: inserire pagina elenco polizze
-    return const Center(child: Text('Polizze – elenco polizze (placeholder)'));
+case _SideItem.polizze:
+  return DualPaneWrapper(
+    user: widget.user,
+    token: widget.token,
+    controller: _paneCtrlPolicies,
+    leftChild: PolizzePage(
+      userId: widget.user.username,
+      sdk: _sdk,
+      onOpenContract: (entityId, contractId, c) {
+        setState(() {
+          _resetChats();
+          // apri il dettaglio contratto riusando la stessa vista già in uso
+          _selectedClientId   = entityId;       // serve per ContractDetailPage (documenti)
+          _selectedContractId = contractId;
+          _selectedContract   = c;
+          _selContractSection = _ContractSection.riepilogo;
+        });
+      },
+    ),
+  );
 
-  case _SideItem.sinistri:
-    // TODO: pagina sinistri globale
-    return const Center(child: Text('Sinistri – gestione sinistri (placeholder)'));
-  case _SideItem.proceduraGara:
-    // TODO: inserire workflow/gare reali
-    return const Center(child: Text('Procedura di Gara – (placeholder)'));
+case _SideItem.sinistri:
+  // Sempre lista "Tutti i sinistri". Al click su una card
+  // ENTRO nel contesto CLIENTE → Sinistri (Summary),
+  // così la sidebar cambia in quella cliente (come per i contratti).
+  return DualPaneWrapper(
+    user: widget.user,
+    token: widget.token,
+    controller: _paneCtrlAllClaims,
+    leftChild: AllClaimsPage(
+      userId: widget.user.username,
+      sdk: _sdk,
+      onOpenClaim: (entityId, contractId, claimId, viewRow, sinistro) {
+        setState(() {
+          _resetChats();
+
+          // ⬇️ Passo al contesto CLIENTE
+          _selectedClientId   = entityId;                     // sidebar diventa "cliente"
+          _selClientSection   = _ClientSection.sinistri;      // pagina cliente → sinistri
+
+          // ⬇️ Preparo la selezione per mostrare SUBITO il Summary
+          _selectedClaim      = sinistro ?? ClaimSummaryPanel.claimFromViewRow(viewRow);
+          _selectedClaimRow   = {
+            ...viewRow,
+            // mi assicuro che i campi ci siano, per sicurezza
+            'contract_id': contractId,
+            'claim_id'   : claimId,
+          };
+
+          // (opzionale) salvo questi ID se ti tornano utili altrove
+          _selectedContractId    = contractId;
+          _selectedClaimId       = claimId;
+          _selectedClaimEntityId = entityId;
+        });
+      },
+    ),
+  );
+
+case _SideItem.proceduraGara:
+  return DualPaneWrapper(
+    user: widget.user,
+    token: widget.token,
+    controller: _paneCtrlGare,
+    leftChild: _selectedGara == null
+      ? GarePage(
+          user: widget.user,
+          token: widget.token,
+          sdk: _sdk,
+          onOpenGara: (g) {
+            setState(() {
+              _resetChats();
+              _selectedGara = g; // apre il dettaglio "incastrato"
+            });
+          },
+        )
+      : GaraDetailPage(gara: _selectedGara!),
+  );
+
 
 }
   }

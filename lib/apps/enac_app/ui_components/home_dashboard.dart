@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart'; // Omnia8Sdk + Entity
-import 'package:boxed_ai/apps/enac_app/ui_components/create_client_dialog.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/clients/create_client_dialog.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
 /// Dashboard “Home” con:
@@ -130,54 +130,75 @@ class _HomeDashboardState extends State<HomeDashboard> {
   /* --------------------- helpers UI / dati “due” --------------------- */
 
   // Estrazione robusta dei contatori dal payload dashboardDue
-  int _dueCount(String scope, int days) {
-    // Normalizza le chiavi del payload
-    final Map<String, dynamic> root = {
-      for (final e in _due.entries) e.key.toString().toLowerCase(): e.value
-    };
+int _dueCount(String scope, int days) {
+  // 1) Prova prima a calcolare dai LISTATI (payload attuale del BE)
+  final String listKey = scope == 'titles' ? 'titles_due' : 'contracts_due';
+  final dynamic rawList =
+      _due[listKey] ?? _due[listKey.toLowerCase()] ?? _due[listKey.toUpperCase()];
+  if (rawList is List) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final limit = today.add(Duration(days: days));
+    final dateKey = scope == 'titles' ? 'scadenza_titolo' : 'scadenza';
 
-    // Trova la sezione corretta ("titles" / "contracts" o alias)
-    dynamic sec = root[scope] ??
-        root[scope == 'titles' ? 'titoli' : 'contratti'] ??
-        root['${scope}_due'] ??
-        root['${scope}_counts'];
-
-    int? parse(dynamic x) {
-      if (x == null) return null;
-      if (x is num) return x.toInt();
-      return int.tryParse(x.toString());
-    }
-
-    // Se la sezione è una mappa, prova varie chiavi possibili
-    if (sec is Map) {
-      final m = {
-        for (final e in sec.entries) e.key.toString().toLowerCase(): e.value
-      };
-      for (final k in <String>[
-        '$days',            // "60"
-        'in_$days',         // "in_60"
-        'in$days',          // "in60"
-        '${days}_giorni',   // "60_giorni"
-      ]) {
-        final v = parse(m[k]);
-        if (v != null) return v;
+    int count = 0;
+    for (final item in rawList) {
+      if (item is Map) {
+        final dynamic ds =
+            item[dateKey] ?? item[dateKey.toLowerCase()] ?? item[dateKey.toUpperCase()];
+        if (ds is String && ds.isNotEmpty) {
+          try {
+            final d = DateTime.parse(ds);
+            final dd = DateTime(d.year, d.month, d.day);
+            if (!dd.isBefore(today) && !dd.isAfter(limit)) {
+              count++;
+            }
+          } catch (_) {
+            // data non parsabile -> ignora
+          }
+        }
       }
     }
+    return count;
+  }
 
-    // Fallback: valori piatti sulla root
-    for (final k in <String>[
-      '${scope}_$days',
-      '${scope}in$days',
-      '${scope}_in_$days',
-      '${scope}$days',
-      '${scope}_${days}_giorni',
-    ]) {
-      final v = parse(root[k]);
+  // 2) Fallback: vecchia logica su mappe con contatori già aggregati (se in futuro il BE li esponesse)
+  final Map<String, dynamic> root = {
+    for (final e in _due.entries) e.key.toString().toLowerCase(): e.value
+  };
+  dynamic sec = root[scope] ??
+      root[scope == 'titles' ? 'titoli' : 'contratti'] ??
+      root['${scope}_due'] ??
+      root['${scope}_counts'];
+
+  int? parse(dynamic x) {
+    if (x == null) return null;
+    if (x is num) return x.toInt();
+    return int.tryParse(x.toString());
+  }
+
+  if (sec is Map) {
+    final m = {for (final e in sec.entries) e.key.toString().toLowerCase(): e.value};
+    for (final k in <String>['$days', 'in_$days', 'in$days', '${days}_giorni']) {
+      final v = parse(m[k]);
       if (v != null) return v;
     }
-
-    return 0;
   }
+
+  for (final k in <String>[
+    '${scope}_$days',
+    '${scope}in$days',
+    '${scope}_in_$days',
+    '${scope}$days',
+    '${scope}_${days}_giorni',
+  ]) {
+    final v = parse(root[k]);
+    if (v != null) return v;
+  }
+
+  return 0;
+}
+
 
   Widget _dueBox({
     required String title,
@@ -340,7 +361,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
                                 color: const Color(0xFF00A651),
                                 borderRadius: BorderRadius.circular(2),
                               ),
-                              child: const Text('CLIENTE',
+                              child: const Text("ENTITA'",
                                   style: TextStyle(
                                       color: Colors.white, fontSize: 11)),
                             ),

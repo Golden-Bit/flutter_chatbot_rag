@@ -16,6 +16,7 @@ import 'dart:convert'; // per jsonEncode / jsonDecode
 import 'package:uuid/uuid.dart';
 import 'dart:convert' show JsonEncoder;
 import 'package:flutter/services.dart'; // ← per LengthLimitingTextInputFormatter
+import 'dart:math' as math; // per min/max responsive
 
 /// Ritorna true se la KB è stata creata automaticamente come archivio di una chat
 bool _isChatContext(ContextMetadata ctx) {
@@ -433,12 +434,27 @@ Map<String, dynamic> fileIconFor(String fileName) {
 /// Info persistente sui job di indicizzazione ancora in corso
 /// ①  aggiungi il campo `jobId`
 /// Info persistente sui job di indicizzazione ancora in corso
+// CHANGED: aggiunto supporto a uploadTaskId e schema chiavi aggiornato
+//          + retro-compatibilità con il vecchio formato {context, tasks{loader,vector}}
+
 class PendingUploadJob {
-  final String jobId; // id univoco del job
-  final String chatId; // id della chat a cui appartiene
-  final String contextPath; // path KB
-  final String fileName; // nome file
+  /// Id univoco del job (nostro, lato client)
+  final String jobId;
+
+  /// Id della chat alla quale il job è associato (può essere vuoto)
+  final String chatId;
+
+  /// Path della Knowledge Box (contesto)
+  final String contextPath;
+
+  /// Nome del file caricato
+  final String fileName;
+
+  /// Mappa contesto → coppia di task-id (loader / vector)
   final Map<String, TaskIdsPerContext> tasksPerCtx;
+
+  /// NEW: id aggregato del task di upload esposto dal backend (se presente)
+  final String? uploadTaskId; // NEW
 
   PendingUploadJob({
     required this.jobId,
@@ -446,37 +462,82 @@ class PendingUploadJob {
     required this.contextPath,
     required this.fileName,
     required this.tasksPerCtx,
+    this.uploadTaskId, // NEW
   });
 
+  /// Serializzazione in **nuovo schema**:
+  ///  - `contextPath`
+  ///  - `tasksPerCtx` (valori compatibili sia con TaskIdsPerContext.fromJson,
+  ///    sia con il vecchio schema grazie al doppio naming dei campi)
+  ///  - `uploadTaskId` (opzionale)
   Map<String, dynamic> toJson() => {
         'jobId': jobId,
         'chatId': chatId,
-        'context': contextPath,
+        'contextPath': contextPath, // CHANGED
         'fileName': fileName,
-        'tasks': tasksPerCtx.map((k, v) => MapEntry(k, {
+        'tasksPerCtx': tasksPerCtx.map((k, v) => MapEntry(k, {
+              // compat nuovo: nomi espliciti
+              'loaderTaskId': v.loaderTaskId,
+              'vectorTaskId': v.vectorTaskId,
+              // compat vecchio: alias usati in passato
               'loader': v.loaderTaskId,
               'vector': v.vectorTaskId,
-            })),
+            })), // CHANGED
+        if (uploadTaskId != null) 'uploadTaskId': uploadTaskId, // NEW
       };
 
+  /// Deserializzazione **robusta**:
+  ///  - accetta sia il nuovo schema (`contextPath`, `tasksPerCtx`)
+  ///  - sia il vecchio (`context`, `tasks{loader,vector}`)
   static PendingUploadJob fromJson(Map<String, dynamic> j) {
-    final tasks =
-        (j['tasks'] as Map<String, dynamic>).map((ctx, ids) => MapEntry(
-            ctx,
-            TaskIdsPerContext(
-              loaderTaskId: ids['loader'],
-              vectorTaskId: ids['vector'],
-            )));
+    // Sorgente tasks: nuovo (tasksPerCtx) o vecchio (tasks)
+    final Map rawTasks =
+        (j['tasksPerCtx'] as Map?) ?? (j['tasks'] as Map?) ?? const {};
+
+    final tasks = rawTasks.map((ctx, ids) {
+      final String key = ctx as String;
+
+      if (ids is Map) {
+        final map = Map<String, dynamic>.from(ids);
+
+        // Preferisci il costruttore da JSON se disponibile/compatibile
+        // (si assume che TaskIdsPerContext.fromJson gestisca loaderTaskId/vectorTaskId)
+        if (map.containsKey('loaderTaskId') || map.containsKey('vectorTaskId')) {
+          return MapEntry(key, TaskIdsPerContext.fromJson(map));
+        }
+
+        // Fallback assoluto: vecchio schema {loader, vector}
+        return MapEntry(
+          key,
+          TaskIdsPerContext(
+            loaderTaskId: map['loader'],
+            vectorTaskId: map['vector'],
+          ),
+        );
+      }
+
+      // Ultimo fallback estremamente difensivo (nessun id disponibile)
+      return MapEntry(
+        key,
+        TaskIdsPerContext(
+          loaderTaskId: "",
+          vectorTaskId: "",
+        ),
+      );
+    });
 
     return PendingUploadJob(
       jobId: j['jobId'],
-      chatId: j['chatId'],
-      contextPath: j['context'],
+      chatId: j['chatId'] ?? '',
+      contextPath: (j['contextPath'] ?? j['context']) as String, // CHANGED
       fileName: j['fileName'],
-      tasksPerCtx: tasks,
+      tasksPerCtx:
+          Map<String, TaskIdsPerContext>.from(tasks as Map<String, TaskIdsPerContext>),
+      uploadTaskId: j['uploadTaskId'], // NEW
     );
   }
 }
+
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -1142,6 +1203,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final double _kDialogMaxWidth =
       600; // larghezza massima del contenuto del dialog
   final double _kDescMaxHeight = 200; // altezza massima area descrizione
+  final double _kViewDialogMaxHeight = 800;
 
   InputDecoration _outlinedDecoration(String label) {
     return InputDecoration(
@@ -1320,7 +1382,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Carica i file per il contesto selezionato
     List<Map<String, dynamic>> filesForContext =
         await _loadFilesForContext(contextPath);
-
+    bool isDeleting = false; // mostra overlay se true
+    String? deletingFileName; // opzionale: nome mostrato accanto allo spinner
     // Trova la descrizione associata al contesto corrente
     final selectedContext = _allContexts.firstWhere(
       (context) => context.path == contextPath,
@@ -1348,232 +1411,330 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(16), // Arrotondamento degli angoli
-                //side: BorderSide(
-                //  color: Colors.blue, // Colore del bordo
-                //  width: 2, // Spessore del bordo
+            // ⇩⇩⇩ calcola limiti responsivi in base allo schermo
+            final mq = MediaQuery.of(context);
+            final double maxW = math.min(
+                _kDialogMaxWidth, mq.size.width - 32); // 16px margine per lato
+            final double maxH =
+                math.min(_kViewDialogMaxHeight, mq.size.height * 0.85);
+
+            return Stack(children: [
+              AlertDialog(
+                backgroundColor: Colors.white,
+                elevation: 6,
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 16, // margine laterale per schermi piccoli
+                  vertical: 24,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                title: SizedBox(
+                    width:
+                        maxW, // ⬅️ vincolo duro di larghezza anche per il titolo
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          WireframeCubeIcon(
+                            size: 36.0,
+                            color: Colors.blue,
+                          ),
+                          SizedBox(width: 8.0),
+                          Text(
+                            selectedContext.customMetadata?["display_name"] ??
+                                selectedContext.path,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        ]),
+                        SizedBox(height: 8.0),
+                        if (description != null &&
+                            description.trim().isNotEmpty)
+                          Text(
+                            description,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey, // ← identico alla card
+                              fontWeight: FontWeight.normal,
+                            ),
+                            maxLines: 10,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        SizedBox(height: 16.0),
+                        // Barra di ricerca
+                        TextField(
+                          controller: searchController,
+                          onChanged: (value) {
+                            // Aggiorna i risultati del filtro
+                            setState(() {
+                              _filterFiles(value);
+                            });
+                          },
+                          decoration: InputDecoration(
+                            hintText: localizations.search_file,
+                            prefixIcon: Icon(Icons.search),
+                            contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide:
+                                  BorderSide(color: Colors.black), // Bordi neri
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: Colors
+                                      .black), // Bordi neri per lo stato normale
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: Colors.black,
+                                  width:
+                                      2.0), // Bordi neri più spessi per lo stato attivo
+                            ),
+                          ),
+                        ),
+                      ],
+                    )),
+                //shape: RoundedRectangleBorder(
+                //  borderRadius: BorderRadius.circular(8),
                 //),
-              ),
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    WireframeCubeIcon(
-                      size: 36.0,
-                      color: Colors.blue,
-                    ),
-                    SizedBox(width: 8.0),
-                    Text(
-                      selectedContext.customMetadata?["display_name"] ??
-                          selectedContext.path,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    )
-                  ]),
-                  SizedBox(height: 8.0),
-                  if (description != null && description.trim().isNotEmpty)
-                    Text(
-                      description,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey, // ← identico alla card
-                        fontWeight: FontWeight.normal,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  SizedBox(height: 16.0),
-                  // Barra di ricerca
-                  TextField(
-                    controller: searchController,
-                    onChanged: (value) {
-                      // Aggiorna i risultati del filtro
-                      setState(() {
-                        _filterFiles(value);
-                      });
+// ⇩⇩⇩ vincola larghezza/altezza massime in modo responsivo
+                content: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: maxW,
+                    maxHeight: maxH,
+                  ),
+                  child: SizedBox(
+                    width: double
+                        .maxFinite, // occupa tutta la larghezza disponibile entro i vincoli
+                    child: filteredFiles.isEmpty
+                        ? const Text('Nessun file trovato per questo contesto.')
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: filteredFiles.length,
+                            itemBuilder: (context, index) {
+                              String filePath = filteredFiles[index]['path'];
+                              List<String> pathSegments = filePath.split('/');
+                              String fileName = pathSegments.isNotEmpty
+                                  ? pathSegments.last
+                                  : 'Sconosciuto';
+                              String fileUUID = filteredFiles[index]
+                                      ['custom_metadata']['file_uuid'] ??
+                                  'Sconosciuto';
+                              String fileType = filteredFiles[index]
+                                      ['custom_metadata']['type'] ??
+                                  'Sconosciuto';
+                              String uploadDate = filteredFiles[index]
+                                      ['custom_metadata']['upload_date'] ??
+                                  'Sconosciuto';
+                              String fileSize = filteredFiles[index]
+                                      ['custom_metadata']['size'] ??
+                                  'Sconosciuto';
+
+                              return Card(
+                                color: Colors.white,
+                                elevation: 6,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      // Riga superiore: Nome file e icona rappresentativa
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          // Nome del file
+                                          Expanded(
+                                            child: Text(
+                                              fileName,
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          // Icona del file
+                                          Icon(
+                                            _getIconForFileType(fileName)[
+                                                'icon'], // Ottieni l'icona
+                                            size: 32,
+                                            color: _getIconForFileType(
+                                                    fileName)[
+                                                'color'], // Ottieni il colore
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 5),
+                                      // Dettagli aggiuntivi del file
+                                      Text(
+                                          '${localizations.file_type}: $fileType'),
+                                      Text(
+                                          '${localizations.file_size}: $fileSize'),
+                                      Text(
+                                          '${localizations.upload_date}: $uploadDate'),
+                                      // Spazio per spostare il cestino in basso
+                                      Spacer(),
+                                      // Cestino in basso a destra
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.end,
+                                        children: [
+                                          // 🆕 Download file sorgente
+                                          IconButton(
+                                            tooltip: 'Scarica',
+                                            icon: const Icon(Icons.download,
+                                                color: Colors.black),
+                                            onPressed: () {
+                                              final fileId =
+                                                  filteredFiles[index]
+                                                          ['name'] ??
+                                                      '';
+                                              _apiSdk.downloadFile(fileId,
+                                                  token: widget.token);
+                                            },
+                                          ),
+                                          // Visualizza anteprima + JSON
+                                          IconButton(
+                                            tooltip: 'Visualizza',
+                                            icon: const Icon(Icons.visibility,
+                                                color: Colors.black),
+                                            onPressed: () {
+                                              _showFilePreviewDialog(
+                                                filteredFiles[index],
+                                                fileName,
+                                              );
+                                            },
+                                          ),
+                                          // Elimina
+                                          IconButton(
+                                            tooltip: 'Elimina',
+                                            icon: const Icon(Icons.delete,
+                                                color: Colors.black),
+                                            onPressed: () async {
+                                              // Mostra overlay
+                                              setState(() {
+                                                isDeleting = true;
+                                                deletingFileName =
+                                                    fileName; // opzionale
+                                              });
+
+                                              try {
+                                                await _deleteFile(
+                                                    fileUUID); // chiamata esistente
+                                                // Aggiorna lista dopo la cancellazione
+                                                setState(() {
+                                                  filesForContext.removeWhere(
+                                                    (f) =>
+                                                        f['custom_metadata']
+                                                            ['file_uuid'] ==
+                                                        fileUUID,
+                                                  );
+                                                  _filterFiles(
+                                                      searchController.text);
+                                                });
+                                              } catch (e) {
+                                                // feedback minimo in caso di errore
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                        content: Text(
+                                                            'Errore eliminazione: $e')),
+                                                  );
+                                                }
+                                              } finally {
+                                                // Nascondi overlay
+                                                setState(() {
+                                                  isDeleting = false;
+                                                  deletingFileName = null;
+                                                });
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
                     },
-                    decoration: InputDecoration(
-                      hintText: localizations.search_file,
-                      prefixIcon: Icon(Icons.search),
-                      contentPadding: EdgeInsets.symmetric(vertical: 8.0),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            BorderSide(color: Colors.black), // Bordi neri
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                            color: Colors
-                                .black), // Bordi neri per lo stato normale
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                            color: Colors.black,
-                            width:
-                                2.0), // Bordi neri più spessi per lo stato attivo
-                      ),
-                    ),
+                    child: Text(localizations.close),
                   ),
                 ],
               ),
-              backgroundColor: Colors.white,
-              elevation: 6,
-              //shape: RoundedRectangleBorder(
-              //  borderRadius: BorderRadius.circular(8),
-              //),
-              content: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 400, maxHeight: 800),
-                child: Container(
-                  width: double.maxFinite,
-                  child: filteredFiles.isEmpty
-                      ? Text('Nessun file trovato per questo contesto.')
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: filteredFiles.length,
-                          itemBuilder: (context, index) {
-                            String filePath = filteredFiles[index]['path'];
-                            List<String> pathSegments = filePath.split('/');
-                            String fileName = pathSegments.isNotEmpty
-                                ? pathSegments.last
-                                : 'Sconosciuto';
-                            String fileUUID = filteredFiles[index]
-                                    ['custom_metadata']['file_uuid'] ??
-                                'Sconosciuto';
-                            String fileType = filteredFiles[index]
-                                    ['custom_metadata']['type'] ??
-                                'Sconosciuto';
-                            String uploadDate = filteredFiles[index]
-                                    ['custom_metadata']['upload_date'] ??
-                                'Sconosciuto';
-                            String fileSize = filteredFiles[index]
-                                    ['custom_metadata']['size'] ??
-                                'Sconosciuto';
-
-                            return Card(
-                              color: Colors.white,
-                              elevation: 6,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+              // ─────────────────────────────────────────────
+              // OVERLAY BLOCCANTE + SPINNER
+              // ─────────────────────────────────────────────
+              if (isDeleting)
+                Positioned.fill(
+                  child: AbsorbPointer(
+                    // intercetta i tap e blocca l'interazione sotto
+                    child: AnimatedOpacity(
+                      opacity: 1.0,
+                      duration: const Duration(milliseconds: 120),
+                      child: Container(
+                        color: Colors.black
+                            .withOpacity(0.20), // oscura leggermente
+                        alignment: Alignment.center,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: const [
+                              BoxShadow(blurRadius: 12, color: Colors.black26)
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2.5),
                               ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Riga superiore: Nome file e icona rappresentativa
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        // Nome del file
-                                        Expanded(
-                                          child: Text(
-                                            fileName,
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        // Icona del file
-                                        Icon(
-                                          _getIconForFileType(fileName)[
-                                              'icon'], // Ottieni l'icona
-                                          size: 32,
-                                          color: _getIconForFileType(fileName)[
-                                              'color'], // Ottieni il colore
-                                        ),
-                                      ],
-                                    ),
-                                    SizedBox(height: 5),
-                                    // Dettagli aggiuntivi del file
-                                    Text(
-                                        '${localizations.file_type}: $fileType'),
-                                    Text(
-                                        '${localizations.file_size}: $fileSize'),
-                                    Text(
-                                        '${localizations.upload_date}: $uploadDate'),
-                                    // Spazio per spostare il cestino in basso
-                                    Spacer(),
-                                    // Cestino in basso a destra
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        // 🆕 Download file sorgente
-                                        IconButton(
-                                          tooltip: 'Scarica',
-                                          icon: const Icon(Icons.download,
-                                              color: Colors.black),
-                                          onPressed: () {
-                                            final fileId = filteredFiles[index]
-                                                    ['name'] ??
-                                                '';
-                                            _apiSdk.downloadFile(fileId,
-                                                token: widget.token);
-                                          },
-                                        ),
-                                        // Visualizza anteprima + JSON
-                                        IconButton(
-                                          tooltip: 'Visualizza',
-                                          icon: const Icon(Icons.visibility,
-                                              color: Colors.black),
-                                          onPressed: () {
-                                            _showFilePreviewDialog(
-                                              filteredFiles[index],
-                                              fileName,
-                                            );
-                                          },
-                                        ),
-                                        // Elimina
-                                        IconButton(
-                                          tooltip: 'Elimina',
-                                          icon: const Icon(Icons.delete,
-                                              color: Colors.black),
-                                          onPressed: () async {
-                                            await _deleteFile(fileUUID);
-                                            setState(() {
-                                              filesForContext.removeWhere((f) =>
-                                                  f['custom_metadata']
-                                                      ['file_uuid'] ==
-                                                  fileUUID);
-                                              _filterFiles(
-                                                  searchController.text);
-                                            });
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+                              const SizedBox(width: 12),
+                              Text(
+                                deletingFileName == null
+                                    ? 'Eliminazione in corso…'
+                                    : 'Eliminazione di "$deletingFileName"…',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600),
                               ),
-                            );
-                          },
+                            ],
+                          ),
                         ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                  child: Text(localizations.close),
-                ),
-              ],
-            );
+            ]);
           },
         );
       },
@@ -1763,146 +1924,147 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onTap: () {
                             _showFilesForContextDialog(contextMetadata.path);
                           },
-                          child: Card(
-                            color: Colors.white,
-                            elevation: 6,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(10.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
+                          child: Stack(children: [
+                            Card(
+                              color: Colors.white,
+                              elevation: 6,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(10.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.start,
                                                 children: [
-                                                  // 1) ICONA CUBO
                                                   WireframeCubeIcon(
-                                                    size: 36.0,
-                                                    color: Colors.blue,
-                                                  ),
-                                                  SizedBox(width: 8.0),
-                                                  // Nome del contesto
-                                                  Text(
-                                                    _displayName(
-                                                        contextMetadata),
-                                                    style: TextStyle(
-                                                      fontSize: 18,
-                                                      fontWeight:
-                                                          FontWeight.bold,
+                                                      size: 36.0,
+                                                      color: Colors.blue),
+                                                  const SizedBox(width: 8.0),
+                                                  Expanded(
+                                                    // ⬅️ AGGIUNTO: impone un vincolo di larghezza → ellissi funziona
+                                                    child: Text(
+                                                      _displayName(
+                                                          contextMetadata),
+                                                      style: const TextStyle(
+                                                          fontSize: 18,
+                                                          fontWeight:
+                                                              FontWeight.bold),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      softWrap:
+                                                          false, // ⬅️ evita l’andata a capo
                                                     ),
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  )
-                                                ]),
-                                            // Rotella di caricamento e nome del file (se in caricamento)
-                                          ],
-                                        ),
-                                      ),
-                                      // Menu popup per azioni (Carica File ed Elimina Contesto)
-                                      Theme(
-                                          data: Theme.of(context).copyWith(
-                                            popupMenuTheme: PopupMenuThemeData(
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(16),
+                                                  ),
+                                                ],
                                               ),
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                          child: PopupMenuButton<String>(
-                                            offset: const Offset(0, 32),
-                                            borderRadius: BorderRadius.circular(
-                                                16), // Imposta un raggio di 8
-                                            color: Colors.white,
-                                            onSelected: (value) {
-                                              if (value == 'delete') {
-                                                _deleteContext(
-                                                    contextMetadata.path);
-                                              } else if (value == 'upload') {
-                                                _uploadFileForContextAsync(
-                                                    contextMetadata.path);
-                                              } else if (value == 'edit') {
-                                                // ③
-                                                _showEditContextDialog(
-                                                    contextMetadata); // ④
-                                              }
-                                            },
-                                            itemBuilder:
-                                                (BuildContext context) =>
-                                                    <PopupMenuEntry<String>>[
-                                              PopupMenuItem<String>(
-                                                value: 'upload',
-                                                child: Text(
-                                                    localizations.upload_file),
-                                              ),
-                                              PopupMenuItem<String>(
-                                                value: 'edit', // ① nuova voce
-                                                child: Text(localizations
-                                                    .edit), // ② nuova label (aggiungi nelle i18n)
-                                              ),
-                                              PopupMenuItem<String>(
-                                                value: 'delete',
-                                                child:
-                                                    Text(localizations.delete),
-                                              ),
+
+                                              // Rotella di caricamento e nome del file (se in caricamento)
                                             ],
-                                          )),
-                                    ],
-                                  ),
-                                  SizedBox(height: 5),
-                                  // Metadati del contesto
-                                  ...metadataWidgets,
-                                  SizedBox(height: 16),
-                                  if (_isLoadingMap[contextMetadata.path] ==
-                                          true &&
-                                      _loadingFileNamesMap[
-                                              contextMetadata.path] !=
-                                          null)
-                                    Row(
-                                      children: [
-                                        SizedBox(
-                                          width: 16.0,
-                                          height: 16.0,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth:
-                                                2.0, // Rotella più sottile
-                                            color: Colors
-                                                .blue, // Colore della rotella
                                           ),
                                         ),
-                                        SizedBox(width: 8.0),
-                                        Expanded(
-                                          child: Text(
-                                            _loadingFileNamesMap[
-                                                    contextMetadata.path] ??
-                                                '',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
+                                        // Menu popup per azioni (Carica File ed Elimina Contesto)
                                       ],
                                     ),
-                                ],
+                                    SizedBox(height: 5),
+                                    // Metadati del contesto
+                                    ...metadataWidgets,
+                                    SizedBox(height: 16),
+                                    if (_isLoadingMap[contextMetadata.path] ==
+                                            true &&
+                                        _loadingFileNamesMap[
+                                                contextMetadata.path] !=
+                                            null)
+                                      Row(
+                                        children: [
+                                          SizedBox(
+                                            width: 16.0,
+                                            height: 16.0,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth:
+                                                  2.0, // Rotella più sottile
+                                              color: Colors
+                                                  .blue, // Colore della rotella
+                                            ),
+                                          ),
+                                          SizedBox(width: 8.0),
+                                          Expanded(
+                                            child: Text(
+                                              _loadingFileNamesMap[
+                                                      contextMetadata.path] ??
+                                                  '',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ), // MENU ⋮ IN BASSO A DESTRA
+                            Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: Theme(
+                                data: Theme.of(context).copyWith(
+                                  popupMenuTheme: PopupMenuThemeData(
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(16)),
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                child: PopupMenuButton<String>(
+                                  tooltip: 'Azioni',
+                                  offset: const Offset(0,
+                                      -8), // apre leggermente sopra il bottone
+                                  onSelected: (value) {
+                                    if (value == 'delete') {
+                                      _deleteContext(contextMetadata.path);
+                                    } else if (value == 'upload') {
+                                      _uploadFileForContextAsync(
+                                          contextMetadata.path);
+                                    } else if (value == 'edit') {
+                                      _showEditContextDialog(contextMetadata);
+                                    }
+                                  },
+                                  itemBuilder: (BuildContext context) =>
+                                      <PopupMenuEntry<String>>[
+                                    PopupMenuItem<String>(
+                                      value: 'upload',
+                                      child: Text(localizations.upload_file),
+                                    ),
+                                    PopupMenuItem<String>(
+                                      value: 'edit',
+                                      child: Text(localizations.edit),
+                                    ),
+                                    PopupMenuItem<String>(
+                                      value: 'delete',
+                                      child: Text(localizations.delete),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
+                          ]),
                         );
                       },
                     ),

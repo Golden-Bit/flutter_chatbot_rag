@@ -692,7 +692,7 @@ class TaskNotification {
   final String jobId;
   final String contextPath;
  final String contextName;      // ← display name del contesto
-  final String fileName;
+   String fileName;
         TaskStage stage;
         bool isVisible;
 

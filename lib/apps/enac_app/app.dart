@@ -133,7 +133,11 @@ final kBrandBlue = Color(0xFF005E95);
 
 
 AppBar _buildAppBar() {
-  const double logoHeight = 64; // ↑ ingrandisci qui (36–48 va bene)
+  // Se non hai già kBrandBlue nel tuo tema:
+  // const kBrandBlue = Color(0xFF005E95); // blu ENAC
+
+  const double logoSize = 64; // regola qui la dimensione del logo in px
+
   Widget vDivider() => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Container(width: 1, color: Colors.white.withOpacity(.4)),
@@ -141,27 +145,50 @@ AppBar _buildAppBar() {
 
   return AppBar(
     backgroundColor: kBrandBlue,
-    elevation      : 2,
-    toolbarHeight  : 72,                 // più spazio per logo grande
-    automaticallyImplyLeading: false,    // ⬅️ elimina la freccia back
-    leadingWidth   : 0,                  // rimuove lo spazio “leading”
-    titleSpacing   : 20,
+    elevation: 2,
+    toolbarHeight: 80,                 // spazio sufficiente per logo + 2 righe
+    automaticallyImplyLeading: false,  // niente freccia indietro
+    leadingWidth: 0,
+    titleSpacing: 20,
     title: Row(
       children: [
-        // LOGO LOCALE DAGLI ASSET
+        // LOGO DAGLI ASSET
         Image.asset(
           'assets/examples_app_assets/enac-logo-bianco.png',
+          width: logoSize,
+          height: logoSize,
           fit: BoxFit.contain,
-          width: logoHeight,
-          height: logoHeight,
         ),
         const SizedBox(width: 12),
-        Text(
-          'ENAC APP',
-          style: GoogleFonts.roboto(
-            color: Colors.white,
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
+
+        // BLOCCO TESTI SU DUE RIGHE
+        Flexible(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Ente Nazionale per l'Aviazione Civile",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.roboto(
+                  color: Colors.white,
+                  fontSize: 18,           // titolo principale
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                "Italian Civil Aviation Authority",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.roboto(
+                  color: Colors.white.withOpacity(.9),
+                  fontSize: 13,           // sottotitolo
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -171,10 +198,11 @@ AppBar _buildAppBar() {
       IconButton(
         icon: Icon(
           _chatsOpen ? Icons.chat_bubble : Icons.chat_bubble_outline,
-          color: Colors.white,
         ),
+        color: Colors.white,
         tooltip: _chatsOpen ? 'Nascondi chat' : 'Mostra chat',
-        onPressed: () => setState(() => _chatsOpen = DualPaneRegistry.toggleAll()),
+        onPressed: () =>
+            setState(() => _chatsOpen = DualPaneRegistry.toggleAll()),
       ),
       const SizedBox(width: 16),
 
@@ -187,13 +215,15 @@ AppBar _buildAppBar() {
 
       // HELP / NOTIFICHE
       IconButton(
-        icon: const Icon(Icons.help_outline, color: Colors.white),
+        icon: const Icon(Icons.help_outline),
+        color: Colors.white,
         tooltip: 'Aiuto',
         onPressed: () {},
       ),
       vDivider(),
       IconButton(
-        icon: const Icon(Icons.notifications_none, color: Colors.white),
+        icon: const Icon(Icons.notifications_none),
+        color: Colors.white,
         tooltip: 'Notifiche',
         onPressed: () {},
       ),
@@ -206,6 +236,7 @@ AppBar _buildAppBar() {
     ],
   );
 }
+
 
 
 

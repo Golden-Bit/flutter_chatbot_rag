@@ -126,140 +126,88 @@ Sinistro? _selectedClaim;                                         // NEW
 Map<String, dynamic>? _selectedClaimRow;                          // NEW
 
   /* ================= TOP‑BAR ================= */
-  Widget _buildTopBar() {
-    Widget tab(String label, _TopTab tab, {bool lock = false}) {
-      final active = _selectedTab == tab;
-      return InkWell(
-        splashFactory: NoSplash.splashFactory,
-        onTap: () => setState(() => _selectedTab = tab),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: active
-              ? BoxDecoration(
-                  border: Border.all(color: Colors.white, width: 1),
-                  borderRadius: BorderRadius.circular(2),
-                )
-              : null,
-          child: Row(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: active ? Colors.white : Colors.grey.shade200,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              if (lock)
-                const Padding(
-                  padding: EdgeInsets.only(left: 4),
-                  child:
-                      Icon(Icons.lock_outline, size: 15, color: Colors.white70),
-                ),
-            ],
-          ),
-        ),
+/* ================= TOP-BAR ================= */
+/* ================= APPBAR con LOGO ENAC ================= */
+/* ================= APPBAR con LOGO ENAC (asset) ================= */
+final kBrandBlue = Color(0xFF005E95);
+
+
+AppBar _buildAppBar() {
+  const double logoHeight = 64; // ↑ ingrandisci qui (36–48 va bene)
+  Widget vDivider() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Container(width: 1, color: Colors.white.withOpacity(.4)),
       );
-    }
 
-    Widget vDivider() => Container(
-          width: 1,
-          height: 40,
-          color: Colors.white.withOpacity(.4),
-        );
-
-    return Material(
-      color: const Color(0xFF66A3FF),
-      elevation: 2,
-      child: SafeArea(
-        bottom: false,
-        child: Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              /* LOGO */
-              Text('App Name',
-                  style: GoogleFonts.roboto(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(width: 32),
-
-              /* TABS */
-              //tab('Documenti', _TopTab.docs),
-              //const SizedBox(width: 24),
-              //tab('Modelli', _TopTab.templates),
-              const Spacer(),
-
-              /* SEARCH TOP‑BAR */
-              /*SizedBox(
-                width: 260,
-                height: 40,
-                child: TextField(
-                  controller: _topSearch,
-                  onSubmitted: (v) => debugPrint('top search: $v'),
-                  style: const TextStyle(color: Colors.black),
-                  decoration: InputDecoration(
-                    hintText: 'Cerca file o cartelle',
-                    hintStyle:
-                        TextStyle(color: Colors.grey.shade500, fontSize: 14),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    filled: true,
-                    fillColor: Colors.white,
-                    suffixIcon: Icon(Icons.search,
-                        size: 20, color: Colors.grey.shade400),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(2),
-                        borderSide: BorderSide.none),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 24),*/
- /* CHAT TOGGLE */
- IconButton(
-   icon: Icon(
-     _chatsOpen ? Icons.chat_bubble : Icons.chat_bubble_outline,
-     color: Colors.white,
-   ),
-   tooltip: _chatsOpen ? 'Nascondi chat' : 'Mostra chat',
-   onPressed: () {
-     setState(() => _chatsOpen = DualPaneRegistry.toggleAll());
-   },
- ),
- const SizedBox(width: 16),
-
-              /* LINGUA */
-              vDivider(),
-              const SizedBox(width: 16),
-              _LanguageMenu(
-                current: 'it',
-                onChange: (lang) => setState(() {}),
-              ),
-              const SizedBox(width: 16),
-              vDivider(),
-
-              /* HELP ‑ NOTIFICHE */
-              IconButton(
-                  icon: const Icon(Icons.help_outline, color: Colors.white),
-                  tooltip: 'Aiuto',
-                  onPressed: () {}),
-              vDivider(),
-              IconButton(
-                  icon:
-                      const Icon(Icons.notifications_none, color: Colors.white),
-                  tooltip: 'Notifiche',
-                  onPressed: () {}),
-              vDivider(),
-
-              /* AVATAR + NOME */
-              const SizedBox(width: 12),
-              _UserMenu(accessToken: widget.token.accessToken),
-            ],
+  return AppBar(
+    backgroundColor: kBrandBlue,
+    elevation      : 2,
+    toolbarHeight  : 72,                 // più spazio per logo grande
+    automaticallyImplyLeading: false,    // ⬅️ elimina la freccia back
+    leadingWidth   : 0,                  // rimuove lo spazio “leading”
+    titleSpacing   : 20,
+    title: Row(
+      children: [
+        // LOGO LOCALE DAGLI ASSET
+        Image.asset(
+          'assets/examples_app_assets/enac-logo-bianco.png',
+          fit: BoxFit.contain,
+          width: logoHeight,
+          height: logoHeight,
+        ),
+        const SizedBox(width: 12),
+        Text(
+          'ENAC APP',
+          style: GoogleFonts.roboto(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
           ),
         ),
+      ],
+    ),
+    actions: [
+      // CHAT TOGGLE
+      IconButton(
+        icon: Icon(
+          _chatsOpen ? Icons.chat_bubble : Icons.chat_bubble_outline,
+          color: Colors.white,
+        ),
+        tooltip: _chatsOpen ? 'Nascondi chat' : 'Mostra chat',
+        onPressed: () => setState(() => _chatsOpen = DualPaneRegistry.toggleAll()),
       ),
-    );
-  }
+      const SizedBox(width: 16),
+
+      // LINGUA
+      vDivider(),
+      const SizedBox(width: 16),
+      _LanguageMenu(current: 'it', onChange: (lang) => setState(() {})),
+      const SizedBox(width: 16),
+      vDivider(),
+
+      // HELP / NOTIFICHE
+      IconButton(
+        icon: const Icon(Icons.help_outline, color: Colors.white),
+        tooltip: 'Aiuto',
+        onPressed: () {},
+      ),
+      vDivider(),
+      IconButton(
+        icon: const Icon(Icons.notifications_none, color: Colors.white),
+        tooltip: 'Notifiche',
+        onPressed: () {},
+      ),
+      vDivider(),
+
+      // AVATAR + MENU UTENTE
+      const SizedBox(width: 12),
+      _UserMenu(accessToken: widget.token.accessToken),
+      const SizedBox(width: 8),
+    ],
+  );
+}
+
+
 
   /* ------------- SIDEBAR: SEARCH ------------ */
   Widget _buildSideSearch() {
@@ -953,31 +901,52 @@ void dispose() {
 }
 
   /* ---------------- BUILD ---------------- */
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+@override
+Widget build(BuildContext context) {
+  final base = Theme.of(context);
+
+  final themed = base.copyWith(
+    colorScheme: base.colorScheme.copyWith(
+      primary: Theme.of(context).colorScheme.primary,
+      secondary: Theme.of(context).colorScheme.primary,
+      onPrimary: Colors.white,
+    ),
+    primaryColor: Theme.of(context).colorScheme.primary,
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: Theme.of(context).colorScheme.primary,
+      selectionColor: Theme.of(context).colorScheme.primary.withOpacity(.12),
+      selectionHandleColor: Theme.of(context).colorScheme.primary,
+    ),
+  );
+
+  return Theme(
+    data: themed,
+    child: Scaffold(
+      appBar: _buildAppBar(),
       body: Column(
         children: [
-          _buildTopBar(),
           Expanded(
             child: Row(
               children: [
-                _buildSideMenu(),                  // sidebar dinamica   // 🔄 due varianti sidebar
-                VerticalDivider(
-                    width: 1, thickness: 1, color: Colors.grey.shade300),
+                _buildSideMenu(),
+                VerticalDivider(width: 1, thickness: 1, color: Colors.grey.shade300),
                 Expanded(
                   child: Container(
-                   color: Colors.white,
-                    alignment: Alignment.topCenter,      // ⬅ forza l’allineamento in alto
+                    color: Colors.white,
+                    alignment: Alignment.topCenter,
                     padding: const EdgeInsets.all(24),
-                    child: _buildContent()),
-            )],
+                    child: _buildContent(),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
+
 }
 
 /* ----------- USER MENU POPUP ------------- */

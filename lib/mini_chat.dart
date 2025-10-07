@@ -57,7 +57,7 @@ class AiGeneratePanel extends StatefulWidget {
 }
 
 // 1️⃣  – colore “istituzionale” usato anche dalla Top‑bar
-const _kPrimaryBlue = Color(0xFF66A3FF);
+const _kPrimaryBlue = Color(0xFF005E95); //Color(0xFF66A3FF);
 
 class _AiGeneratePanelState extends State<AiGeneratePanel> {
 

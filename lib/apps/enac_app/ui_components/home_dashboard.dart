@@ -1,11 +1,14 @@
 // lib/apps/enac_app/ui_components/home_dashboard.dart
 import 'dart:async';
+import 'package:boxed_ai/apps/enac_app/ui_components/clients/client_form_page.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart'; // Omnia8Sdk + Entity
 import 'package:boxed_ai/apps/enac_app/ui_components/clients/create_client_dialog.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
+
+enum _HomeInnerView { dashboard, clientForm }
 
 /// Dashboard “Home” con:
 ///   • 2 riquadri superiori AFFIANCATI: Titoli in Scadenza / Scadenze Contrattuali (da BE)
@@ -34,6 +37,15 @@ class HomeDashboard extends StatefulWidget {
 }
 
 class _HomeDashboardState extends State<HomeDashboard> {
+
+  // vista interna: dashboard o form cliente
+
+_HomeInnerView _view = _HomeInnerView.dashboard;
+
+// opzionali per edit (oggi usiamo solo create)
+String? _editingEntityId;
+Entity? _editingEntity;
+
   /* --------------------- stato “due” + entità --------------------- */
   Future<void>? _boot; // inizializzazione
   Map<String, dynamic> _due = {};
@@ -267,18 +279,14 @@ int _dueCount(String scope, int days) {
             icon: const Icon(Icons.add, size: 18),
             label: const Text('Nuova Entità',
                 style: TextStyle(fontWeight: FontWeight.w500)),
-            onPressed: () async {
-              final created = await CreateClientDialog.show(
-                context,
-                user: widget.user,
-                token: widget.token,
-                sdk: widget.sdk,
-              );
-              if (created == true && mounted) {
-                // ricarica tutto per mostrare la nuova entità in cima
-                setState(() => _boot = _init());
-              }
-            },
+onPressed: () async {
+  setState(() {
+    _view = _HomeInnerView.clientForm;
+    _editingEntityId = null;   // create
+    _editingEntity   = null;
+  });
+},
+
           ),
         ],
       );
@@ -454,6 +462,27 @@ int _dueCount(String scope, int days) {
         if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
+// Se sto creando/modificando un cliente, mostro la pagina inline e occupo tutta l’altezza
+if (_view == _HomeInnerView.clientForm) {
+  return CreateOrEditClientPage(
+    user   : widget.user,
+    token  : widget.token,
+    sdk    : widget.sdk,
+    entityId      : _editingEntityId, // null = create
+    initialEntity : _editingEntity,   // null = create
+    onCancel: () {
+      setState(() => _view = _HomeInnerView.dashboard);
+    },
+    onSaved: (newId) async {
+      // torna alla dashboard e ricarica elenco/contatori
+      setState(() {
+        _view = _HomeInnerView.dashboard;
+        _boot = _init();
+      });
+    },
+  );
+}
+
 
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),

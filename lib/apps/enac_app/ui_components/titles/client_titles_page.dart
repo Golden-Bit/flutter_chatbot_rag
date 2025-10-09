@@ -23,6 +23,13 @@ class ClientTitlesPage extends StatefulWidget {
   /// Come per i contratti: il parent (HomeScaffold) decide cosa mostrare.
   final void Function(Titolo titolo, Map<String, dynamic> viewRow) onOpenTitle;
 
+  /// NEW: chiede al parent di aprire la pagina di creazione titolo.
+  /// Il parent si occuperà anche di chiamare _resetChats().
+  final void Function()? onCreateTitle;
+
+  /// NEW: contatore passato dal parent per forzare il refresh della tabella.
+  final int refreshCounter;
+
   const ClientTitlesPage({
     super.key,
     required this.user,
@@ -31,6 +38,8 @@ class ClientTitlesPage extends StatefulWidget {
     required this.clientId,
     required this.sdk,
     required this.onOpenTitle,
+    this.onCreateTitle,
+    this.refreshCounter = 0,
   });
 
   @override
@@ -38,7 +47,6 @@ class ClientTitlesPage extends StatefulWidget {
 }
 
 class _ClientTitlesPageState extends State<ClientTitlesPage> {
-  int _refresh = 0;
 
   Widget _sectionTitle(String t) => Align(
         alignment: Alignment.centerLeft,
@@ -207,18 +215,7 @@ class _ClientTitlesPageState extends State<ClientTitlesPage> {
               ),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Nuovo titolo'),
-              onPressed: () async {
-                final created = await CreateTitleDialog.show(
-                  context,
-                  user: widget.user,
-                  token: widget.token,
-                  sdk: widget.sdk,
-                  entityId: widget.clientId,
-                );
-                if (created == true && mounted) {
-                  setState(() => _refresh++); // ricarica tabella
-                }
-              },
+              onPressed: () => widget.onCreateTitle?.call(), // NEW: delega al parent
             ),
           ],
         ),
@@ -228,7 +225,7 @@ class _ClientTitlesPageState extends State<ClientTitlesPage> {
         /* ---------- tabella titoli ---------- */
         Expanded(
           child: TitlesTable(
-            key: ValueKey(_refresh),
+            key: ValueKey(widget.refreshCounter),
             userId: widget.userId,
             clientId: widget.clientId,
             sdk: widget.sdk,

@@ -6,11 +6,13 @@ import 'package:boxed_ai/apps/enac_app/ui_components/claim/claim_summary_panel.d
 import 'package:boxed_ai/apps/enac_app/ui_components/claim/client_claims_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/claim/contract_claims_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/contracts/all_contracts_table.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/contracts/contract_form_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_detail_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_models.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/titles/client_titles_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/titles/contract_titles_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/titles/create_title_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/titles/title_summary_page.dart';
 import 'package:flutter/material.dart';
 import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
@@ -61,6 +63,16 @@ class HomeScaffold extends StatefulWidget {
 }
 
 class _HomeScaffoldState extends State<HomeScaffold> {
+
+// Titoli: stato creazione e refresh
+bool _creatingTitle = false;     // ON = mostra pagina creazione Titolo
+int  _titlesRefresh = 0;         // per forzare refresh lista dopo creazione
+
+// Controller per DualPane
+final DualPaneController _paneCtrlTitles   = DualPaneController(); // (ce l’hai già)
+final DualPaneController _paneCtrlCreateTitle = DualPaneController(); // ⬅️ NEW
+  bool _creatingContract = false;   // ON = mostra pagina creazione
+int  _contractsRefresh = 0;       // per forzare refresh lista dopo creazione
 // in _HomeScaffoldState
 String? _selectedContractId;
 
@@ -73,7 +85,7 @@ String? _selectedClaimEntityId;    // entityId del sinistro selezionato (globale
   final DualPaneController _paneCtrl1 = DualPaneController();
   final DualPaneController _paneCtrl2 = DualPaneController();
   final DualPaneController _paneCtrl3 = DualPaneController();
-  final DualPaneController _paneCtrlTitles = DualPaneController();
+  final DualPaneController _paneCtrlCreate = DualPaneController();
   final DualPaneController _paneCtrlPolicies = DualPaneController();
   // Controller per la vista "Tutti i sinistri"
 final DualPaneController _paneCtrlAllClaims = DualPaneController();
@@ -625,28 +637,92 @@ case _ClientSection.cliente:
     case _ClientSection.richieste:
       return const Center(child: Text('Richieste – placeholder'));
 case _ClientSection.contratti:
-  return DualPaneWrapper(
+  if (_creatingContract) {
+    // ⬅️ MOSTRA la pagina di creazione *come leftChild* del DualPaneWrapper
+    return DualPaneWrapper(
+      key: const ValueKey('pane-create-contract'), // 👈 NEW
       user: widget.user,
       token: widget.token,
-  controller : _paneCtrl1,
-  leftChild  :ClientContractsPage(
-    user: widget.user,
-    token: widget.token,
-    userId: widget.user.username,
-    clientId: _selectedClientId!,
-    sdk: _sdk,
-onOpenContract: (String contractId, ContrattoOmnia8 c) {
-  setState(() {
-    _resetChats();
-    _selectedContractId = contractId;   // ⬅️ salvi anche l’ID
-    _selectedContract   = c;
-    _selContractSection = _ContractSection.riepilogo;
-  });
-},
-  ));
+      controller: _paneCtrlCreate,
+      leftChild: CreateContractPage(
+        key: const ValueKey('create-contract'),
+        user     : widget.user,
+        token    : widget.token,
+        sdk      : _sdk,
+        clientId : _selectedClientId!,
+    onCancel: () => setState(() {
+      _resetChats();              // 👈 chiude chat + aggiorna _chatsOpen=false
+      _creatingContract = false;  // torna alla lista
+    }),
+    onCreated: (newContractId) {
+      setState(() {
+        _resetChats();              // 👈 chiude chat + aggiorna _chatsOpen=false
+        _creatingContract = false;  // torna alla lista
+        _contractsRefresh++;        // forza refresh tabella
+      });
+    },
+      ),
+    );
+  } else {
+    // ⬅️ LISTA contratti, con callback "Nuovo contratto"
+    return DualPaneWrapper(
+      key: ValueKey('pane-client-contracts-$_contractsRefresh'), // 👈 NEW
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrl1,
+      leftChild: ClientContractsPage(
+        key        : ValueKey('contracts-${_contractsRefresh}'),
+        user       : widget.user,
+        token      : widget.token,
+        userId     : widget.user.username,
+        clientId   : _selectedClientId!,
+        sdk        : _sdk,
+        onOpenContract     : (String contractId, ContrattoOmnia8 c) {
+          setState(() {
+            _resetChats();
+            _selectedContractId = contractId;
+            _selectedContract   = c;
+            _selContractSection = _ContractSection.riepilogo;
+          });
+        },
+onCreateContract: () => setState(() {
+  _resetChats();          // <<--- IMPORTANTE
+  _creatingContract = true;
+}),
+        refreshCounter      : _contractsRefresh, // per la tabella
+      ),
+    );
+  }
+
 case _ClientSection.titoli:
-  if (_selectedTitle == null) {
-    // Lista titoli
+  if (_creatingTitle) {
+    // ⬅️ MOSTRA pagina creazione TITOLO come leftChild del DualPaneWrapper
+    return DualPaneWrapper(
+      key: const ValueKey('pane-create-title'),
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlCreateTitle,
+      leftChild: CreateTitlePage(
+        key: const ValueKey('create-title'),
+        user    : widget.user,
+        token   : widget.token,
+        sdk     : _sdk,
+        entityId: _selectedClientId!,
+        onCancel: () => setState(() {
+          _resetChats();           // 👈 chiude tutte le chat + aggiorna icona
+          _creatingTitle = false;  // torna alla lista titoli
+        }),
+        onCreated: (newTitleId) {
+          setState(() {
+            _resetChats();           // 👈 chiude chat + aggiorna icona
+            _creatingTitle = false;  // torna alla lista
+            _titlesRefresh++;        // forza refresh tabella titoli
+          });
+        },
+      ),
+    );
+  } else if (_selectedTitle == null) {
+    // LISTA titoli
     return DualPaneWrapper(
       user: widget.user,
       token: widget.token,
@@ -657,7 +733,12 @@ case _ClientSection.titoli:
         userId: widget.user.username,
         clientId: _selectedClientId!,
         sdk: _sdk,
-        onOpenTitle: (titolo, viewRow) {           // NEW: callback richiesto
+        refreshCounter: _titlesRefresh,          // ⬅️ NEW
+        onCreateTitle: () => setState(() {       // ⬅️ NEW
+          _resetChats();                         // chiude chat in apertura creazione
+          _creatingTitle = true;
+        }),
+        onOpenTitle: (titolo, viewRow) {
           setState(() {
             _resetChats();
             _selectedTitle    = titolo;
@@ -667,17 +748,18 @@ case _ClientSection.titoli:
       ),
     );
   } else {
-    // Summary titolo “incastrato” (niente Navigator, sidebar+topbar restano)
+    // SUMMARY incastrato del titolo
     return DualPaneWrapper(
       user: widget.user,
       token: widget.token,
       controller: _paneCtrlTitles,
       leftChild: TitleSummaryPanel(
-        titolo: _selectedTitle!,
+        titolo : _selectedTitle!,
         viewRow: _selectedTitleRow ?? const {},
       ),
     );
   }
+
 
     case _ClientSection.movimenti:
       return const Center(child: Text('Movimenti – placeholder'));

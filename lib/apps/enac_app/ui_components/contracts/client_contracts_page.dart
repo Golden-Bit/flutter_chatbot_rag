@@ -11,12 +11,15 @@ import 'package:uuid/uuid.dart';
 import '../../logic_components/backend_sdk.dart';
 import 'contracts_table.dart';
 
+
 class ClientContractsPage extends StatefulWidget {
   final User user; // username = userId
   final Token token; 
   final String userId;
   final String clientId;
   final Omnia8Sdk sdk;
+    final void Function()? onCreateContract;   // ⬅️ NEW
+  final int refreshCounter;                  // ⬅️ NEW (default 0)
 final void Function(String contractId, ContrattoOmnia8 c) onOpenContract;
 
   const ClientContractsPage({
@@ -27,6 +30,8 @@ final void Function(String contractId, ContrattoOmnia8 c) onOpenContract;
     required this.clientId,
     required this.sdk,
     required this.onOpenContract,
+        this.onCreateContract,                   // ⬅️ NEW
+    this.refreshCounter = 0,                 // ⬅️ NEW
   });
 
   @override
@@ -38,8 +43,9 @@ final void Function(String contractId, ContrattoOmnia8 c) onOpenContract;
  *  STATE
  * =================================================================*/
 class _ClientContractsPageState extends State<ClientContractsPage> {
+  
 
-  int _refresh = 0;
+  //int _refresh = 0;
   /* ===============================================================
    *  DIALOG “NUOVO CONTRATTO” (copertura totale dei campi)
    * ===============================================================*/
@@ -233,18 +239,7 @@ Widget _infoColumn(List<Widget> children) => Column(
             ),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Nuovo contratto'),
-             onPressed: () async {
-   final created = await CreateContractDialog.show(
-     context,
-     user     : widget.user,
-     token    : widget.token,
-     sdk      : widget.sdk,
-     clientId : widget.clientId,
-   );
-   if (created == true && mounted) {
-     setState(() => _refresh++);
-   }
- },
+onPressed: () => widget.onCreateContract?.call(),
             ),
           ],
         ),
@@ -256,7 +251,7 @@ Widget _infoColumn(List<Widget> children) => Column(
         /* ---------- tabella contratti ---------- */
         Expanded(
           child: ContractsTable(
-                key      : ValueKey(_refresh),
+                key      : ValueKey(widget.refreshCounter),
             userId: widget.userId,
             clientId: widget.clientId,
             sdk: widget.sdk,

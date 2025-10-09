@@ -163,6 +163,9 @@ class ContractFormPane extends StatefulWidget with ChatBotExtensions {
 /*  STATE: controllers, digitazione, UI, export modello                    */
 /*─────────────────────────────────────────────────────────────────────────*/
 class ContractFormPaneState extends State<ContractFormPane> {
+
+  static const double _kFormMaxWidth = 600; // ⬅️ nuovo
+
   @override
   void initState() { super.initState(); _ContractFormHostCbs.bind(this); }
   @override
@@ -405,7 +408,11 @@ class ContractFormPaneState extends State<ContractFormPane> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _kFormMaxWidth),
+        child: SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -548,7 +555,7 @@ class ContractFormPaneState extends State<ContractFormPane> {
           const SizedBox(height: 8),
         ],
       ),
-    );
+    )));
   }
 }
 

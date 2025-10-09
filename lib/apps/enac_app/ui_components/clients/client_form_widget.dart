@@ -80,6 +80,10 @@ class ClientFormPane extends StatefulWidget with ChatBotExtensions {
 }
 
 class ClientFormPaneState extends State<ClientFormPane> {
+
+    // ⬇️ NUOVO: larghezza massima del form
+  static const double _kFormMaxWidth = 600;
+
   @override
   void initState() {
     super.initState();
@@ -143,31 +147,42 @@ class ClientFormPaneState extends State<ClientFormPane> {
     decoration: _dec(label).copyWith(hintText: hint),
   );
 
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(children: [
-        _t('name','Ragione sociale *', hint: 'ACME S.p.A.'),
-        const SizedBox(height: 12),
-        _t('address','Indirizzo', hint: 'Via Roma 1'),
-        const SizedBox(height: 12),
-        _t('phone','Telefono', hint: '+39 333 1234567'),
-        const SizedBox(height: 12),
-        _t('email','Email', hint: 'info@acme.com'),
-        const SizedBox(height: 12),
-        _t('vat','Partita IVA', hint: 'IT01234567890'),
-        const SizedBox(height: 12),
-        _t('tax_code','Codice fiscale', hint: 'RSSMRA85H09H501Z'),
-        const SizedBox(height: 12),
-        _t('sector','Settore / ATECO', hint: '62.01'),
-        const SizedBox(height: 12),
-        _t('legal_rep','Legale rappresentante'),
-        const SizedBox(height: 12),
-        _t('legal_rep_tax_code','CF legale rappresentante'),
-      ]),
-    );
-  }
+@override
+Widget build(BuildContext context) {
+  // ⬇️ Contenuto originale del form, invariato
+  final form = SingleChildScrollView(
+    padding: const EdgeInsets.all(16),
+    child: Column(children: [
+      _t('name','Ragione sociale *', hint: 'ACME S.p.A.'),
+      const SizedBox(height: 12),
+      _t('address','Indirizzo', hint: 'Via Roma 1'),
+      const SizedBox(height: 12),
+      _t('phone','Telefono', hint: '+39 333 1234567'),
+      const SizedBox(height: 12),
+      _t('email','Email', hint: 'info@acme.com'),
+      const SizedBox(height: 12),
+      _t('vat','Partita IVA', hint: 'IT01234567890'),
+      const SizedBox(height: 12),
+      _t('tax_code','Codice fiscale', hint: 'RSSMRA85H09H501Z'),
+      const SizedBox(height: 12),
+      _t('sector','Settore / ATECO', hint: '62.01'),
+      const SizedBox(height: 12),
+      _t('legal_rep','Legale rappresentante'),
+      const SizedBox(height: 12),
+      _t('legal_rep_tax_code','CF legale rappresentante'),
+    ]),
+  );
+
+  // ⬇️ NOVITÀ: centro orizzontalmente e limito a max 600px
+  return Align(
+    alignment: Alignment.topCenter,               // centrato orizz., agganciato in alto
+    child: ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: _kFormMaxWidth),
+      child: form,
+    ),
+  );
+}
+
 
   // ———— HostCallbacks implementation ————
   Future<void> setField(String field, String value, {int? typingMs}) async {

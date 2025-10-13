@@ -1,12 +1,7 @@
 // lib/apps/enac_app/ui_components/client_detail_page.dart
-// ═══════════════════════════════════════════════════════════════
-// ClientDetailPage (SUMMARY) – Header con azioni in alto a destra
-// + Riepilogo dati (niente Tab)
-// ═══════════════════════════════════════════════════════════════
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-
-import '../../logic_components/backend_sdk.dart'; // Entity
+import '../../logic_components/backend_sdk.dart'; // Entity, Omnia8Sdk
 
 /* ────────────────────────────────────────────────────────────────
  *  Widgets base (KV + griglia) – coerenti con altri summary
@@ -20,8 +15,7 @@ class _KV extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(k,
-            style: const TextStyle(fontSize: 11, color: Colors.blueGrey, height: 1.3)),
+        Text(k, style: const TextStyle(fontSize: 11, color: Colors.blueGrey, height: 1.3)),
         const SizedBox(height: 2),
         Container(
           width: double.infinity,
@@ -44,7 +38,7 @@ class _SectionGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (ctx, c) {
-      final colW = math.max(220.0, (c.maxWidth - 24) / 2); // 2 colonne comode
+      final colW = math.max(220.0, (c.maxWidth - 24) / 2);
       return Wrap(
         spacing: 24,
         runSpacing: 16,
@@ -55,28 +49,34 @@ class _SectionGrid extends StatelessWidget {
 }
 
 /* ────────────────────────────────────────────────────────────────
- *  Azioni header (stile coerente con contratti/sinistri)
+ *  Azioni header – ora con tasto Elimina
  * ────────────────────────────────────────────────────────────── */
 class _HeaderActionIconsClient extends StatelessWidget {
-  const _HeaderActionIconsClient();
+  const _HeaderActionIconsClient({this.onEdit, this.onDelete});
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final active = Colors.grey.shade700;
     final disabled = Colors.grey.shade400;
 
-    Widget ico(IconData i, {bool enabled = true, String? tip}) => Padding(
+    Widget ico(IconData i, {bool enabled = true, String? tip, VoidCallback? onTap}) => Padding(
           padding: const EdgeInsets.only(left: 8),
           child: Tooltip(
             message: tip ?? '',
-            child: Icon(i, size: 18, color: enabled ? active : disabled),
+            child: InkWell(
+              onTap: enabled ? onTap : null,
+              child: Icon(i, size: 18, color: enabled ? active : disabled),
+            ),
           ),
         );
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ico(Icons.edit, tip: 'Modifica'),
+        ico(Icons.edit, tip: 'Modifica', onTap: onEdit),
+        ico(Icons.delete_outline, tip: 'Elimina', onTap: onDelete), // ⬅️ NEW
         ico(Icons.file_copy, tip: 'Duplica'),
         ico(Icons.mail, tip: 'Email'),
         ico(Icons.phone, tip: 'Chiama'),
@@ -87,30 +87,117 @@ class _HeaderActionIconsClient extends StatelessWidget {
 }
 
 /* ────────────────────────────────────────────────────────────────
- *  ClientDetailPage (solo SUMMARY, senza Tab)
+ *  ClientDetailPage (SUMMARY) – con azione Elimina
  * ────────────────────────────────────────────────────────────── */
-class ClientDetailPage extends StatelessWidget {
+class ClientDetailPage extends StatefulWidget {
   final Entity client;
-  const ClientDetailPage({super.key, required this.client});
+  final Omnia8Sdk sdk;
+  final String userId;
+  final String entityId;
+  final VoidCallback? onEditRequested;
+  final VoidCallback? onDeleted;
 
+  const ClientDetailPage({
+    super.key,
+    required this.client,
+    required this.sdk,
+    required this.userId,
+    required this.entityId,
+    this.onEditRequested,
+    this.onDeleted,
+  });
+
+  @override
+  State<ClientDetailPage> createState() => _ClientDetailPageState();
+}
+
+class _ClientDetailPageState extends State<ClientDetailPage> {
   // KV compatto per la card header
   RichText _kvMini(String label, String value) => RichText(
         text: TextSpan(
           style: const TextStyle(fontSize: 13, color: Colors.black87),
           children: [
-            TextSpan(
-              text: '$label\n',
-              style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
-            ),
+            TextSpan(text: '$label\n', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
             TextSpan(text: value.isEmpty ? 'n.d.' : value),
           ],
         ),
       );
 
-  /// Header: badge CLIENTE + nome + 3 colonne info
-  /// Pulsanti **in alto a destra** (come richiesto).
+  Future<void> _confirmAndDelete() async {
+    // 1) Alert di conferma
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_outlined),
+            SizedBox(width: 8),
+            Text('Eliminare l’entità?'),
+          ],
+        ),
+        content: Text(
+          'Questa operazione rimuoverà definitivamente l’entità '
+          '"${widget.client.name}". L’azione è irreversibile. Confermi?',
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annulla'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Elimina'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // 2) Chiamata SDK
+    try {
+      await widget.sdk.deleteEntity(widget.userId, widget.entityId);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Entità eliminata.')),
+      );
+
+      // 3) Notifica al parent per tornare alla vista precedente
+      widget.onDeleted?.call();
+    } catch (e) {
+      if (!mounted) return;
+      // errore: mostro dialog di errore coerente
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          title: const Text('Errore eliminazione'),
+          content: Text('Impossibile eliminare l’entità.\nDettagli: $e'),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Chiudi'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  /// Header: badge CLIENTE + nome + 3 colonne info + azioni in alto
   Widget _header(BuildContext context) {
-    final c = client;
+    final c = widget.client;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
@@ -147,8 +234,7 @@ class ClientDetailPage extends StatelessWidget {
                         color: const Color(0xFF00A651),
                         borderRadius: BorderRadius.circular(2),
                       ),
-                      child: const Text("ENTITA'",
-                          style: TextStyle(color: Colors.white, fontSize: 11)),
+                      child: const Text("ENTITA'", style: TextStyle(color: Colors.white, fontSize: 11)),
                     ),
                     Text(
                       c.name,
@@ -162,7 +248,7 @@ class ClientDetailPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
 
-                // griglia 3x? compatta nella card
+                // griglia compatta
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -208,8 +294,11 @@ class ClientDetailPage extends StatelessWidget {
             ),
           ),
 
-          // colonna destra con azioni IN ALTO
-          const _HeaderActionIconsClient(),
+          // azioni in alto a destra
+          _HeaderActionIconsClient(
+            onEdit: widget.onEditRequested,
+            onDelete: _confirmAndDelete, // ⬅️ NEW
+          ),
         ],
       ),
     );
@@ -229,7 +318,7 @@ class ClientDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = client;
+    final c = widget.client;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

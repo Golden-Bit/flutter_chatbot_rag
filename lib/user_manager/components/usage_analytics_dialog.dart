@@ -1,43 +1,176 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
+// ====== Costanti UI ======
+const _kMaxDialogWidth = 900.0;
+const _kListPageSize   = 20;
+const _kPhoneWidth     = 600.0;
+
+// ====== Helpers ======
+Color _statusColor(ActivityStatusDart s) {
+  switch (s) {
+    case ActivityStatusDart.pending:   return Colors.amber[700]!;
+    case ActivityStatusDart.running:   return Colors.blue[700]!;
+    case ActivityStatusDart.completed: return Colors.green[700]!;
+    case ActivityStatusDart.error:     return Colors.red[700]!;
+    default:                           return Colors.grey[600]!;
+  }
+}
+
+String _statusLabel(ActivityStatusDart s) {
+  switch (s) {
+    case ActivityStatusDart.pending:   return 'In attesa';
+    case ActivityStatusDart.running:   return 'In esecuzione';
+    case ActivityStatusDart.completed: return 'Completata';
+    case ActivityStatusDart.error:     return 'Errore';
+    default:                           return 'Sconosciuto';
+  }
+}
+
+String _typeLabel(ActivityTypeDart t) {
+  switch (t) {
+    case ActivityTypeDart.uploadAsync:  return 'Upload';
+    case ActivityTypeDart.streamEvents: return 'Chat';
+    default:                            return 'Sconosciuto';
+  }
+}
+
+IconData _typeIcon(ActivityTypeDart t) {
+  switch (t) {
+    case ActivityTypeDart.uploadAsync:  return Icons.upload_file_rounded;
+    case ActivityTypeDart.streamEvents: return Icons.message_rounded;
+    default:                            return Icons.article_outlined;
+  }
+}
+
+// Costo arrotondato all’intero, senza simbolo €, con separatori it_IT
+String _niceMoney(double v) {
+  final int rounded = v.round();
+  return NumberFormat.decimalPattern('it_IT').format(rounded);
+}
+
+String _niceDateTime(DateTime? d) {
+  if (d == null) return '—';
+  return DateFormat('dd MMM y HH:mm', 'it_IT').format(d);
+}
+
+String _truncate(String? s, [int max = 140]) {
+  if (s == null) return '';
+  if (s.length <= max) return s;
+  return s.substring(0, max - 1) + '…';
+}
+
+String _prettyJson(Map<String, dynamic>? m) {
+  try {
+    return const JsonEncoder.withIndent('  ').convert(m ?? const {});
+  } catch (_) {
+    return (m ?? const {}).toString();
+  }
+}
+
+/// Dialog principale – legge i dati REALI via SDK
 class UsageDialog extends StatefulWidget {
-  const UsageDialog({super.key});
+  const UsageDialog({
+    super.key,
+    required this.sdk,
+    required this.username,
+    required this.token,
+  });
+
+  final ContextApiSdk sdk;
+  final String username;
+  final String token;
 
   @override
   State<UsageDialog> createState() => _UsageDialogState();
 }
 
 class _UsageDialogState extends State<UsageDialog> {
+  // Filtri
   DateTime? _startDate;
   DateTime? _endDate;
+  String?   _statusFilter; // 'PENDING' | 'RUNNING' | 'COMPLETED' | 'ERROR' | null
+  String?   _typeFilter;   // 'UPLOAD_ASYNC' | 'STREAM_EVENTS' | null
+  final TextEditingController _searchCtrl = TextEditingController();
 
-  final double _chatTotal = 0.063;
-  final double _docTotal = 0.000;
+  // Lista + paginazione
+  final ScrollController _scrollCtrl = ScrollController();
+  final List<ActivityRecord> _items = <ActivityRecord>[];
+
+  bool _loading = false;
+  bool _initialLoad = true;
+  bool _hasMore = true;
+  int  _skip = 0;
+  int  _limit = _kListPageSize;
+
+  // Info aggregate
+  double _totalCost = 0.0;
+  int    _totalCount = 0;
+
+  // Error banner
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     initializeDateFormatting('it_IT', null);
+    // Default: ultimi 7 giorni (date-only)
+    final now = DateTime.now();
+    _startDate = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
+    _endDate   = DateTime(now.year, now.month, now.day);
+
+    _scrollCtrl.addListener(_onScroll);
+    unawaited(_fetch(reset: true));
   }
 
-  Future<void> _pickDate({
-    required bool isStart,
-    required BuildContext context,
-  }) async {
-    final initial = isStart ? _startDate ?? DateTime.now() : _endDate ?? DateTime.now();
-    final firstDate = DateTime(2023, 1, 1);
-    final lastDate = DateTime.now();
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: firstDate,
-      lastDate: lastDate,
-      locale: const Locale('it', 'IT'),
-    );
-    if (picked != null) {
+  // ========== DatePicker SAFE ==========
+  // useRootNavigator: true per evitare l’overlay “grigio” bloccato
+  Future<void> _pickDate({required bool isStart}) async {
+    try {
+      final firstDate = DateTime(2023, 1, 1);
+      final lastDate  = DateTime.now();
+
+      DateTime initial = isStart ? (_startDate ?? DateTime.now())
+                                 : (_endDate   ?? DateTime.now());
+
+      if (initial.isBefore(firstDate)) initial = firstDate;
+      if (initial.isAfter(lastDate))   initial = lastDate;
+
+      final picked = await showDatePicker(
+        context: context,
+        useRootNavigator: true,
+        initialDate: initial,
+        firstDate: firstDate,
+        lastDate: lastDate,
+        locale: const Locale('it', 'IT'),
+        builder: (ctx, child) {
+          return Theme(
+            data: Theme.of(ctx).copyWith(
+              dialogBackgroundColor: Colors.white,
+              colorScheme: Theme.of(ctx).colorScheme.copyWith(
+                    primary: Colors.blue,
+                    onPrimary: Colors.white,
+                  ),
+            ),
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
+      );
+
+      if (!mounted || picked == null) return;
+
       setState(() {
         if (isStart) {
           _startDate = picked;
@@ -51,36 +184,141 @@ class _UsageDialogState extends State<UsageDialog> {
           }
         }
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Errore selezione data: $e');
     }
+  }
+
+  // ========== Paginazione ==========
+  void _onScroll() {
+    if (!_hasMore || _loading) return;
+    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 240) {
+      unawaited(_fetch());
+    }
+  }
+
+  Future<void> _fetch({bool reset = false}) async {
+    if (_loading) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+      if (reset) {
+        _skip = 0;
+        _hasMore = true;
+        _initialLoad = _items.isEmpty;
+      }
+    });
+
+    try {
+      // endDate inclusiva (23:59:59.999)
+      DateTime? endInclusive;
+      if (_endDate != null) {
+        endInclusive = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59, 999);
+      }
+
+      final resp = await widget.sdk.listActivities(
+        username: widget.username,
+        token: widget.token,
+        startDate: _startDate?.toUtc(),
+        endDate:   endInclusive?.toUtc(),
+        type:   (_typeFilter?.isEmpty ?? true) ? null : _typeFilter,
+        status: (_statusFilter?.isEmpty ?? true) ? null : _statusFilter,
+        q: _searchCtrl.text.trim().isEmpty ? null : _searchCtrl.text.trim(),
+        skip: _skip,
+        limit: _limit,
+      );
+
+      setState(() {
+        if (reset) _items.clear();
+        _items.addAll(resp.items);
+        _skip += resp.items.length;
+
+        _totalCost  = resp.totalCostUsd;
+        _totalCount = resp.total;
+        _hasMore    = _items.length < resp.total;
+      });
+    } catch (e) {
+      setState(() => _error = 'Errore nel caricamento: $e');
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _initialLoad = false;
+      });
+    }
+  }
+
+  void _resetFilters() {
+    final now = DateTime.now();
+    setState(() {
+      _startDate = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
+      _endDate   = DateTime(now.year, now.month, now.day);
+      _statusFilter = null;
+      _typeFilter   = null;
+      _searchCtrl.clear();
+    });
+    unawaited(_fetch(reset: true));
   }
 
   @override
   Widget build(BuildContext context) {
+    // Limitiamo SEMPRE l’altezza massima del dialog al 90% dello schermo:
+    final media = MediaQuery.of(context);
+    final maxDialogHeight = media.size.height * 0.9;
+
     return Dialog(
       backgroundColor: Colors.white,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias, // evita bleed fuori dal raggio
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 900), // <- larghezza aumentata
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildTitle(context),
-              const SizedBox(height: 20),
-              _buildDateRangeForm(context),
-              const SizedBox(height: 32),
-              Row(
+        constraints: BoxConstraints(
+          maxWidth: _kMaxDialogWidth,
+          maxHeight: maxDialogHeight,
+        ),
+        child: LayoutBuilder(
+          builder: (ctx, cons) {
+            final bool isPhone = cons.maxWidth < _kPhoneWidth;
+
+            // Corpo scrollabile internamente grazie a Column + Expanded sulla lista
+            return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.max, // occupa tutta l’altezza disponibile
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _buildChatUsageSection()),
-                  const SizedBox(width: 24),
-                  Expanded(child: _buildDocumentUsageSection()),
+                  _buildTitle(context),
+                  const SizedBox(height: 16),
+                  _buildFilters(context, isPhone: isPhone),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    _ErrorBanner(text: _error!),
+                  ],
+                  const SizedBox(height: 12),
+
+                  // ⬇️ La LISTA ora usa Expanded: prende tutto lo spazio residuo e scorre
+                  Expanded(
+                    child: _buildListArea(context, isPhone: isPhone),
+                  ),
+
+                  const SizedBox(height: 8),
+                  // SafeArea bottom per non tagliare su device con gesture-bar
+                  SafeArea(
+                    top: false,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'Totale stimato periodo: ${_niceMoney(_totalCost)} · ${_totalCount} attività',
+                        style: const TextStyle(fontSize: 13, color: Colors.black87),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -99,269 +337,484 @@ class _UsageDialogState extends State<UsageDialog> {
         ),
         const Spacer(),
         IconButton(
+          tooltip: 'Aggiorna',
+          icon: const Icon(Icons.refresh_rounded, size: 20),
+          onPressed: () => _fetch(reset: true),
+        ),
+        IconButton(
           tooltip: 'Chiudi',
           icon: const Icon(Icons.close, size: 20),
-          onPressed: () => Navigator.of(context).maybePop(),
+          onPressed: () => Navigator.of(context, rootNavigator: true).maybePop(),
         ),
       ],
     );
   }
 
-  Widget _buildDateRangeForm(BuildContext context) {
-    String _format(DateTime? d) =>
+  // ====== Filtri con layout reattivo ======
+  Widget _buildFilters(BuildContext context, {required bool isPhone}) {
+    String fmt(DateTime? d) =>
         d == null ? 'Seleziona' : DateFormat('dd MMM y', 'it_IT').format(d);
 
-    return Row(
+    final fields = <Widget>[
+      _DateField(label: 'Dal', text: fmt(_startDate), onTap: () => _pickDate(isStart: true)),
+      _DateField(label: 'Al',  text: fmt(_endDate),  onTap: () => _pickDate(isStart: false)),
+
+      // ▼▼▼  MENU COERENTI CON POPUP DELL’APP (showMenu + PopupMenuItem) ▼▼▼
+      _MenuField<String>(
+        label: 'Tipo',
+        value: _typeFilter,
+        hint: 'Qualsiasi',
+        items: const [
+          _MenuChoice('UPLOAD_ASYNC',  'Upload'),
+          _MenuChoice('STREAM_EVENTS', 'Chat'),
+        ],
+        onSelected: (v) => setState(() => _typeFilter = v),
+      ),
+      _MenuField<String>(
+        label: 'Stato',
+        value: _statusFilter,
+        hint: 'Qualsiasi',
+        items: const [
+          _MenuChoice('PENDING',   'In attesa'),
+          _MenuChoice('RUNNING',   'In esecuzione'),
+          _MenuChoice('COMPLETED', 'Completata'),
+          _MenuChoice('ERROR',     'Errore'),
+        ],
+        onSelected: (v) => setState(() => _statusFilter = v),
+      ),
+
+      _SearchField(
+        controller: _searchCtrl,
+        onSubmitted: (_) => _fetch(reset: true),
+      ),
+    ];
+
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: _DateField(
-            label: 'Dal',
-            text: _format(_startDate),
-            onTap: () => _pickDate(isStart: true, context: context),
+        ElevatedButton(
+          onPressed: () => _fetch(reset: true),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
+          child: const Text('Applica'),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _DateField(
-            label: 'Al',
-            text: _format(_endDate),
-            onTap: () => _pickDate(isStart: false, context: context),
-          ),
+        const SizedBox(width: 8),
+        TextButton(
+          onPressed: _resetFilters,
+          child: const Text('Reset'),
         ),
       ],
     );
-  }
 
-  Widget _buildSectionHeader(String label) => Text(
-        label,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Colors.black87,
-        ),
+    if (!isPhone) {
+      // Desktop/tablet: 2 righe ordinate
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Expanded(child: fields[0]),
+            const SizedBox(width: 12),
+            Expanded(child: fields[1]),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: fields[2]),
+            const SizedBox(width: 12),
+            Expanded(child: fields[3]),
+            const SizedBox(width: 12),
+            Expanded(flex: 2, child: fields[4]),
+            const SizedBox(width: 12),
+            actions,
+          ]),
+        ],
       );
+    }
 
-  Widget _buildKeyValue(String key, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
+    // Telefono: 1 colonna (campi larghi e leggibili)
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            SizedBox(width: double.infinity, child: fields[0]),
+            SizedBox(width: double.infinity, child: fields[1]),
+            SizedBox(width: double.infinity, child: fields[2]),
+            SizedBox(width: double.infinity, child: fields[3]),
+            SizedBox(width: double.infinity, child: fields[4]),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
           children: [
             Expanded(
-              child: Text(key,
-                  style: const TextStyle(fontSize: 13, color: Colors.black54)),
-            ),
-            Text(value,
-                style: const TextStyle(fontSize: 13, color: Colors.black87)),
-          ],
-        ),
-      );
-
-  Widget _buildChatUsageSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader('Messaggi generati con chatbot'),
-        const SizedBox(height: 12),
-        Container(
-          height: 360,
-          decoration: BoxDecoration(
-            color: Colors.grey[100], // <- sfondo contenitore
-            border: Border.all(color: Colors.grey[200]!),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ListView(
-            padding: const EdgeInsets.all(12),
-            children: [
-              _UsageCard(
-                icon: Icons.message_rounded,
-                title: 'Domanda su sintassi Python',
-                subtitle: '18 apr 2025 · GPT‑4o‑mini',
-                children: [
-                  _buildKeyValue('Token input', '152'),
-                  _buildKeyValue('Token output', '298'),
-                  _buildKeyValue('Costo stimato', '0,010'),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _UsageCard(
-                icon: Icons.message_outlined,
-                title: 'Genera post LinkedIn marketing',
-                subtitle: '17 apr 2025 · GPT‑3.5‑turbo',
-                children: [
-                  _buildKeyValue('Token input', '78'),
-                  _buildKeyValue('Token output', '143'),
-                  _buildKeyValue('Costo stimato', '0,001'),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _UsageCard(
-                icon: Icons.message_outlined,
-                title: 'Traduci documento tecnico in giapponese',
-                subtitle: '15 apr 2025 · GPT‑4o‑mini‑high',
-                children: [
-                  _buildKeyValue('Token input', '1 024'),
-                  _buildKeyValue('Token output', '1 725'),
-                  _buildKeyValue('Costo stimato', '0,052'),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Text(
-            'Totale stimato: ${_chatTotal.toStringAsFixed(3)}',
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDocumentUsageSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader('Documenti e media processati'),
-        const SizedBox(height: 12),
-        Container(
-          height: 360,
-          decoration: BoxDecoration(
-            color: Colors.grey[100], // <- sfondo contenitore
-            border: Border.all(color: Colors.grey[200]!),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ListView(
-            padding: const EdgeInsets.all(12),
-            children: [
-              _UsageCard(
-                icon: Icons.picture_as_pdf_rounded,
-                title: 'Capitolo‑3‑Manuale‑AI.pdf',
-                subtitle: '19 pagine · 1,8 MB',
-                children: [
-                  _buildKeyValue('Tipo', 'PDF'),
-                  _buildKeyValue('Token estratti', '4 539'),
-                  _buildKeyValue('Tempo elaborazione', '6 s'),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _UsageCard(
-                icon: Icons.description_rounded,
-                title: 'Budget‑Q2‑2025.docx',
-                subtitle: '12 pagine · 426 KB',
-                children: [
-                  _buildKeyValue('Tipo', 'DOCX'),
-                  _buildKeyValue('Token estratti', '2 097'),
-                  _buildKeyValue('Tempo elaborazione', '3 s'),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _UsageCard(
-                icon: Icons.movie_rounded,
-                title: 'Spot‑prodotto‑30s.mp4',
-                subtitle: '0:30 · 1080p · 12 MB',
-                children: [
-                  _buildKeyValue('Tipo', 'Video MP4'),
-                  _buildKeyValue('Frame analizzati', '450'),
-                  _buildKeyValue('Tempo elaborazione', '19 s'),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _UsageCard(
-                icon: Icons.image_rounded,
-                title: 'Schema‑architettura.png',
-                subtitle: '2048×1024 · 1,2 MB',
-                children: [
-                  _buildKeyValue('Tipo', 'PNG'),
-                  _buildKeyValue('Descrizione generata', 'Diagramma di rete'),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Text(
-            'Totale stimato: ${_docTotal.toStringAsFixed(3)}',
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-//=============================================================================
-//  WIDGET CARD USO
-//=============================================================================
-class _UsageCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final List<Widget> children;
-
-  const _UsageCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      elevation: 1,
-      borderRadius: BorderRadius.circular(12),
-      color: Colors.white, // <- sfondo card bianco
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 20, color: Colors.black87),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
+              child: ElevatedButton(
+                onPressed: () => _fetch(reset: true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
-              ],
+                child: const Text('Applica'),
+              ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
-            ),
-            const SizedBox(height: 12),
-            ...children,
+            const SizedBox(width: 8),
+            TextButton(onPressed: _resetFilters, child: const Text('Reset')),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _buildListArea(BuildContext context, {required bool isPhone}) {
+    // NIENTE altezza fissa qui: il parent fornisce lo spazio via Expanded.
+    if (_initialLoad && _loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_items.isEmpty) {
+      return const Center(child: Text('Nessuna attività trovata nel periodo selezionato.'));
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Scrollbar(
+        controller: _scrollCtrl,
+        child: ListView.builder(
+          controller: _scrollCtrl,
+          padding: const EdgeInsets.all(12),
+          itemCount: _items.length + 1, // +1 per loader finale
+          itemBuilder: (ctx, idx) {
+            if (idx == _items.length) {
+              if (_loading) {
+                return const Padding(
+                  padding: EdgeInsets.all(12.0),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (!_hasMore) return const SizedBox.shrink();
+              return const SizedBox(height: 48);
+            }
+
+            final it = _items[idx];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: _ActivityCard(
+                record: it,
+                onTap: () => _openDetail(it),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openDetail(ActivityRecord base) async {
+    ActivityRecord? detail;
+    Object? err;
+
+    try {
+      detail = await widget.sdk.getActivityDetail(
+        activityId: base.activityId,
+        username: widget.username,
+        token: widget.token,
+      );
+    } catch (e) {
+      err = e;
+    }
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => _ActivityDetailDialog(
+        record: detail ?? base,
+        errorText: err?.toString(),
       ),
     );
   }
 }
 
 //=============================================================================
-//  WIDGET CAMPO DATA
+//  WIDGETS UI (cards, fields, dialog dettaglio)
 //=============================================================================
-class _DateField extends StatelessWidget {
-  final String label;
-  final String text;
+class _ActivityCard extends StatelessWidget {
+  const _ActivityCard({
+    required this.record,
+    required this.onTap,
+  });
+
+  final ActivityRecord record;
   final VoidCallback onTap;
 
+  @override
+  Widget build(BuildContext context) {
+    final title = record.metadata?['filename'] as String?
+        ?? record.metadata?['context'] as String?
+        ?? record.metadata?['chain_id'] as String?
+        ?? record.activityId;
+
+    final subtitle = [
+      _typeLabel(record.type),
+      if (record.startTime != null) _niceDateTime(record.startTime),
+    ].join(' · ');
+
+    final trailingText = record.costUsd != null ? _niceMoney(record.costUsd!) : '';
+
+    return Material(
+      elevation: 1,
+      borderRadius: BorderRadius.circular(12),
+      color: Colors.white,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(_typeIcon(record.type), size: 22, color: Colors.black87),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                    const SizedBox(height: 8),
+                    if ((record.responsePreview ?? '').isNotEmpty)
+                      Text(
+                        _truncate(record.responsePreview, 180),
+                        style: const TextStyle(fontSize: 13, color: Colors.black87),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _StatusChip(status: record.status),
+                  const SizedBox(height: 8),
+                  if (trailingText.isNotEmpty)
+                    Text(trailingText, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.status});
+  final ActivityStatusDart status;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.12),
+        border: Border.all(color: c.withOpacity(0.35)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _statusLabel(status),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c),
+      ),
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  const _SearchField({required this.controller, required this.onSubmitted});
+  final TextEditingController controller;
+  final ValueChanged<String> onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      textInputAction: TextInputAction.search,
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(
+        labelText: 'Cerca',
+        hintText: 'Testo in payload/preview/metadata',
+        isDense: true,
+        prefixIcon: const Icon(Icons.search),
+        suffixIcon: (controller.text.isEmpty)
+            ? null
+            : IconButton(
+                tooltip: 'Pulisci',
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  controller.clear();
+                  onSubmitted('');
+                },
+              ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+}
+
+// =====  Campo menù coerente con PopupMenu dell’app  =====
+class _MenuChoice<T> {
+  final T value;
+  final String label;
+  const _MenuChoice(this.value, this.label);
+}
+
+class _MenuField<T> extends StatelessWidget {
+  const _MenuField({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onSelected,
+    required this.hint,
+    this.includeAny = true,
+    this.anyLabel = 'Qualsiasi',
+  });
+
+  final String label;
+  final T? value;
+  final List<_MenuChoice<T>> items;
+  final ValueChanged<T?> onSelected;
+  final String hint;
+
+  final bool includeAny;
+  final String anyLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Builder(builder: (innerCtx) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () async {
+          final RenderBox box = innerCtx.findRenderObject() as RenderBox;
+          final RenderBox overlay = Overlay.of(innerCtx).context.findRenderObject() as RenderBox;
+          final Rect fieldRect = Rect.fromPoints(
+            box.localToGlobal(Offset.zero, ancestor: overlay),
+            box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
+          );
+
+          final List<PopupMenuEntry<T?>> entries = <PopupMenuEntry<T?>>[
+            if (includeAny)
+              PopupMenuItem<T?>(
+                value: null,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        anyLabel,
+                        style: TextStyle(
+                          fontWeight: (value == null) ? FontWeight.bold : FontWeight.normal,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    if (value == null) const Icon(Icons.check, size: 18),
+                  ],
+                ),
+              ),
+            ...items.map((i) {
+              final bool isSelected = value == i.value;
+              return PopupMenuItem<T?>(
+                value: i.value,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        i.label,
+                        style: TextStyle(
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    if (isSelected) const Icon(Icons.check, size: 18),
+                  ],
+                ),
+              );
+            }),
+          ];
+
+          final selected = await showMenu<T?>(
+            context: innerCtx,
+            position: RelativeRect.fromRect(fieldRect, Offset.zero & overlay.size),
+            color: Theme.of(context).popupMenuTheme.color ?? Colors.white,
+            shape: Theme.of(context).popupMenuTheme.shape ??
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            constraints: BoxConstraints(minWidth: box.size.width),
+            items: entries,
+          );
+
+          if (selected != null || includeAny) {
+            onSelected(selected);
+          }
+        },
+        child: InputDecorator(
+          decoration: InputDecoration(
+            labelText: label,
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
+          ),
+          child: Text(
+            (value == null)
+                ? hint
+                : (items.firstWhere((e) => e.value == value).label),
+            style: TextStyle(
+              fontSize: 13,
+              color: (value == null) ? Colors.black54 : Colors.black87,
+            ),
+          ),
+        ),
+      );
+    });
+  }
+}
+
+class _DateField extends StatelessWidget {
   const _DateField({
     required this.label,
     required this.text,
     required this.onTap,
   });
+
+  final String label;
+  final String text;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -371,13 +824,144 @@ class _DateField extends StatelessWidget {
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
+          isDense: true,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           suffixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
-          isDense: true,
         ),
-        child: Text(
+        child: Text(text, style: const TextStyle(fontSize: 13)),
+      ),
+    );
+  }
+}
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red[50],
+        border: Border.all(color: Colors.red[200]!),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+  }
+}
+
+// ===== Dettaglio attività =====
+class _ActivityDetailDialog extends StatelessWidget {
+  const _ActivityDetailDialog({required this.record, this.errorText});
+  final ActivityRecord record;
+  final String? errorText;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final maxDialogHeight = media.size.height * 0.9;
+
+    return Dialog(
+      backgroundColor: Colors.white,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 760, maxHeight: maxDialogHeight),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView( // scroll se contenuto lungo
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(_typeIcon(record.type), color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Dettaglio attività',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: 'Chiudi',
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(context, rootNavigator: true).maybePop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _StatusChip(status: record.status),
+                const SizedBox(height: 12),
+
+                if (errorText != null) _ErrorBanner(text: errorText!),
+
+                _kv('ID attività', record.activityId),
+                _kv('Utente', record.userId),
+                _kv('Tipo', _typeLabel(record.type)),
+                _kv('Stato', _statusLabel(record.status)),
+                _kv('Costo stimato', record.costUsd != null ? _niceMoney(record.costUsd!) : '—'),
+                _kv('Inizio', _niceDateTime(record.startTime)),
+                _kv('Fine', _niceDateTime(record.endTime)),
+                const SizedBox(height: 8),
+
+                _sectionTitle('Metadata'),
+                _monospaceBox(_prettyJson(record.metadata)),
+                const SizedBox(height: 12),
+
+                _sectionTitle('Payload'),
+                _monospaceBox(_prettyJson(record.payload)),
+                const SizedBox(height: 12),
+
+                _sectionTitle('Anteprima risposta'),
+                _monospaceBox((record.responsePreview ?? '').isEmpty ? '—' : record.responsePreview!),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _kv(String k, String v) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      children: [
+        Expanded(child: Text(k, style: const TextStyle(fontSize: 13, color: Colors.black54))),
+        Text(v, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+      ],
+    ),
+  );
+
+  Widget _sectionTitle(String t) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(t, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+  );
+
+  Widget _monospaceBox(String text) {
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 260),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SingleChildScrollView(
+        child: SelectableText(
           text,
-          style: const TextStyle(fontSize: 13),
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: Colors.black87),
         ),
       ),
     );

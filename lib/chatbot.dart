@@ -5752,7 +5752,14 @@ class ChatBotPageState extends State<ChatBotPage> {
                                           case 'Utilizzo':
                                             showDialog(
                                               context: context,
-                                              builder: (_) => UsageDialog(),
+                                              useRootNavigator:
+                                                  true, // ✅ IMPORTANTISSIMO
+                                              builder: (_) => UsageDialog(
+                                                  sdk: _apiSdk,
+                                                  username:
+                                                      widget.user.username,
+                                                  token:
+                                                      widget.token.accessToken),
                                             );
                                             break;
                                           case 'Impostazioni':

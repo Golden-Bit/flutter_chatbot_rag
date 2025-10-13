@@ -106,13 +106,21 @@ class DualPaneWrapper extends StatefulWidget {
     required this.leftChild,          // può (o meno) implementare ChatBotExtensions
     required this.user,
     required this.token,
+    this.autoStartMessage,
+    this.autoStartInvisible = false,
+    this.openChatOnMount = false,
   });
 
   final DualPaneController controller;
   final Widget leftChild;
   final User   user;
   final Token  token;
-
+  /// Messaggio inviato automaticamente al primo mount (se non nullo/vuoto)
+  final String? autoStartMessage;
+  /// Se true, il messaggio parte con visibilità invisibile (non mostrato in UI)
+  final bool    autoStartInvisible;
+  /// Se true, apre la chat al mount
+  final bool    openChatOnMount;
   @override
   State<DualPaneWrapper> createState() => _DualPaneWrapperState();
 }
@@ -123,7 +131,7 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
 
   double _split       = .5;   // frazione colonna sinistra (0‑1)
   bool   _chatVisible = false;
-
+bool   _autoSent    = false; // evita invii duplicati ai rebuild
   //───────────────────────────────────────────────────────────────────────────
   // Helper: se leftChild implementa ChatBotExtensions la restituisce
   //───────────────────────────────────────────────────────────────────────────
@@ -144,6 +152,14 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
     super.initState();
     widget.controller._attach(this);
     DualPaneRegistry.register(widget.controller);
+   // Dopo il primo frame siamo sicuri che ChatBotPage sia montata
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (widget.openChatOnMount) {
+        _setChatVisible(true);
+      }
+      await _tryAutoSend();
+    });
   }
 
   @override
@@ -154,6 +170,24 @@ class _DualPaneWrapperState extends State<DualPaneWrapper> {
   }
 
   void _setChatVisible(bool v) => setState(() => _chatVisible = v);
+
+  Future<void> _tryAutoSend() async {
+    if (_autoSent) return;
+    final msg = widget.autoStartMessage?.trim();
+    if (msg == null || msg.isEmpty) return;
+    final chat = _chatbotKey.currentState;
+    if (chat == null) return;
+    try {
+      await chat.sendHostMessage(
+        msg,
+        visibility: widget.autoStartInvisible ? kVisInvisible : kVisNormal,
+      );
+      _autoSent = true;
+    } catch (_) {
+      // opzionale: debugPrint, ma evitiamo rumore in produzione
+    }
+  }
+
 
   //───────────────────────────────────────────────────────────────────────────
   @override

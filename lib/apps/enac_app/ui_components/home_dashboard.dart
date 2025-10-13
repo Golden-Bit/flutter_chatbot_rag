@@ -23,6 +23,8 @@ class HomeDashboard extends StatefulWidget {
   final Token token;
   final Omnia8Sdk sdk;
   final void Function(String clientId)? onOpenClient;
+  final VoidCallback? onCreateClient; // callback verso il parent (HomeScaffold)
+  final int refreshCounter;           // per forzare refresh da parent
 
   const HomeDashboard({
     super.key,
@@ -30,6 +32,8 @@ class HomeDashboard extends StatefulWidget {
     required this.token,
     required this.sdk,
     this.onOpenClient,
+        this.onCreateClient,      
+    this.refreshCounter = 0,   
   });
 
   @override
@@ -60,6 +64,13 @@ Entity? _editingEntity;
     _boot = _init();
   }
 
+@override
+void didUpdateWidget(covariant HomeDashboard oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  if (oldWidget.refreshCounter != widget.refreshCounter) {
+    setState(() { _boot = _init(); });  // ricarica contatori + elenco entità
+  }
+}
   /// Inizializza: prova a leggere i contatori; comunque carica le entità.
   Future<void> _init() async {
     final userId = widget.user.username;
@@ -279,13 +290,8 @@ int _dueCount(String scope, int days) {
             icon: const Icon(Icons.add, size: 18),
             label: const Text('Nuova Entità',
                 style: TextStyle(fontWeight: FontWeight.w500)),
-onPressed: () async {
-  setState(() {
-    _view = _HomeInnerView.clientForm;
-    _editingEntityId = null;   // create
-    _editingEntity   = null;
-  });
-},
+onPressed: () => widget.onCreateClient?.call(),
+
 
           ),
         ],
@@ -462,27 +468,6 @@ onPressed: () async {
         if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
-// Se sto creando/modificando un cliente, mostro la pagina inline e occupo tutta l’altezza
-if (_view == _HomeInnerView.clientForm) {
-  return CreateOrEditClientPage(
-    user   : widget.user,
-    token  : widget.token,
-    sdk    : widget.sdk,
-    entityId      : _editingEntityId, // null = create
-    initialEntity : _editingEntity,   // null = create
-    onCancel: () {
-      setState(() => _view = _HomeInnerView.dashboard);
-    },
-    onSaved: (newId) async {
-      // torna alla dashboard e ricarica elenco/contatori
-      setState(() {
-        _view = _HomeInnerView.dashboard;
-        _boot = _init();
-      });
-    },
-  );
-}
-
 
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),

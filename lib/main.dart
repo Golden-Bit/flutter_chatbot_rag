@@ -5,6 +5,7 @@ import 'package:boxed_ai/user_manager/pages/registration_page_1.dart';
 import 'package:boxed_ai/utilities/localization.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_langdetect/flutter_langdetect.dart' as langdetect;
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,16 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+        localizationsDelegates: const [
+    GlobalMaterialLocalizations.delegate,
+    GlobalWidgetsLocalizations.delegate,
+    GlobalCupertinoLocalizations.delegate,
+  ],
+  supportedLocales: const [
+    Locale('it', 'IT'),
+    Locale('en', 'US'),
+    Locale('es', 'ES'),
+  ],
       title: 'Boxed-AI',
       theme: ThemeData(
         primarySwatch: Colors.blue,

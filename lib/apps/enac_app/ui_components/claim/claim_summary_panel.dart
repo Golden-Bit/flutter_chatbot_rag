@@ -110,6 +110,9 @@ class ClaimSummaryPanel extends StatefulWidget {
     required this.entityId,
     required this.contractId,
     required this.claimId,
+
+    required this.onEditRequested,
+    required this.onDeleted,
   });
 
   final Sinistro sinistro;
@@ -122,7 +125,8 @@ class ClaimSummaryPanel extends StatefulWidget {
   final String entityId;
   final String contractId;
   final String claimId;
-
+  final VoidCallback? onEditRequested;
+  final VoidCallback? onDeleted;
   /// Build da viewRow (fallback quando non abbiamo l’oggetto pieno)
   static Sinistro claimFromViewRow(Map<String, dynamic> v) {
     DateTime d(String k) {
@@ -209,6 +213,57 @@ class _ClaimSummaryPanelState extends State<ClaimSummaryPanel> {
     if (mime.contains('zip') || mime.contains('compressed')) return Icons.archive;
     return Icons.insert_drive_file;
   }
+
+  // ⬇️ NEW: conferma + cancellazione
+  Future<void> _confirmAndDelete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_outlined),
+            SizedBox(width: 8),
+            Text('Eliminare il sinistro?'),
+          ],
+        ),
+        content: const Text(
+          'Questa operazione eliminerà definitivamente il sinistro. '
+          'L’azione è irreversibile. Confermi?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annulla')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Elimina')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await widget.sdk.deleteClaim(
+        widget.userId,
+        widget.entityId,
+        widget.contractId,
+        widget.claimId,
+      );
+      if (!mounted) return;
+      _snack('Sinistro eliminato.');
+      widget.onDeleted?.call(); // ⬅️ notifica al parent
+    } catch (e) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Errore eliminazione'),
+          content: Text('Impossibile eliminare il sinistro.\nDettagli: $e'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Chiudi')),
+          ],
+        ),
+      );
+    }
+  }
+
 
   /* ====================== DOCUMENTI ====================== */
 
@@ -976,7 +1031,10 @@ Container(
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const _HeaderActionIcons(),
+                            _HeaderActionIcons(                 // ⬅️ WAS: const _HeaderActionIcons()
+                onEdit: widget.onEditRequested,   // ⬅️ NEW
+                onDelete: _confirmAndDelete,      // ⬅️ NEW
+              ),
               const SizedBox(height: 6),
               _pairRight('DATA AVVENIMENTO', dataAvv),
               const SizedBox(height: 4),
@@ -1139,26 +1197,34 @@ Container(
   }
 }
 
+// ⬇️ SOSTITUISCI la vecchia classe con questa versione “cliccabile”
 class _HeaderActionIcons extends StatelessWidget {
-  const _HeaderActionIcons();
+  const _HeaderActionIcons({ this.onEdit, this.onDelete });
+
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     Color active = Colors.grey.shade700;
     Color disabled = Colors.grey.shade400;
 
-    Widget ico(IconData i, {bool enabled = true, String? tip}) => Padding(
-          padding: const EdgeInsets.only(left: 8),
-          child: Tooltip(
-            message: tip ?? '',
-            child: Icon(i, size: 18, color: enabled ? active : disabled),
-          ),
-        );
+    Widget ico(IconData i, {bool enabled = true, String? tip, VoidCallback? onTap}) => Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Tooltip(
+        message: tip ?? '',
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          child: Icon(i, size: 18, color: enabled ? active : disabled),
+        ),
+      ),
+    );
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ico(Icons.edit, tip: 'Modifica'),
+        ico(Icons.edit, tip: 'Modifica', onTap: onEdit),
+        ico(Icons.delete_outline, tip: 'Elimina', onTap: onDelete),
         ico(Icons.sell, tip: 'Tag'),
         ico(Icons.mail, tip: 'Email'),
         ico(Icons.phone, tip: 'Chiama'),

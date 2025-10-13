@@ -9,6 +9,125 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 //import 'package:http/http.dart' as http;
 import 'dart:html' as html;
 
+
+// ───────────────────────────────────────────────────────────────────────────
+//  MODEL ▸ Activity logs (GET /activities, GET /activities/{id})
+// ───────────────────────────────────────────────────────────────────────────
+
+enum ActivityTypeDart { uploadAsync, streamEvents, unknown }
+enum ActivityStatusDart { pending, running, completed, error, unknown }
+
+ActivityTypeDart activityTypeFromWire(String? s) {
+  switch ((s ?? '').toUpperCase()) {
+    case 'UPLOAD_ASYNC':  return ActivityTypeDart.uploadAsync;
+    case 'STREAM_EVENTS': return ActivityTypeDart.streamEvents;
+    default:              return ActivityTypeDart.unknown;
+  }
+}
+
+ActivityStatusDart activityStatusFromWire(String? s) {
+  switch ((s ?? '').toUpperCase()) {
+    case 'PENDING':   return ActivityStatusDart.pending;
+    case 'RUNNING':   return ActivityStatusDart.running;
+    case 'COMPLETED': return ActivityStatusDart.completed;
+    case 'ERROR':     return ActivityStatusDart.error;
+    default:          return ActivityStatusDart.unknown;
+  }
+}
+
+class ActivityRecord {
+  final String activityId;
+  final String userId;
+  final ActivityTypeDart type;
+  final ActivityStatusDart status;
+  final double? costUsd;
+  final DateTime? startTime;
+  final DateTime? endTime;
+  final Map<String, dynamic>? payload;          // già “scrubbed” lato server
+  final String? responsePreview;                // preview testo risposta
+  final Map<String, dynamic>? metadata;         // es: chain_id, upload_task_id, context, ...
+
+  const ActivityRecord({
+    required this.activityId,
+    required this.userId,
+    required this.type,
+    required this.status,
+    this.costUsd,
+    this.startTime,
+    this.endTime,
+    this.payload,
+    this.responsePreview,
+    this.metadata,
+  });
+
+  static double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
+  factory ActivityRecord.fromJson(Map<String, dynamic> j) => ActivityRecord(
+    activityId     : j['activity_id'] ?? j['id'] ?? '',
+    userId         : j['user_id'] ?? '',
+    type           : activityTypeFromWire(j['type']),
+    status         : activityStatusFromWire(j['status']),
+    costUsd        : _toDouble(j['cost_usd']),
+    startTime      : (j['start_time'] != null) ? DateTime.tryParse(j['start_time']) : null,
+    endTime        : (j['end_time']   != null) ? DateTime.tryParse(j['end_time'])   : null,
+    payload        : (j['payload'] as Map?)?.cast<String, dynamic>(),
+    responsePreview: j['response_preview'] as String?,
+    metadata       : (j['metadata'] as Map?)?.cast<String, dynamic>(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'activity_id'     : activityId,
+    'user_id'         : userId,
+    'type'            : type.name,
+    'status'          : status.name,
+    if (costUsd != null) 'cost_usd': costUsd,
+    if (startTime != null) 'start_time' : startTime!.toIso8601String(),
+    if (endTime   != null) 'end_time'   : endTime!.toIso8601String(),
+    if (payload   != null) 'payload'    : payload,
+    if (responsePreview != null) 'response_preview': responsePreview,
+    if (metadata  != null) 'metadata'   : metadata,
+  };
+}
+
+class ActivitiesListResponse {
+  final int total;
+  final int skip;
+  final int limit;
+  final double totalCostUsd;
+  final List<ActivityRecord> items;
+
+  ActivitiesListResponse({
+    required this.total,
+    required this.skip,
+    required this.limit,
+    required this.totalCostUsd,
+    required this.items,
+  });
+
+  static double _numToDouble(dynamic v) =>
+      (v is num) ? v.toDouble() : (double.tryParse('$v') ?? 0.0);
+
+  factory ActivitiesListResponse.fromJson(Map<String, dynamic> j) =>
+      ActivitiesListResponse(
+        total       : (j['total'] as num?)?.toInt() ?? 0,
+        skip        : (j['skip']  as num?)?.toInt() ?? 0,
+        limit       : (j['limit'] as num?)?.toInt() ?? 0,
+        totalCostUsd: _numToDouble(j['total_cost_usd']),
+        items       : (j['items'] as List<dynamic>? ?? const [])
+                        .map((e) => ActivityRecord.fromJson(
+                              Map<String, dynamic>.from(e),
+                            ))
+                        .toList(),
+      );
+}
+
+
+
 // ───────────────────────────────────────────────────────────────────────────
 // PAYMENTS ▸ Models & enums
 // ───────────────────────────────────────────────────────────────────────────
@@ -2344,5 +2463,76 @@ Future<NormalizeFilenameResponseDto> normalizeFilename(
   throw ApiException('Errore /filenames/normalize: ${res.body}');
 }
 
+/// GET /activities  – lista con filtri e paginazione
+Future<ActivitiesListResponse> listActivities({
+  required String username,
+  String? token,
+  DateTime? startDate,
+  DateTime? endDate,
+  String? type,           // 'UPLOAD_ASYNC' | 'STREAM_EVENTS'
+  String? status,         // 'PENDING' | 'RUNNING' | 'COMPLETED' | 'ERROR'
+  String? chainId,
+  String? uploadTaskId,
+  String? context,
+  String? fileId,
+  String? filename,
+  String? q,
+  int skip = 0,
+  int limit = 10,         // server: 1..100
+}) async {
+  if (baseUrl == null) await loadConfig();
+  if (limit < 1)  limit = 1;
+  if (limit > 100) limit = 100;
+
+  final qp = <String, String>{
+    'username': username,
+    'skip'    : '$skip',
+    'limit'   : '$limit',
+    if (token != null) 'token': token!,
+    if (startDate != null) 'start_date': startDate.toUtc().toIso8601String(),
+    if (endDate   != null) 'end_date'  : endDate.toUtc().toIso8601String(),
+    if (type      != null && type.isNotEmpty)   'type'   : type,
+    if (status    != null && status.isNotEmpty) 'status' : status,
+    if (chainId   != null && chainId.isNotEmpty) 'chain_id' : chainId,
+    if (uploadTaskId != null && uploadTaskId.isNotEmpty) 'upload_task_id': uploadTaskId,
+    if (context   != null && context.isNotEmpty) 'context': context,
+    if (fileId    != null && fileId.isNotEmpty)  'file_id': fileId,
+    if (filename  != null && filename.isNotEmpty) 'filename': filename,
+    if (q         != null && q.isNotEmpty)        'q'       : q,
+  };
+
+  final uri = Uri.parse('$baseUrl/activities').replace(queryParameters: qp);
+  final res = await http.get(uri);
+
+  if (res.statusCode == 200) {
+    final jsonMap = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    return ActivitiesListResponse.fromJson(jsonMap);
+  }
+
+  throw ApiException('Errore GET /activities: ${res.body}');
+}
+
+/// GET /activities/{activity_id} – dettaglio singolo record
+Future<ActivityRecord> getActivityDetail({
+  required String activityId,
+  required String username,
+  String? token,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final qp = <String, String>{ 'username': username, if (token != null) 'token': token! };
+  final uri = Uri.parse('$baseUrl/activities/$activityId').replace(queryParameters: qp);
+
+  final res = await http.get(uri);
+  if (res.statusCode == 200) {
+    final jsonMap = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    return ActivityRecord.fromJson(jsonMap);
+  }
+
+  if (res.statusCode == 404) {
+    throw ApiException('Activity non trovata (id=$activityId)');
+  }
+  throw ApiException('Errore GET /activities/$activityId: ${res.body}');
+}
 
 }

@@ -6,7 +6,13 @@ import 'package:boxed_ai/dual_pane_wrapper.dart';
 import 'package:flutter/material.dart';
 
 class ClientFormPane extends StatefulWidget with ChatBotExtensions {
-  const ClientFormPane({super.key});
+  const ClientFormPane({
+    super.key,
+    this.initialValues, // ⬅️ NEW: prefill per Edit
+  });
+
+  /// Chiavi accettate: name, address, tax_code, vat, phone, email, sector, legal_rep, legal_rep_tax_code
+  final Map<String, String>? initialValues;
 
   @override
   State<ClientFormPane> createState() => ClientFormPaneState();
@@ -81,21 +87,40 @@ class ClientFormPane extends StatefulWidget with ChatBotExtensions {
 
 class ClientFormPaneState extends State<ClientFormPane> {
 
-    // ⬇️ NUOVO: larghezza massima del form
+  // Larghezza massima del form
   static const double _kFormMaxWidth = 600;
 
   @override
   void initState() {
     super.initState();
-    _ClientFormHostCbs.bind(this);          // ⬅️ BIND qui
+    _ClientFormHostCbs.bind(this);          // bind host cbs
+
+    // ⬅️ NEW: prefill immediato all'avvio (senza digitazione simulata)
+    if (widget.initialValues != null && widget.initialValues!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _setInitialValues(widget.initialValues!);
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ClientFormPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Se cambiano gli initialValues (es. si rientra nell'editor con altri dati)
+    if (widget.initialValues != oldWidget.initialValues &&
+        widget.initialValues != null) {
+      _setInitialValues(widget.initialValues!);
+    }
   }
 
   @override
   void dispose() {
-    _ClientFormHostCbs.unbind(this);        // ⬅️ UNBIND qui
+    _ClientFormHostCbs.unbind(this);        // unbind host cbs
+    for (final f in _f.values) { f.dispose(); }
+    for (final c in _c.values) { c.dispose(); }
     super.dispose();
   }
-  
+
   // Controllers + Focus
   final _c = <String, TextEditingController>{
     'name': TextEditingController(),
@@ -113,6 +138,17 @@ class ClientFormPaneState extends State<ClientFormPane> {
   // tracking digitazione per campo
   final _gen = <String,int>{};
   static const _kDefaultTypingMs = 22;
+
+  // Prefill "immediato" (no typing)
+  void _setInitialValues(Map<String, String> m) {
+    for (final e in m.entries) {
+      final key = e.key;
+      if (_c.containsKey(key)) {
+        _c[key]!.text = e.value;
+        _c[key]!.selection = TextSelection.collapsed(offset: _c[key]!.text.length);
+      }
+    }
+  }
 
   // ————— helpers “host” —————
   Future<void> _typeInto(String key, String target, {required int ms}) async {
@@ -140,49 +176,54 @@ class ClientFormPaneState extends State<ClientFormPane> {
     var i = 0; while (i < n && a.codeUnitAt(i) == b.codeUnitAt(i)) i++; return i;
   }
 
-  // ————— UI del form (riuso il tuo stile) —————
-  InputDecoration _dec(String l) => InputDecoration(labelText: l, isDense: true, border: const OutlineInputBorder());
+  // ————— UI del form —————
+  InputDecoration _dec(String l) => const InputDecoration(
+        isDense: true,
+        border: OutlineInputBorder(),
+        // labelText separata per traduzioni dinamiche (qui impostata sotto)
+      ).copyWith(labelText: l);
+
   Widget _t(String key, String label, {String? hint}) => TextFormField(
     controller: _c[key], focusNode: _f[key],
     decoration: _dec(label).copyWith(hintText: hint),
   );
 
-@override
-Widget build(BuildContext context) {
-  // ⬇️ Contenuto originale del form, invariato
-  final form = SingleChildScrollView(
-    padding: const EdgeInsets.all(16),
-    child: Column(children: [
-      _t('name','Ragione sociale *', hint: 'ACME S.p.A.'),
-      const SizedBox(height: 12),
-      _t('address','Indirizzo', hint: 'Via Roma 1'),
-      const SizedBox(height: 12),
-      _t('phone','Telefono', hint: '+39 333 1234567'),
-      const SizedBox(height: 12),
-      _t('email','Email', hint: 'info@acme.com'),
-      const SizedBox(height: 12),
-      _t('vat','Partita IVA', hint: 'IT01234567890'),
-      const SizedBox(height: 12),
-      _t('tax_code','Codice fiscale', hint: 'RSSMRA85H09H501Z'),
-      const SizedBox(height: 12),
-      _t('sector','Settore / ATECO', hint: '62.01'),
-      const SizedBox(height: 12),
-      _t('legal_rep','Legale rappresentante'),
-      const SizedBox(height: 12),
-      _t('legal_rep_tax_code','CF legale rappresentante'),
-    ]),
-  );
+  @override
+  Widget build(BuildContext context) {
+    final form = SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [
+        _t('name','Ragione sociale *', hint: 'ACME S.p.A.'),
+        const SizedBox(height: 12),
+        _t('address','Indirizzo', hint: 'Via Roma 1'),
+        const SizedBox(height: 12),
+        _t('phone','Telefono', hint: '+39 333 1234567'),
+        const SizedBox(height: 12),
+        _t('email','Email', hint: 'info@acme.com'),
+        const SizedBox(height: 12),
+        _t('vat','Partita IVA', hint: 'IT01234567890'),
+        const SizedBox(height: 12),
+        _t('tax_code','Codice fiscale', hint: 'RSSMRA85H09H501Z'),
+        const SizedBox(height: 12),
+        _t('sector','Settore / ATECO', hint: '62.01'),
+        const SizedBox(height: 12),
+        _t('legal_rep','Legale rappresentante'),
+        const SizedBox(height: 12),
+        _t('legal_rep_tax_code','CF legale rappresentante'),
+      ]),
+    );
 
-  // ⬇️ NOVITÀ: centro orizzontalmente e limito a max 600px
-  return Align(
-    alignment: Alignment.topCenter,               // centrato orizz., agganciato in alto
-    child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: _kFormMaxWidth),
-      child: form,
-    ),
-  );
-}
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: _kFormMaxWidth),
+        child: form,
+      ),
+    );
+  }
 
+  // esporto il modello (per Create/Edit)
+  Map<String,String> get model => { for (final e in _c.entries) e.key: e.value.text.trim() };
 
   // ———— HostCallbacks implementation ————
   Future<void> setField(String field, String value, {int? typingMs}) async {
@@ -191,6 +232,7 @@ Widget build(BuildContext context) {
     final node = _f[field];
     if (node != null) WidgetsBinding.instance.addPostFrameCallback((_) => node.requestFocus());
   }
+
   Future<void> fill(Map<String, dynamic> m, {int? typingMs}) async {
     final ms = typingMs ?? _kDefaultTypingMs;
     // ordine “umano”
@@ -202,9 +244,6 @@ Widget build(BuildContext context) {
       await Future.delayed(const Duration(milliseconds: 100));
     }
   }
-
-  // esporto il modello (se vuoi recuperarlo dal dialog)
-  Map<String,String> get model => { for (final e in _c.entries) e.key: e.value.text.trim() };
 }
 
 // ——— host callbacks adapter ———
@@ -223,10 +262,8 @@ class _ClientFormHostCbs extends ChatBotHostCallbacks {
     }
   }
 
-  // helper interno
   ClientFormPaneState? get _s => _bound;
 
-  // chiamate dal widget-tool
   Future<void> setField(String field, dynamic value, {int? typingMs}) async {
     debugPrint('[HostCbs] setField field=$field value=$value typingMs=$typingMs bound=${_s!=null}');
     await _s?.setField(field, value?.toString() ?? '', typingMs: typingMs);
@@ -243,8 +280,7 @@ class _ClientFormHostCbs extends ChatBotHostCallbacks {
   }
 }
 
-
-// ——— tool “executor” (legge i parametri e invoca host) ———
+// ——— tool “executor” ———
 class _FillClientFormExec extends StatefulWidget {
   const _FillClientFormExec({required this.json, required this.host});
   final Map<String,dynamic> json; final _ClientFormHostCbs host;

@@ -22,6 +22,11 @@ class ClientClaimsPage extends StatefulWidget {
   /// Come per i titoli: il parent (HomeScaffold) decide cosa mostrare.
   final void Function(Sinistro sinistro, Map<String, dynamic> viewRow) onOpenClaim;
 
+  // NEW: chiede al parent (HomeScaffold) di aprire la pagina di creazione.
+  final VoidCallback? onCreateClaim;
+
+  // NEW: contatore passato dal parent per forzare il refresh della tabella.
+  final int refreshCounter;
   const ClientClaimsPage({
     super.key,
     required this.user,
@@ -30,6 +35,8 @@ class ClientClaimsPage extends StatefulWidget {
     required this.clientId,
     required this.sdk,
     required this.onOpenClaim,
+    this.onCreateClaim,
+    this.refreshCounter = 0,
   });
 
   @override
@@ -37,7 +44,6 @@ class ClientClaimsPage extends StatefulWidget {
 }
 
 class _ClientClaimsPageState extends State<ClientClaimsPage> {
-  int _refresh = 0;
 
   Widget _sectionTitle(String t) => Align(
         alignment: Alignment.centerLeft,
@@ -206,18 +212,7 @@ class _ClientClaimsPageState extends State<ClientClaimsPage> {
               ),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Denuncia sinistro'),
-              onPressed: () async {
-                final created = await CreateClaimDialog.show(
-                  context,
-                  user: widget.user,
-                  token: widget.token,
-                  sdk: widget.sdk,
-                  entityId: widget.clientId,
-                );
-                if (created == true && mounted) {
-                  setState(() => _refresh++); // ricarica tabella
-                }
-              },
+onPressed: () => widget.onCreateClaim?.call(), // delega al parent
             ),
           ],
         ),
@@ -227,7 +222,7 @@ class _ClientClaimsPageState extends State<ClientClaimsPage> {
         /* ---------- tabella sinistri ---------- */
         Expanded(
           child: ClaimsTable(
-            key: ValueKey(_refresh),
+            key: ValueKey(widget.refreshCounter),
             userId: widget.userId,
             clientId: widget.clientId,
             sdk: widget.sdk,

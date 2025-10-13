@@ -133,6 +133,33 @@ class CheckoutSuccessResponse extends CheckoutOrPortal {
       );
 }
 
+/// Risposta di POST /filenames/normalize
+class NormalizeFilenameResponseDto {
+  final String originalFilename;
+  final String normalizedFilename;
+  final bool changed;
+
+  const NormalizeFilenameResponseDto({
+    required this.originalFilename,
+    required this.normalizedFilename,
+    required this.changed,
+  });
+
+  factory NormalizeFilenameResponseDto.fromJson(Map<String, dynamic> j) =>
+      NormalizeFilenameResponseDto(
+        originalFilename : j['original_filename'],
+        normalizedFilename: j['normalized_filename'],
+        changed          : j['changed'] == true,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'original_filename'  : originalFilename,
+    'normalized_filename': normalizedFilename,
+    'changed'            : changed,
+  };
+}
+
+
 /// Variante "portal_redirect"
 class PortalRedirectResponse extends CheckoutOrPortal {
   final String reasonCode;
@@ -692,7 +719,7 @@ class TaskNotification {
   final String jobId;
   final String contextPath;
  final String contextName;      // ← display name del contesto
-  final String fileName;
+   String fileName;
         TaskStage stage;
         bool isVisible;
 
@@ -947,8 +974,8 @@ class ContextApiSdk {
      final data = {
     "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
     "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
-    "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-    //"chatbot_nlp_api": "http://127.0.0.1:8888"
+    //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+    "chatbot_nlp_api": "http://127.0.0.1:8888"
     //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag-with-auth"
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
@@ -2287,5 +2314,35 @@ Future<UploadTaskDto> getSingleUserTask(String userId, String taskId) async {
   }
   throw ApiException('Errore GET /user_tasks/$userId/$taskId: ${res.body}');
 }
+
+/// POST /filenames/normalize
+/// Ritorna il nome file normalizzato secondo la stessa logica server (_sanitize_filename).
+Future<NormalizeFilenameResponseDto> normalizeFilename(
+  String filename, {
+  String? token,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/filenames/normalize');
+  final body = <String, dynamic>{
+    'filename': filename,
+    if (token != null) 'token': token,
+  };
+
+  final res = await http.post(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+
+  if (res.statusCode == 200) {
+    return NormalizeFilenameResponseDto.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  throw ApiException('Errore /filenames/normalize: ${res.body}');
+}
+
 
 }

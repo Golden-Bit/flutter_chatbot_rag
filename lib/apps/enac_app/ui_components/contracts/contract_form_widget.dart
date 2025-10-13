@@ -6,11 +6,11 @@ import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
 
 class ContractFormPane extends StatefulWidget with ChatBotExtensions {
-  const ContractFormPane({super.key});
+  const ContractFormPane({super.key,this.initialValues});
 
   @override
   State<ContractFormPane> createState() => ContractFormPaneState();
-
+  final Map<String, String>? initialValues;
   /*───────────────────────────────────────────────────────────────────────*/
   /* ToolSpec: COMPILA TUTTO (ogni parametro è opzionale)                  */
   /*───────────────────────────────────────────────────────────────────────*/
@@ -165,9 +165,45 @@ class ContractFormPane extends StatefulWidget with ChatBotExtensions {
 class ContractFormPaneState extends State<ContractFormPane> {
 
   static const double _kFormMaxWidth = 600; // ⬅️ nuovo
+void _setInitialValues(Map<String, String> m) {
+  // campi testo
+  for (final e in m.entries) {
+    final k = e.key;
+    final v = e.value;
+    if (_c.containsKey(k)) {
+      _c[k]!.text = v;
+      _c[k]!.selection = TextSelection.collapsed(offset: _c[k]!.text.length);
+    }
+  }
+  // booleani
+  if (m.containsKey('regolazione')) {
+    setState(() => _regolazione = (m['regolazione']!.toLowerCase() == 'true'));
+  }
+  if (m.containsKey('compresoFirma')) {
+    setState(() => _compresoFirma = (m['compresoFirma']!.toLowerCase() == 'true'));
+  }
+}
 
-  @override
-  void initState() { super.initState(); _ContractFormHostCbs.bind(this); }
+@override
+void initState() {
+  super.initState();
+  _ContractFormHostCbs.bind(this);
+  // ⬇️ prefill iniziale
+  if (widget.initialValues != null && widget.initialValues!.isNotEmpty) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setInitialValues(widget.initialValues!);
+    });
+  }
+}
+
+@override
+void didUpdateWidget(covariant ContractFormPane oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  if (widget.initialValues != oldWidget.initialValues &&
+      widget.initialValues != null) {
+    _setInitialValues(widget.initialValues!);
+  }
+}
   @override
   void dispose() { _ContractFormHostCbs.unbind(this); super.dispose(); }
 

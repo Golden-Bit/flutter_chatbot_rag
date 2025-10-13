@@ -92,25 +92,33 @@ class _SectionGrid extends StatelessWidget {
 }
 
 /// ─────────── Azioni header (icone a destra) ───────────
+/// ─────────── Azioni header (icone a destra) ───────────
 class _HeaderActionIconsContract extends StatelessWidget {
-  const _HeaderActionIconsContract();
+  const _HeaderActionIconsContract({required this.onEdit, required this.onDelete});
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
-    Color active = Colors.grey.shade700;
-    Color disabled = Colors.grey.shade400;
-    Widget ico(IconData i, {bool enabled = true, String? tip}) => Padding(
-          padding: const EdgeInsets.only(left: 8),
-          child: Tooltip(
-            message: tip ?? '',
-            child: Icon(i, size: 18, color: enabled ? active : disabled),
-          ),
-        );
+    final active = Colors.grey.shade700;
+    final disabled = Colors.grey.shade400;
+
+    Widget ico(IconData i, {bool enabled = true, String? tip, VoidCallback? onTap}) => Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Tooltip(
+        message: tip ?? '',
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          child: Icon(i, size: 18, color: enabled ? active : disabled),
+        ),
+      ),
+    );
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ico(Icons.edit, tip: 'Modifica'),
+        ico(Icons.edit, tip: 'Modifica', onTap: onEdit),
+        ico(Icons.delete_outline, tip: 'Elimina', onTap: onDelete),
         ico(Icons.file_copy, tip: 'Duplica'),
         ico(Icons.mail, tip: 'Email'),
         ico(Icons.phone, tip: 'Chiama'),
@@ -119,6 +127,7 @@ class _HeaderActionIconsContract extends StatelessWidget {
     );
   }
 }
+
 
 /// ─────────── Modello documento UI ───────────
 class _DocItem {
@@ -145,6 +154,8 @@ class ContractDetailPage extends StatefulWidget {
     required this.entityId,
     required this.contractId,
     this.initialTab = 0,  
+        this.onEditRequested,
+    this.onDeleted,
   });
 
   final ContrattoOmnia8 contratto;
@@ -155,12 +166,69 @@ final int initialTab;
   final String userId;
   final String entityId;
   final String contractId;
-
+  final VoidCallback? onEditRequested;
+  final VoidCallback? onDeleted;
   @override
   State<ContractDetailPage> createState() => _ContractDetailPageState();
 }
 
 class _ContractDetailPageState extends State<ContractDetailPage> {
+
+  Future<void> _confirmAndDelete() async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      title: Row(children: const [
+        Icon(Icons.warning_amber_outlined),
+        SizedBox(width: 8),
+        Text('Eliminare il contratto?'),
+      ]),
+      content: Text(
+        'Questa operazione rimuoverà definitivamente il contratto '
+        '"${widget.contratto.identificativi.compagnia} – '
+        '${widget.contratto.identificativi.numeroPolizza}".\n'
+        'L’azione è irreversibile. Confermi?'
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Annulla'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('Elimina'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return;
+
+  try {
+    await widget.sdk.deleteContract(
+      widget.userId, widget.entityId, widget.contractId,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Contratto eliminato.')),
+    );
+    widget.onDeleted?.call();
+  } catch (e) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        title: const Text('Errore eliminazione'),
+        content: Text('Impossibile eliminare il contratto.\nDettagli: $e'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Chiudi')),
+        ],
+      ),
+    );
+  }
+}
+
   /* ----------------- Documenti: stato ----------------- */
   bool _docsLoading = true;
   List<_DocItem> _docs = [];
@@ -194,6 +262,7 @@ class _ContractDetailPageState extends State<ContractDetailPage> {
     if (mime.contains('zip') || mime.contains('compressed')) return Icons.archive;
     return Icons.insert_drive_file;
   }
+
 
   /* ====================== DOCUMENTI — API WRAPPERS ====================== */
 
@@ -603,7 +672,10 @@ class _ContractDetailPageState extends State<ContractDetailPage> {
 Column(
   crossAxisAlignment: CrossAxisAlignment.end,
   children: [
-    const _HeaderActionIconsContract(), // ⬅️ ora in ALTO a destra
+        _HeaderActionIconsContract(
+      onEdit: widget.onEditRequested,
+      onDelete: _confirmAndDelete,
+    ), // ⬅️ ora in ALTO a destra
     const SizedBox(height: 8),
     const Text('PREMIO ANNUO',
         style: TextStyle(fontSize: 11, color: Colors.blueGrey)),

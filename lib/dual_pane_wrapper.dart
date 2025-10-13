@@ -1,109 +1,108 @@
 // lib/shared/dual_pane_wrapper.dart
 //
-// Dual‑pane layout con ChatBot a destra e, **sovrapposto** al contenuto
-// di sinistra, il pannello “Genera con AI” (AiGeneratePanel).
+// Dual-pane layout con ChatBot a destra e, sovrapposto al contenuto
+// di sinistra, il pannello “Genera con AI” (AiGeneratePanel).
 //
-// • Il pannello AI è ancorato in alto‑centro della colonna sinistra
-//   con un leggero sollevamento (elevation).
-// • La chiave (GlobalKey<ChatBotPageState>) del ChatBot è generata
-//   internamente e condivisa sia con ChatBotPage sia con AiGeneratePanel.
-//
-// In questa versione il wrapper rileva dinamicamente – se presenti –
-// le estensioni dichiarate dalla pagina di sinistra tramite il mixin
-// `ChatBotExtensions` e le inoltra a ChatBotPage, rendendo
-// l’integrazione completamente plug‑and‑play.
+// - Mini panel SEMPRE visibile (anche con chat chiusa).
+// - Nessun overlay grigio: pannello clippato (Material.clipBehavior + ClipRect).
+// - ChatBotPage sempre montata (Offstage+IgnorePointer quando chiusa).
 //
 
-//─────────────────────────────────────────────────────────────────────────────
-// IMPORT
-//─────────────────────────────────────────────────────────────────────────────
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:boxed_ai/chatbot.dart';
 import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:boxed_ai/mini_chat.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
-// (facoltativo) se la pagina vuole ricevere la chat‑key
+// (facoltativo) se la pagina vuole ricevere la chat-key
 mixin ChatBotKeyConsumer on Widget {
   Widget withChatKey(GlobalKey<ChatBotPageState> k);
 }
 
-/// Ogni pagina che vuole “estendersi” verso il ChatBot
-/// implementa semplicemente questa interfaccia.
-/// Tutti i getter hanno già un default → la pagina può
-/// sovrascrivere **solo** ciò che le serve.
 mixin ChatBotExtensions {
-  /// Nuovi widget renderizzabili nei messaggi
   Map<String, ChatWidgetBuilder> get extraWidgetBuilders => const {};
-
-  /// Nuove ToolSpec da inserire nell’header “tools”
   List<ToolSpec> get toolSpecs => const [];
-
-  /// Callback verso l’host (es. cambia‑colore, naviga, ecc.)
   ChatBotHostCallbacks get hostCallbacks => const ChatBotHostCallbacks();
 }
 
-
-//─────────────────────────────────────────────────────────────────────────────
-// REGISTRY ­— gestione apertura/chiusura globale di tutti i wrapper
-//─────────────────────────────────────────────────────────────────────────────
+/*───────────────────────────────────────────────────────────────────────────*/
+/* REGISTRY                                                                  */
+/*───────────────────────────────────────────────────────────────────────────*/
 class DualPaneRegistry {
   DualPaneRegistry._();
 
-  static final _controllers = <DualPaneController>{};
-  static bool _isOpen = false;
+  static final Set<DualPaneController> _controllers = <DualPaneController>{};
+  static bool _areOpen = false;
+  static bool _isBroadcasting = false;
 
-  static void register(DualPaneController c)   => _controllers.add(c);
+  static void register(DualPaneController c) {
+    _controllers.add(c);
+    if (_areOpen) c.openChat();
+  }
+
   static void unregister(DualPaneController c) => _controllers.remove(c);
 
-  static void openAll()  {
-    _isOpen = true;
-    for (final c in _controllers) c.openChat();
-  }
-
-  static void closeAll() {
-    _isOpen = false;
-    for (final c in _controllers) c.closeChat();
-  }
+  static void openAll()  => _broadcast(open: true);
+  static void closeAll() => _broadcast(open: false);
 
   static bool toggleAll() {
-    _isOpen ? closeAll() : openAll();
-    return _isOpen;
+    _broadcast(open: !_areOpen);
+    return _areOpen;
   }
 
-  static bool get areOpen => _isOpen;
+  static bool get areOpen => _areOpen;
+
+  static void _broadcast({required bool open}) {
+    if (_isBroadcasting) return;
+    _isBroadcasting = true;
+    try {
+      _areOpen = open;
+      final snapshot = List<DualPaneController>.from(_controllers);
+      for (final c in snapshot) {
+        try { open ? c.openChat() : c.closeChat(); } catch (_) {}
+      }
+    } finally {
+      _isBroadcasting = false;
+    }
+  }
 }
 
-//─────────────────────────────────────────────────────────────────────────────
-// CONTROLLER
-//─────────────────────────────────────────────────────────────────────────────
+/*───────────────────────────────────────────────────────────────────────────*/
+/* CONTROLLER                                                                */
+/*───────────────────────────────────────────────────────────────────────────*/
 class DualPaneController {
   _DualPaneWrapperState? _state;
+  bool _visible = false;
 
-  void openChat()  => _state?._setChatVisible(true);
-  void closeChat() => _state?._setChatVisible(false);
+  void openChat()  { _visible = true;  _state?._setChatVisibleSafe(true); }
+  void closeChat() { _visible = false; _state?._setChatVisibleSafe(false); }
 
-  /* internal */
-  void _attach(_DualPaneWrapperState s) => _state = s;
-  void _detach()                        => _state = null;
+  void _attach(_DualPaneWrapperState s) {
+    _state = s;
+    if (_visible || DualPaneRegistry.areOpen) {
+      _state?._setChatVisibleSafe(true);
+    }
+  }
+  void _detach() => _state = null;
 }
 
-//─────────────────────────────────────────────────────────────────────────────
-// COSTANTI LAYOUT
-//─────────────────────────────────────────────────────────────────────────────
-const double _kMinFrac            = .15; // larghezza minima colonna sinistra
-const double _kMaxFrac            = .85; // larghezza massima colonna sinistra
-const double _dividerVisibleWidth = 4;   // spessore barra visibile
-const double _dragHitWidth        = 4;   // area di drag
+/*───────────────────────────────────────────────────────────────────────────*/
+/* COSTANTI LAYOUT                                                           */
+/*───────────────────────────────────────────────────────────────────────────*/
+const double _kMinFrac            = .15;
+const double _kMaxFrac            = .85;
+const double _dividerVisibleWidth = 4;
+const double _dragHitWidth        = 4;
 
-//─────────────────────────────────────────────────────────────────────────────
-// WIDGET WRAPPER
-//─────────────────────────────────────────────────────────────────────────────
+/*───────────────────────────────────────────────────────────────────────────*/
+/* WIDGET WRAPPER                                                            */
+/*───────────────────────────────────────────────────────────────────────────*/
 class DualPaneWrapper extends StatefulWidget {
   const DualPaneWrapper({
     super.key,
     required this.controller,
-    required this.leftChild,          // può (o meno) implementare ChatBotExtensions
+    required this.leftChild,
     required this.user,
     required this.token,
     this.autoStartMessage,
@@ -115,49 +114,37 @@ class DualPaneWrapper extends StatefulWidget {
   final Widget leftChild;
   final User   user;
   final Token  token;
-  /// Messaggio inviato automaticamente al primo mount (se non nullo/vuoto)
+
   final String? autoStartMessage;
-  /// Se true, il messaggio parte con visibilità invisibile (non mostrato in UI)
   final bool    autoStartInvisible;
-  /// Se true, apre la chat al mount
   final bool    openChatOnMount;
+
   @override
   State<DualPaneWrapper> createState() => _DualPaneWrapperState();
 }
 
 class _DualPaneWrapperState extends State<DualPaneWrapper> {
-  // Key creata internamente e condivisa fra ChatBotPage e AiGeneratePanel
   final GlobalKey<ChatBotPageState> _chatbotKey = GlobalKey<ChatBotPageState>();
 
-  double _split       = .5;   // frazione colonna sinistra (0‑1)
+  double _split       = .5;
   bool   _chatVisible = false;
-bool   _autoSent    = false; // evita invii duplicati ai rebuild
-  //───────────────────────────────────────────────────────────────────────────
-  // Helper: se leftChild implementa ChatBotExtensions la restituisce
-  //───────────────────────────────────────────────────────────────────────────
-  ChatBotExtensions? get _extProvider =>
-      widget.leftChild is ChatBotExtensions
-          ? widget.leftChild as ChatBotExtensions
-          : null;
+  bool   _autoSent    = false;
 
-  //───────────────────────────────────────────────────────────────────────────
-  // Helper: se leftChild vuole la chat‑key gliela iniettiamo
-  //───────────────────────────────────────────────────────────────────────────
+  ChatBotExtensions? get _extProvider =>
+      widget.leftChild is ChatBotExtensions ? widget.leftChild as ChatBotExtensions : null;
+
   Widget _injectChatKey(Widget w) =>
       (w is ChatBotKeyConsumer) ? (w as ChatBotKeyConsumer).withChatKey(_chatbotKey) : w;
 
-  //───────────────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
     widget.controller._attach(this);
     DualPaneRegistry.register(widget.controller);
-   // Dopo il primo frame siamo sicuri che ChatBotPage sia montata
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      if (widget.openChatOnMount) {
-        _setChatVisible(true);
-      }
+      if (widget.openChatOnMount) _setChatVisibleSafe(true);
       await _tryAutoSend();
     });
   }
@@ -169,12 +156,29 @@ bool   _autoSent    = false; // evita invii duplicati ai rebuild
     super.dispose();
   }
 
-  void _setChatVisible(bool v) => setState(() => _chatVisible = v);
+  void _setChatVisibleSafe(bool v) {
+    if (!mounted || _chatVisible == v) return;
+
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    final inFrame = phase == SchedulerPhase.persistentCallbacks ||
+                    phase == SchedulerPhase.transientCallbacks   ||
+                    phase == SchedulerPhase.postFrameCallbacks;
+
+    if (inFrame) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _chatVisible = v);
+      });
+    } else {
+      setState(() => _chatVisible = v);
+    }
+  }
 
   Future<void> _tryAutoSend() async {
     if (_autoSent) return;
     final msg = widget.autoStartMessage?.trim();
     if (msg == null || msg.isEmpty) return;
+
     final chat = _chatbotKey.currentState;
     if (chat == null) return;
     try {
@@ -183,28 +187,24 @@ bool   _autoSent    = false; // evita invii duplicati ai rebuild
         visibility: widget.autoStartInvisible ? kVisInvisible : kVisNormal,
       );
       _autoSent = true;
-    } catch (_) {
-      // opzionale: debugPrint, ma evitiamo rumore in produzione
-    }
+    } catch (_) {}
   }
 
-
-  //───────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final totalW = constraints.maxWidth;
-        final leftW  = _chatVisible ? totalW * _split : totalW;
-        final rightW = _chatVisible ? totalW - leftW - _dragHitWidth : 0;
+    return LayoutBuilder(builder: (context, constraints) {
+      final totalW = constraints.maxWidth;
+      final leftW  = _chatVisible ? totalW * _split : totalW;
+      final double rightW = _chatVisible ? (totalW - leftW - _dragHitWidth) : 0.0;
 
-        return Row(
-          children: [
-            //──── colonna sinistra (contenuto + pannello AI sovrapposto) ──
-            SizedBox(
-              width: leftW,
-              child: RepaintBoundary( // ✅ ISOLAMENTO DESTRA
-                  child: Stack(
+      return Row(
+        children: [
+          // ── colonna sinistra ──
+          SizedBox(
+            width: leftW,
+            child: RepaintBoundary(
+              child: Stack(
+                clipBehavior: Clip.none, // ombre ok; il pannello è clippato internamente
                 alignment: Alignment.topCenter,
                 children: [
                   // contenuto principale
@@ -218,87 +218,92 @@ bool   _autoSent    = false; // evita invii duplicati ai rebuild
                     child: _injectChatKey(widget.leftChild),
                   ),
 
-                  // pannello “Genera con AI” con elevazione
+                  // ── Mini panel SEMPRE visibile ──
                   Positioned(
                     top: 16,
                     child: Material(
                       elevation: 8,
                       borderRadius: BorderRadius.circular(8),
+                      clipBehavior: Clip.antiAlias, // limita la pittura del contenuto
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 420),
-                        child: AiGeneratePanel(chatKey: _chatbotKey),
+                        child: ClipRect( // blocca eventuali scrim/backdrop fuori dai bounds
+                          child: AiGeneratePanel(chatKey: _chatbotKey),
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-            )),
+            ),
+          ),
 
-            //──── drag‑handle (solo se chat visibile) ────────────────────
-            if (_chatVisible)
-              _DragHandle(
-                onDragDx: (dx) {
-                  setState(() {
-                    _split =
-                        (_split + dx / totalW).clamp(_kMinFrac, _kMaxFrac);
-                  });
-                },
-              ),
+          // drag-handle
+          if (_chatVisible)
+            _DragHandle(
+              onDragDx: (dx) {
+                setState(() {
+                  _split = (_split + dx / totalW).clamp(_kMinFrac, _kMaxFrac);
+                });
+              },
+            ),
 
-            //──── colonna destra (ChatBot) — mantenuta con stato ─────────
-            Visibility(
-              visible: _chatVisible,
-              maintainState: true,
-              maintainAnimation: true,
-              maintainSize: false,
-              child: SizedBox(
-                width: rightW as double,
-                child: RepaintBoundary( // ✅ ISOLAMENTO DESTRA
+          // ── colonna destra (ChatBot) — SEMPRE montata ──
+          SizedBox(
+            width: rightW,
+            child: Offstage(
+              offstage: !_chatVisible,       // non occupa layout quando chiusa
+              child: IgnorePointer(
+                ignoring: !_chatVisible,     // non riceve input quando chiusa
+                child: RepaintBoundary(
                   child: ChatBotPage(
-                  key          : _chatbotKey,
-                  user         : widget.user,
-                  token        : widget.token,
-                  // INIEZIONE DINAMICA DELLE ESTENSIONI (fallback ai default)
-                  hostCallbacks         : _extProvider?.hostCallbacks         ?? const ChatBotHostCallbacks(),
-                  externalWidgetBuilders: _extProvider?.extraWidgetBuilders  ?? const {},
-                  toolSpecs             : _extProvider?.toolSpecs             ?? const [],
-                  // — parametri UI invariati —
-                  hasSidebar               : true,
-                  showEmptyChatPlaceholder : false,
-                  showTopBarLogo           : false,
-                  showSidebarLogo          : false,
-                  showUserMenu             : false,
-                  showConversationButton   : false,
-                  showKnowledgeBoxButton   : false,
-                  borderStyle : const ChatBorderStyle(
-                    visible: true,
-                    margin : EdgeInsets.all(16),
-                    radius : 4,
-                  ),
-                  separatorStyle : const TopBarSeparatorStyle(
-                    visible   : false,
-                    thickness : 1,
-                    color     : Colors.grey,
-                    topOffset : 0,
-                  ),
-                  topBarMinHeight : 50,
-                  backgroundStyle : const ChatBackgroundStyle(
-                    useGradient : false,
-                    baseColor   : Colors.white,
+                    key: _chatbotKey,
+                    user: widget.user,
+                    token: widget.token,
+
+                    // estensioni dinamiche
+                    hostCallbacks: _extProvider?.hostCallbacks ?? const ChatBotHostCallbacks(),
+                    externalWidgetBuilders: _extProvider?.extraWidgetBuilders ?? const {},
+                    toolSpecs: _extProvider?.toolSpecs ?? const [],
+
+                    // UI
+                    hasSidebar: true,
+                    showEmptyChatPlaceholder: false,
+                    showTopBarLogo: false,
+                    showSidebarLogo: false,
+                    showUserMenu: false,
+                    showConversationButton: false,
+                    showKnowledgeBoxButton: false,
+                    borderStyle: const ChatBorderStyle(
+                      visible: true,
+                      margin: EdgeInsets.all(16),
+                      radius: 4,
+                    ),
+                    separatorStyle: const TopBarSeparatorStyle(
+                      visible: false,
+                      thickness: 1,
+                      color: Colors.grey,
+                      topOffset: 0,
+                    ),
+                    topBarMinHeight: 50,
+                    backgroundStyle: const ChatBackgroundStyle(
+                      useGradient: false,
+                      baseColor: Colors.white,
+                    ),
                   ),
                 ),
               ),
-            )),
-          ],
-        );
-      },
-    );
+            ),
+          ),
+        ],
+      );
+    });
   }
 }
 
-//─────────────────────────────────────────────────────────────────────────────
-// DRAG HANDLE
-//─────────────────────────────────────────────────────────────────────────────
+/*───────────────────────────────────────────────────────────────────────────*/
+/* DRAG HANDLE                                                               */
+/*───────────────────────────────────────────────────────────────────────────*/
 class _DragHandle extends StatelessWidget {
   const _DragHandle({required this.onDragDx});
   final void Function(double dx) onDragDx;

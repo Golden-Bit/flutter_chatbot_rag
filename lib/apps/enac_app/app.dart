@@ -1,12 +1,17 @@
 // main.dart
 import 'dart:html' as html;
 
+import 'package:boxed_ai/apps/enac_app/ui_components/claim/CreateClaimPage.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/claim/all_claims_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/claim/claim_edit_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/claim/claim_summary_panel.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/claim/client_claims_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/claim/contract_claims_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/clients/client_edit_form_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/clients/client_form_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/contracts/all_contracts_table.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/contracts/contract_form_page.dart';
+import 'package:boxed_ai/apps/enac_app/ui_components/contracts/edit_contract_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_detail_page.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_models.dart';
 import 'package:boxed_ai/apps/enac_app/ui_components/gare/gare_page.dart';
@@ -63,7 +68,28 @@ class HomeScaffold extends StatefulWidget {
 }
 
 class _HomeScaffoldState extends State<HomeScaffold> {
+bool _editingContract = false;
+final DualPaneController _paneCtrlEditContract = DualPaneController();
+  // Forza il rebuild/refresh della lista sinistri nel contesto "Contratto"
+int _contractClaimsRefresh = 0;
+// ⬇️ Claim: stato EDIT
+bool _editingClaim = false;                           // ⬅️ NEW
+final DualPaneController _paneCtrlEditClaim = DualPaneController(); // ⬅️ NEW
+// ⬇️ NEW: stato e controller per modifica ENTITÀ
+bool _editingClient = false;
+Entity? _editingEntity; // entità corrente da editare
+final DualPaneController _paneCtrlEditClient = DualPaneController();
+// stato e controller per creazione ENTITÀ
+bool _creatingClient = false;            // ON = mostra pagina creazione Entità
+int  _entitiesRefresh = 0;               // per forzare refresh HomeDashboard
+final DualPaneController _paneCtrlCreateClient = DualPaneController();
 
+// Sinistri: stato creazione e refresh
+bool _creatingClaim = false;    // ON = mostra pagina creazione Sinistro
+int  _claimsRefresh = 0;        // per forzare refresh lista dopo creazione
+
+// Controller per pagina di creazione Sinistro
+final DualPaneController _paneCtrlCreateClaim = DualPaneController();
 // Titoli: stato creazione e refresh
 bool _creatingTitle = false;     // ON = mostra pagina creazione Titolo
 int  _titlesRefresh = 0;         // per forzare refresh lista dopo creazione
@@ -107,12 +133,15 @@ late final Omnia8Sdk _sdk;
   /*──────────────────────────────────────────────────────────
    *  Chiude tutte le chat e aggiorna l’icona della Top‑bar
    *────────────────────────────────────────────────────────*/
-  void _resetChats() {
-    if (_chatsOpen) {
-      DualPaneRegistry.closeAll();
-      _chatsOpen = false;
-    }
-  }
+void _resetChats() {
+  // Chiudi comunque il Registry per evitare desync con il flag locale.
+  print("#"*120);
+  DualPaneRegistry.closeAll();
+  print("*"*120);
+  //_chatsOpen = false;
+}
+
+
 
   // Badge numerico uniforme per "Documenti"
 Widget _docBadge(int n) => Container(
@@ -207,15 +236,21 @@ AppBar _buildAppBar() {
     ),
     actions: [
       // CHAT TOGGLE
-      IconButton(
-        icon: Icon(
-          _chatsOpen ? Icons.chat_bubble : Icons.chat_bubble_outline,
-        ),
-        color: Colors.white,
-        tooltip: _chatsOpen ? 'Nascondi chat' : 'Mostra chat',
-        onPressed: () =>
-            setState(() => _chatsOpen = DualPaneRegistry.toggleAll()),
-      ),
+IconButton(
+  icon: Icon(_chatsOpen ? Icons.chat_bubble : Icons.chat_bubble_outline),
+  color: Colors.white,
+  tooltip: _chatsOpen ? 'Nascondi chat' : 'Mostra chat',
+  onPressed: () => setState(() {
+    // L’UI decide l’intento, il Registry esegue. Non usiamo valori di ritorno.
+    _chatsOpen = !_chatsOpen;
+    if (_chatsOpen) {
+      DualPaneRegistry.openAll();
+    } else {
+      DualPaneRegistry.closeAll();
+    }
+  }),
+),
+
       const SizedBox(width: 16),
 
       // LINGUA
@@ -261,7 +296,8 @@ AppBar _buildAppBar() {
         child: TextField(
           controller: _sideSearch,
           onSubmitted: (v) => setState(() {
-            _resetChats();                    // ⬅️ NEW
+            _resetChats();
+            _chatsOpen = false;                    // ⬅️ NEW
             _searchQuery = v.trim();
           }),
           decoration: InputDecoration(
@@ -291,6 +327,7 @@ AppBar _buildAppBar() {
 Widget row(String txt, _ContractSection sec, {Widget? trailing}) => InkWell(
   onTap: () => setState(() {
     _resetChats();
+    _chatsOpen = false;
     _selContractSection = sec;
     if (sec == _ContractSection.titoli) {   // reset selezione summary titolo
       _selectedTitle = null;
@@ -327,6 +364,7 @@ Widget row(String txt, _ContractSection sec, {Widget? trailing}) => InkWell(
               tooltip: 'Risultati ricerca',
 onPressed: () => setState(() {
   _resetChats(); 
+  _chatsOpen = false;
   _selectedContract   = null;
   _selectedContractId = null;   // ⬅️ aggiunto
   _selectedClientId   = null;
@@ -337,6 +375,7 @@ onPressed: () => setState(() {
               tooltip: 'Contratti',
 onPressed: () => setState(() {
   _resetChats(); 
+  _chatsOpen = false;
   _selectedContract   = null;
   _selectedContractId = null;   // ⬅️ aggiunto
   _selClientSection   = _ClientSection.contratti;
@@ -373,6 +412,7 @@ Widget _buildClientSideMenu() {
       InkWell(
 onTap: () => setState(() {
   _resetChats();
+  _chatsOpen = false;
   _selClientSection = sec;
   if (sec == _ClientSection.titoli) {           // NEW: reset vista summary
     _selectedTitle = null;
@@ -413,6 +453,7 @@ return Container(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => setState(() {
               _resetChats();
+              _chatsOpen = false;
               _selectedClientId = null; // torna ai risultati
             }),
           ),
@@ -453,6 +494,7 @@ Widget _buildSideMenu() {
         splashFactory: NoSplash.splashFactory,
 onTap: () => setState(() {
   _resetChats();
+  _chatsOpen = false;
   _selectedSide = item;
   _searchQuery = null;
 
@@ -516,6 +558,35 @@ return Container(
 if (_selectedContract != null) {
   switch (_selContractSection) {
 case _ContractSection.riepilogo:
+  if (_editingContract) {
+    return DualPaneWrapper(
+      key: const ValueKey('pane-edit-contract'),
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlEditContract,
+      leftChild: EditContractPage(
+        user: widget.user,
+        token: widget.token,
+        sdk: _sdk,
+        entityId: _selectedClientId!,         // cliente corrente
+        contractId: _selectedContractId!,     // contratto corrente
+        initialContract: _selectedContract!,  // oggetto pieno
+        onCancel: () => setState(() {
+          _resetChats();
+          _editingContract = false;
+        }),
+        onUpdated: (updated) async {
+          setState(() {
+            _resetChats();
+            _editingContract = false;       // torna al riepilogo
+            _selectedContract = updated;    // aggiorna i dati mostrati
+          });
+        },
+      ),
+    );
+  }
+
+  // riepilogo standard con callback edit/delete
   return DualPaneWrapper(
     user: widget.user,
     token: widget.token,
@@ -525,12 +596,23 @@ case _ContractSection.riepilogo:
       sdk       : _sdk,
       user      : widget.user,
       userId    : widget.user.username,
-      entityId  : _selectedClientId!,     // cliente corrente
-      contractId: _selectedContractId!,   // <-- serve per le API Documenti
-      initialTab: 0,                      // Riepilogo
+      entityId  : _selectedClientId!,
+      contractId: _selectedContractId!,
+      initialTab: 0,
+      onEditRequested: () => setState(() {
+        _resetChats();
+        _editingContract = true;
+      }),
+      onDeleted: () => setState(() {
+        _resetChats();
+        // torna alla lista contratti del cliente
+        _selectedContract   = null;
+        _selectedContractId = null;
+        _selClientSection   = _ClientSection.contratti;
+        _contractsRefresh++;   // forza refresh tabella
+      }),
     ),
   );
-
 case _ContractSection.titoli:
   if (_selectedTitle == null) {
     return DualPaneWrapper(
@@ -545,6 +627,7 @@ case _ContractSection.titoli:
         onOpenTitle: (titolo, viewRow) {
           setState(() {
             _resetChats();
+            _chatsOpen = false;
             _selectedTitle    = titolo;
             _selectedTitleRow = viewRow;
           });
@@ -570,6 +653,7 @@ case _ContractSection.sinistri:
       token: widget.token,
       controller: _paneCtrl3,
       leftChild: ContractClaimsPage(
+        key       : ValueKey('contract-claims-$_contractClaimsRefresh'), // 👈 forza rebuild
         userId    : widget.user.username,
         entityId  : _selectedClientId!,
         contractId: _selectedContractId!,
@@ -577,8 +661,46 @@ case _ContractSection.sinistri:
         onOpenClaim: (sinistro, viewRow) {
           setState(() {
             _resetChats();
+            _chatsOpen = false;
             _selectedClaim    = sinistro;
             _selectedClaimRow = viewRow; // contiene già contract_id e claim_id
+          });
+        },
+      ),
+    );
+  } else if (_editingClaim) {
+    final String contractId = _selectedContractId!;
+    final String claimId = (
+      _selectedClaimRow?['claim_id'] ??
+      _selectedClaimRow?['id'] ??
+      ''
+    ).toString();
+
+    return DualPaneWrapper(
+      key: const ValueKey('pane-edit-claim-in-contract'),
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlEditClaim,
+      leftChild: EditClaimPage(
+        user        : widget.user,
+        token       : widget.token,
+        sdk         : _sdk,
+        entityId    : _selectedClientId!,
+        contractId  : contractId,
+        claimId     : claimId,
+        initialClaim: _selectedClaim!,
+        onCancel    : () => setState(() {
+          _resetChats();
+          _chatsOpen = false;
+          _editingClaim = false; // torna al summary
+        }),
+        onUpdated   : (id, updated) async {
+          setState(() {
+            _resetChats();
+            _chatsOpen = false;
+            _editingClaim = false;
+            _selectedClaim = updated;      // aggiorna summary corrente
+            _contractClaimsRefresh++;      // forza refresh lista quando torni indietro
           });
         },
       ),
@@ -604,9 +726,24 @@ case _ContractSection.sinistri:
         entityId  : _selectedClientId!,
         contractId: contractId,
         claimId   : claimId,
+
+        // 👇 CABLAGGI FONDAMENTALI
+        onEditRequested: () => setState(() {
+          _resetChats();
+          _chatsOpen = false;
+          _editingClaim = true;
+        }),
+        onDeleted: () => setState(() {
+          _resetChats();
+          _chatsOpen = false;
+          _selectedClaim    = null;   // chiudi summary
+          _selectedClaimRow = null;
+          _contractClaimsRefresh++;   // e ricarica lista
+        }),
       ),
     );
   }
+
 
     case _ContractSection.documenti:
       return const Center(child: Text('Documenti – placeholder'));
@@ -620,6 +757,37 @@ case _ContractSection.sinistri:
 if (_selectedClientId != null) {
   switch (_selClientSection) {
 case _ClientSection.cliente:
+  // se sto modificando, mostra editor in DualPane
+  if (_editingClient) {
+    return DualPaneWrapper(
+      key: const ValueKey('pane-edit-client'),
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlEditClient,
+      leftChild: EditClientPage(
+        user        : widget.user,
+        token       : widget.token,
+        sdk         : _sdk,
+        entityId    : _selectedClientId!,      // id cliente corrente
+        initialEntity: _editingEntity!,        // entità pre-caricata dal summary
+        onCancel    : () => setState(() {
+          _resetChats();
+          _chatsOpen = false;
+          _editingClient = false;              // torna al summary
+        }),
+        onUpdated   : (entityId, updated) async {
+          setState(() {
+            _resetChats();
+            _chatsOpen = false;
+            _editingClient = false;            // chiudi editor
+            // nessun contatore qui: il FutureBuilder del summary rilegge dal BE
+          });
+        },
+      ),
+    );
+  }
+
+  // altrimenti mostra il summary (come prima) MA con onEditRequested
   return FutureBuilder<Entity>(
     future: _sdk.getEntity(widget.user.username, _selectedClientId!),
     builder: (ctx, snap) {
@@ -629,9 +797,28 @@ case _ClientSection.cliente:
       if (snap.hasError) {
         return Center(child: Text('Errore: ${snap.error}'));
       }
-      return ClientDetailPage(client: snap.data!);   //  ← oggetto reale
+      final entity = snap.data!;
+return ClientDetailPage(
+  client: entity,
+  sdk: _sdk,
+  userId: widget.user.username,
+  entityId: _selectedClientId!,
+  onEditRequested: () => setState(() {
+    _resetChats();
+    _chatsOpen = false;
+    _editingEntity = entity;
+    _editingClient = true;
+  }),
+  onDeleted: () => setState(() {
+    _resetChats();
+    _chatsOpen = false;
+    _selectedClientId = null;  // ⬅️ torna alla vista precedente
+    _entitiesRefresh++;        // (opz.) refresh dashboard/elenco
+  }),
+);
     },
   );
+
     case _ClientSection.progetti:
       return const Center(child: Text('Progetti – placeholder'));
     case _ClientSection.richieste:
@@ -651,12 +838,14 @@ case _ClientSection.contratti:
         sdk      : _sdk,
         clientId : _selectedClientId!,
     onCancel: () => setState(() {
-      _resetChats();              // 👈 chiude chat + aggiorna _chatsOpen=false
+      _resetChats();      
+      _chatsOpen = false;        // 👈 chiude chat + aggiorna _chatsOpen=false
       _creatingContract = false;  // torna alla lista
     }),
     onCreated: (newContractId) {
       setState(() {
-        _resetChats();              // 👈 chiude chat + aggiorna _chatsOpen=false
+        _resetChats();   
+        _chatsOpen = false;           // 👈 chiude chat + aggiorna _chatsOpen=false
         _creatingContract = false;  // torna alla lista
         _contractsRefresh++;        // forza refresh tabella
       });
@@ -680,13 +869,15 @@ case _ClientSection.contratti:
         onOpenContract     : (String contractId, ContrattoOmnia8 c) {
           setState(() {
             _resetChats();
+            _chatsOpen = false;
             _selectedContractId = contractId;
             _selectedContract   = c;
             _selContractSection = _ContractSection.riepilogo;
           });
         },
 onCreateContract: () => setState(() {
-  _resetChats();          // <<--- IMPORTANTE
+  _resetChats();     
+  _chatsOpen = false;     // <<--- IMPORTANTE
   _creatingContract = true;
 }),
         refreshCounter      : _contractsRefresh, // per la tabella
@@ -709,12 +900,14 @@ case _ClientSection.titoli:
         sdk     : _sdk,
         entityId: _selectedClientId!,
         onCancel: () => setState(() {
-          _resetChats();           // 👈 chiude tutte le chat + aggiorna icona
+          _resetChats();  
+          _chatsOpen = false;         // 👈 chiude tutte le chat + aggiorna icona
           _creatingTitle = false;  // torna alla lista titoli
         }),
         onCreated: (newTitleId) {
           setState(() {
-            _resetChats();           // 👈 chiude chat + aggiorna icona
+            _resetChats();     
+            _chatsOpen = false;      // 👈 chiude chat + aggiorna icona
             _creatingTitle = false;  // torna alla lista
             _titlesRefresh++;        // forza refresh tabella titoli
           });
@@ -735,12 +928,14 @@ case _ClientSection.titoli:
         sdk: _sdk,
         refreshCounter: _titlesRefresh,          // ⬅️ NEW
         onCreateTitle: () => setState(() {       // ⬅️ NEW
-          _resetChats();                         // chiude chat in apertura creazione
+          _resetChats();    
+          _chatsOpen = false;                     // chiude chat in apertura creazione
           _creatingTitle = true;
         }),
         onOpenTitle: (titolo, viewRow) {
           setState(() {
             _resetChats();
+            _chatsOpen = false;
             _selectedTitle    = titolo;
             _selectedTitleRow = viewRow;
           });
@@ -764,8 +959,36 @@ case _ClientSection.titoli:
     case _ClientSection.movimenti:
       return const Center(child: Text('Movimenti – placeholder'));
 case _ClientSection.sinistri:
-  if (_selectedClaim == null) {
-    // Lista sinistri
+  if (_creatingClaim) {
+    // PAGINA CREAZIONE SINISTRO
+    return DualPaneWrapper(
+      key: const ValueKey('pane-create-claim'),
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlCreateClaim,
+      leftChild: CreateClaimPage(
+        key: const ValueKey('create-claim'),
+        user    : widget.user,
+        token   : widget.token,
+        sdk     : _sdk,
+        entityId: _selectedClientId!,
+        onCancel: () => setState(() {
+          _resetChats();         // chiude chat + aggiorna icona
+          _chatsOpen = false;
+          _creatingClaim = false;
+        }),
+        onCreated: (newClaimId) {
+          setState(() {
+            _resetChats();    
+            _chatsOpen = false;   // chiude chat + aggiorna icona
+            _creatingClaim = false;
+            _claimsRefresh++;    // forza refresh lista sinistri
+          });
+        },
+      ),
+    );
+  } else if (_selectedClaim == null) {
+    // LISTA sinistri
     return DualPaneWrapper(
       user: widget.user,
       token: widget.token,
@@ -779,14 +1002,65 @@ case _ClientSection.sinistri:
         onOpenClaim: (sinistro, viewRow) {
           setState(() {
             _resetChats();
+            _chatsOpen = false;
             _selectedClaim    = sinistro;
             _selectedClaimRow = viewRow; // deve contenere contract_id e claim_id
           });
         },
+        // NEW: apre la pagina di creazione
+        onCreateClaim: () => setState(() {
+          _resetChats();    
+          _chatsOpen = false;     // chiude chat in apertura creazione
+          _creatingClaim = true;
+        }),
+        // NEW: refresh controllato da parent
+        refreshCounter: _claimsRefresh,
       ),
     );
-  } else {
-    // Summary incastrato
+  } else if (_editingClaim) {
+    // EDIT
+    final String contractId = (
+      _selectedClaimRow?['contract_id'] ??
+      _selectedClaimRow?['contractId']
+    )?.toString() ?? (_selectedContractId ?? '');
+
+    final String claimId = (
+      _selectedClaimRow?['claim_id'] ??
+      _selectedClaimRow?['ClaimId']  ??
+      _selectedClaimRow?['id']
+    )?.toString() ?? '';
+
+    return DualPaneWrapper(
+      key: const ValueKey('pane-edit-claim'),
+      user: widget.user,
+      token: widget.token,
+      controller: _paneCtrlEditClaim,
+      leftChild: EditClaimPage(
+        user       : widget.user,
+        token      : widget.token,
+        sdk        : _sdk,
+        entityId   : _selectedClientId!,
+        contractId : contractId,
+        claimId    : claimId,
+        initialClaim: _selectedClaim!,
+        onCancel   : () => setState(() {
+          _resetChats();
+          _chatsOpen = false;
+          _editingClaim = false;   // torna al summary
+        }),
+        onUpdated  : (id, updated) async {
+          setState(() {
+            _resetChats();
+            _chatsOpen = false;
+            _editingClaim = false;
+            _selectedClaim = updated;  // aggiorno summary corrente
+            _claimsRefresh++;
+          });
+        },
+      ),
+    );
+  }else {
+    // SUMMARY incastrato del sinistro
     final String contractId = (
       _selectedClaimRow?['contract_id'] ??
       _selectedClaimRow?['contractId']
@@ -803,18 +1077,31 @@ case _ClientSection.sinistri:
       token: widget.token,
       controller: _paneCtrlClaims,
       leftChild: ClaimSummaryPanel(
-        sinistro: _selectedClaim!,
-        viewRow : _selectedClaimRow ?? const {},
-        // ↓↓↓ nuovi parametri richiesti dal pannello ↓↓↓
-        sdk: _sdk,
-        user: widget.user,
-        userId: widget.user.username,
-        entityId: _selectedClientId!,
+        sinistro  : _selectedClaim!,
+        viewRow   : _selectedClaimRow ?? const {},
+        sdk       : _sdk,
+        user      : widget.user,
+        userId    : widget.user.username,
+        entityId  : _selectedClientId!,
         contractId: contractId,
-        claimId: claimId,
+        claimId   : claimId,
+            // 👇 CABLAGGI FONDAMENTALI
+    onEditRequested: () => setState(() {
+      _resetChats();
+      _chatsOpen = false;
+      _editingClaim = true;      // apri editor (ramo già presente sopra)
+    }),
+    onDeleted: () => setState(() {
+      _resetChats();
+      _chatsOpen = false;
+      _selectedClaim    = null;  // torna alla lista
+      _selectedClaimRow = null;
+      _claimsRefresh++;          // forza refresh ClientClaimsPage
+    }),
       ),
     );
   }
+
 
 
     case _ClientSection.documenti:
@@ -845,6 +1132,7 @@ if (_searchQuery != null)  {
       onOpenClient: (id) {
         setState(() {
           _resetChats();
+          _chatsOpen = false;
           _selectedClientId = id;
           _selClientSection = _ClientSection.cliente;
           // pulizia di selezioni precedenti
@@ -859,7 +1147,7 @@ if (_searchQuery != null)  {
       onOpenContract: (entityId, contractId, contratto) {
         setState(() {
           _resetChats();
-
+_chatsOpen = false;
           // fai entrare nel contesto CONTRATTO → Riepilogo
           _selectedClientId   = entityId;            // serve per documenti
           _selectedContractId = contractId;
@@ -877,7 +1165,7 @@ if (_searchQuery != null)  {
       onOpenClaim: (entityId, contractId, claimId, viewRow, sinistro) {
         setState(() {
           _resetChats();
-
+_chatsOpen = false;
           // entra nel contesto CLIENTE → Sinistri (mostra subito il Summary)
           _selectedClientId = entityId;
           _selClientSection = _ClientSection.sinistri;
@@ -906,19 +1194,57 @@ if (_searchQuery != null)  {
     // caso 2: mostra placeholder sezione
 // 🔧 Dentro _buildContent(), sostituisci lo switch(_selectedSide) finale
 switch (_selectedSide) {
-  case _SideItem.home:
-    return HomeDashboard(
+case _SideItem.home:
+  if (_creatingClient) {
+    return DualPaneWrapper(
+      key: const ValueKey('pane-create-client'),
       user: widget.user,
       token: widget.token,
-      sdk: _sdk,
-      onOpenClient: (id) {
-        setState(() {
-          _resetChats();
-          _selectedClientId = id;                 // apri il cliente dalla Home
-          _selClientSection = _ClientSection.cliente;
-        });
-      },
+      controller: _paneCtrlCreateClient,
+      leftChild: CreateClientPage(
+        user   : widget.user,
+        token  : widget.token,
+        sdk    : _sdk,
+        onCancel: () => setState(() {
+          _resetChats();    
+          _chatsOpen = false;        // chiude chat + aggiorna icona
+          _creatingClient = false;  // torna alla dashboard
+        }),
+        onCreated: (newEntityId) {
+          setState(() {
+            _resetChats();
+            _chatsOpen = false;
+            _creatingClient = false;
+            _entitiesRefresh++;     // forza refresh elenco entità in HomeDashboard
+          });
+        },
+      ),
     );
+  }
+
+  // dashboard standard (passo anche refreshCounter e callback creazione)
+  return HomeDashboard(
+    key: ValueKey('home-${_entitiesRefresh}'),
+    user: widget.user,
+    token: widget.token,
+    sdk: _sdk,
+    onOpenClient: (id) {
+      setState(() {
+        _resetChats();
+        _chatsOpen = false;
+        _selectedClientId = id;
+        _selClientSection = _ClientSection.cliente;
+      });
+    },
+    // ⬇️ nuovo: apertura pagina creazione entità
+    onCreateClient: () => setState(() {
+      _resetChats();
+      _chatsOpen = false;
+      _creatingClient = true;
+    }),
+    refreshCounter: _entitiesRefresh, // ⬅️ vedi modifiche HomeDashboard
+  );
+
 case _SideItem.polizze:
   return DualPaneWrapper(
     user: widget.user,
@@ -930,6 +1256,7 @@ case _SideItem.polizze:
       onOpenContract: (entityId, contractId, c) {
         setState(() {
           _resetChats();
+          _chatsOpen = false;
           // apri il dettaglio contratto riusando la stessa vista già in uso
           _selectedClientId   = entityId;       // serve per ContractDetailPage (documenti)
           _selectedContractId = contractId;
@@ -954,7 +1281,7 @@ case _SideItem.sinistri:
       onOpenClaim: (entityId, contractId, claimId, viewRow, sinistro) {
         setState(() {
           _resetChats();
-
+_chatsOpen = false;
           // ⬇️ Passo al contesto CLIENTE
           _selectedClientId   = entityId;                     // sidebar diventa "cliente"
           _selClientSection   = _ClientSection.sinistri;      // pagina cliente → sinistri
@@ -990,6 +1317,7 @@ case _SideItem.proceduraGara:
           onOpenGara: (g) {
             setState(() {
               _resetChats();
+              _chatsOpen = false;
               _selectedGara = g; // apre il dettaglio "incastrato"
             });
           },

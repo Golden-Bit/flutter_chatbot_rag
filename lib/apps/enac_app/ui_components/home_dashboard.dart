@@ -275,7 +275,7 @@ int _dueCount(String scope, int days) {
 
   Widget _entitiesHeader() => Row(
         children: [
-          const Text('Elenco delle Entità Assicurate',
+          const Text('Elenco degli Assicurati',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
           const Spacer(),
           TextButton.icon(
@@ -480,7 +480,7 @@ onPressed: () => widget.onCreateClient?.call(),
                 children: [
                   Expanded(
                     child: _dueBox(
-                      title: 'Titoli in Scadenza',
+                      title: 'Pagamenti in Scadenza',
                       rows: const [
                         (label: 'In Scadenza tra 60 giorni', days: 60),
                         (label: 'In Scadenza tra 90 giorni', days: 90),

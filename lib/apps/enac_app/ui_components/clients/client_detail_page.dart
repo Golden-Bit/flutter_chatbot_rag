@@ -77,10 +77,10 @@ class _HeaderActionIconsClient extends StatelessWidget {
       children: [
         ico(Icons.edit, tip: 'Modifica', onTap: onEdit),
         ico(Icons.delete_outline, tip: 'Elimina', onTap: onDelete), // ⬅️ NEW
-        ico(Icons.file_copy, tip: 'Duplica'),
-        ico(Icons.mail, tip: 'Email'),
-        ico(Icons.phone, tip: 'Chiama'),
-        ico(Icons.cloud_upload, enabled: false, tip: 'Carica'),
+        //ico(Icons.file_copy, tip: 'Duplica'),
+        //ico(Icons.mail, tip: 'Email'),
+        //ico(Icons.phone, tip: 'Chiama'),
+        //ico(Icons.cloud_upload, enabled: false, tip: 'Carica'),
       ],
     );
   }
@@ -281,10 +281,10 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                           _kvMini('PARTITA IVA', c.vat ?? 'n.d.'),
                           const SizedBox(height: 6),
                           _kvMini('COD. FISCALE', c.taxCode ?? 'n.d.'),
-                          const SizedBox(height: 6),
-                          _kvMini('LEG. RAPP.', c.legalRep ?? 'n.d.'),
-                          const SizedBox(height: 6),
-                          _kvMini('CF LEG. RAPP.', c.legalRepTaxCode ?? 'n.d.'),
+                          //const SizedBox(height: 6),
+                          //_kvMini('LEG. RAPP.', c.legalRep ?? 'n.d.'),
+                          //const SizedBox(height: 6),
+                          //_kvMini('CF LEG. RAPP.', c.legalRepTaxCode ?? 'n.d.'),
                         ],
                       ),
                     ),
@@ -344,10 +344,10 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                 _KV('Partita IVA', c.vat ?? ''),
                 _KV('Codice Fiscale', c.taxCode ?? ''),
               ]),
-              _section('Rappresentanza', [
+              /*_section('Rappresentanza', [
                 _KV('Legale Rappresentante', c.legalRep ?? ''),
                 _KV('CF Legale Rappresentante', c.legalRepTaxCode ?? ''),
-              ]),
+              ]),*/
             ],
           ),
         ),

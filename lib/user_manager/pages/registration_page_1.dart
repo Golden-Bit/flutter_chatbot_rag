@@ -58,28 +58,42 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
   /// Quando l'utente clicca “Continua con Microsoft”, recupero l'URL di login da backend
   /// e ridirigo il browser verso quell'endpoint (Hosted UI Cognito → Azure AD).
-  Future<void> _onSocialPressed(String providerName) async {
-    if (providerName != 'Microsoft') {
-      // Per ora gestiamo solo Microsoft; per gli altri (Google/Apple) metti un fallback
-      debugPrint('Provider non gestito: $providerName');
-      return;
-    }
-    setState(() {
-      _errorMessage = '';
-      _isLoading = true;
-    });
-    try {
+Future<void> _onSocialPressed(String providerName) async {
+  setState(() {
+    _errorMessage = '';
+    _isLoading = true;
+  });
+
+  try {
+    if (providerName == 'Microsoft') {
+      // Salvo provider pendente per la callback
+      html.window.localStorage['pending_provider'] = 'azure';
       final loginUrl = await _apiClient.getAzureLoginUrl();
-      // Effettuo il redirect del browser intero verso Cognito Hosted UI
-      html.window.location.href = loginUrl;
-      // Non serve fare altro: verrà richiamato initState alla redirect
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Errore Invio al login federato: $e';
-        _isLoading = false;
-      });
+      html.window.location.href = loginUrl; // redirect alla Hosted UI
+      return; // initState verrà rilanciato al ritorno
     }
+
+    if (providerName == 'Google') {
+      // Salvo provider pendente per la callback
+      html.window.localStorage['pending_provider'] = 'google';
+      final loginUrl = await _apiClient.getGoogleLoginUrl();
+      html.window.location.href = loginUrl; // redirect alla Hosted UI
+      return; // initState verrà rilanciato al ritorno
+    }
+
+    // altri provider non ancora gestiti
+    debugPrint('Provider non gestito: $providerName');
+    setState(() {
+      _isLoading = false;
+    });
+  } catch (e) {
+    setState(() {
+      _errorMessage = 'Errore Invio al login federato: $e';
+      _isLoading = false;
+    });
   }
+}
+
 
   @override
   Widget build(BuildContext context) {

@@ -464,7 +464,7 @@ class TitleFormPaneState extends State<TitleFormPane> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 8),
-                Text('Carico contratti...'),
+                Text('Carico polizze...'),
               ],
             )
           else if (_loadError != null)

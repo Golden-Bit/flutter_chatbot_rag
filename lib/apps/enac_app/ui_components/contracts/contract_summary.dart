@@ -16,6 +16,17 @@ import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 final _dateFmt = DateFormat('dd/MM/yyyy');
 final _currencyFmt = NumberFormat.currency(locale: 'it_IT', symbol: '€');
 
+String? _firstNonBlank(List<String?> vals) {
+  const placeholders = {'-', '--', 'n/a', 'N/A', 'account placeholder', 'intermediario placeholder'};
+  for (final v in vals) {
+    final s = v?.trim();
+    if (s == null || s.isEmpty) continue;
+    if (placeholders.contains(s.toLowerCase())) continue;
+    return s; // il primo valore utile
+  }
+  return null;
+}
+
 String _fmtDate(DateTime? dt) => (dt == null) ? '—' : _dateFmt.format(dt);
 
 double? _parseMoney(dynamic v) {
@@ -141,6 +152,28 @@ class _DocItem {
   String get categoria => meta['categoria']?.toString() ?? 'ALTRO';
 }
 
+// Normalizza il tipo contratto ai soli valori consentiti
+String _tipoContratto(String? raw) {
+  final s = (raw ?? '').toUpperCase().trim();
+  if (s.isEmpty) return '—';
+  if (s.startsWith('COND')) return 'COND';
+  if (s == 'APP0' || s == 'APP 0' || s.contains('PREMIO NULLO')) return 'APP0';
+  if (s == 'APP€' || s == 'APP €' || s.contains('CON PREMIO')) return 'APP€';
+  return s; // fallback: mostra com'è se non riconosciuto
+}
+
+// Converte dinamicamente in "Sì"/"No"
+String _siNo(dynamic v) {
+  if (v == null) return '—';
+  final s = v.toString().trim().toLowerCase();
+  const yes = {'si','sì','true','1','y','yes'};
+  const no  = {'no','false','0','n'};
+  if (yes.contains(s)) return 'Sì';
+  if (no.contains(s))  return 'No';
+  return s.isEmpty ? '—' : v.toString(); // fallback: mostra testo originale
+}
+
+
 /// ═══════════════════════════════════════════════════════════════
 /// ContractDetailPage — con Documenti (upload/list/CRUD)
 /// ═══════════════════════════════════════════════════════════════
@@ -210,7 +243,7 @@ class _ContractDetailPageState extends State<ContractDetailPage> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Contratto eliminato.')),
+      const SnackBar(content: Text('Polizza eliminata.')),
     );
     widget.onDeleted?.call();
   } catch (e) {
@@ -220,7 +253,7 @@ class _ContractDetailPageState extends State<ContractDetailPage> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         title: const Text('Errore eliminazione'),
-        content: Text('Impossibile eliminare il contratto.\nDettagli: $e'),
+        content: Text('Impossibile eliminare la polizza.\nDettagli: $e'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Chiudi')),
         ],
@@ -690,84 +723,87 @@ Column(
     );
   }
 
-  /// Contenuto del tab RIEPILOGO (quello “attuale” esistente)
-  Widget _buildRiepilogo() {
-    final id   = widget.contratto.identificativi;
-    final uv   = widget.contratto.unitaVendita;          // opzionale
-    final amm  = widget.contratto.amministrativi;        // opzionale
-    final prem = widget.contratto.premi;                 // opzionale
-    final rinn = widget.contratto.rinnovo;               // opzionale
-    final op   = widget.contratto.operativita;           // opzionale
-    final pr   = op?.parametriRegolazione;               // opzionale
-    final ram  = widget.contratto.ramiEl;                // opzionale
+Widget _buildRiepilogo() {
+  final id   = widget.contratto.identificativi;
+  final uv   = widget.contratto.unitaVendita;     // contiene: puntoVendita, puntoVendita2, account, intermediario
+  final amm  = widget.contratto.amministrativi;   // effetto, scadenza, scadenzaCopertura, dataEmissione, frazionamento, ...
+  final prem = widget.contratto.premi;            // premio (lordo), netto (imponibile), imposte, ...
+  final rinn = widget.contratto.rinnovo;          // rinnovo, disdetta, proroga, giorniMora (testo/num)
+  final op   = widget.contratto.operativita;      // regolazione (bool)
+  final ram  = widget.contratto.ramiEl;           // descrizione del rischio
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _section('Identificativi', [
-            _KV('Tipo', id.tipo),
-            _KV('TpCar', id.tpCar ?? ''),
-            _KV('Ramo', id.ramo),
-            _KV('Compagnia', id.compagnia),
-            _KV('Numero Polizza', id.numeroPolizza),
-          ]),
-          _section('Rischio / Prodotto', [
-            _KV('Descrizione', ram?.descrizione ?? ''),
-          ]),
-          _section('Unità Vendita', [
-            _KV('Punto Vendita', uv?.puntoVendita ?? ''),
-            _KV('Punto Vendita 2', uv?.puntoVendita2 ?? ''),
-            _KV('Account', uv?.account ?? ''),
-            _KV('Intermediario', uv?.intermediario ?? ''),
-          ]),
-          _section('Amministrativi', [
-            _KV('Effetto', _fmtDate(amm?.effetto)),
-            _KV('Scadenza', _fmtDate(amm?.scadenza)),
-            _KV('Data Emissione', _fmtDate(amm?.dataEmissione)),
-            _KV('Ultima Rata Pagata', _fmtDate(amm?.ultimaRataPagata)),
-            _KV('Scadenza Originaria', _fmtDate(amm?.scadenzaOriginaria)),
-            _KV('Scadenza Mora', _fmtDate(amm?.scadenzaMora)),
-            _KV('Scadenza Vincolo', _fmtDate(amm?.scadenzaVincolo)),
-            _KV('Scadenza Copertura', _fmtDate(amm?.scadenzaCopertura)),
-            _KV('Fine Copertura Proroga', _fmtDate(amm?.fineCoperturaProroga)),
-            _KV('Numero Proposta', amm?.numeroProposta ?? ''),
-            _KV('Codice Convenzione', amm?.codConvenzione ?? ''),
-            _KV('Frazionamento', amm?.frazionamento ?? ''),
-            _KV('Modalità Incasso', amm?.modalitaIncasso ?? ''),
-            _KV('Compreso Firma', _yesNo(amm?.compresoFirma)),
-          ]),
-          _section('Premi', [
-            _KV('Premio', _fmtMoney(prem?.premio)),
-            _KV('Netto', _fmtMoney(prem?.netto)),
-            _KV('Accessori', _fmtMoney(prem?.accessori)),
-            _KV('Diritti', _fmtMoney(prem?.diritti)),
-            _KV('Imposte', _fmtMoney(prem?.imposte)),
-            _KV('Spese', _fmtMoney(prem?.spese)),
-            _KV('Fondo', _fmtMoney(prem?.fondo)),
-            _KV('Sconto', prem?.sconto == null ? '—' : _fmtMoney(prem?.sconto)),
-          ]),
-          _section('Rinnovo', [
-            _KV('Rinnovo', rinn?.rinnovo ?? ''),
-            _KV('Disdetta', rinn?.disdetta ?? ''),
-            _KV('Giorni Mora', rinn?.giorniMora ?? ''),
-            _KV('Proroga', rinn?.proroga ?? ''),
-          ]),
-          _section('Operatività', [
-            _KV('Regolazione', _yesNo(op?.regolazione)),
-            _KV('Inizio', _fmtDate(pr?.inizio)),
-            _KV('Fine', _fmtDate(pr?.fine)),
-            _KV('Ultima Reg. Emessa', _fmtDate(pr?.ultimaRegEmessa)),
-            _KV('Giorni Invio Dati', pr?.giorniInvioDati?.toString() ?? ''),
-            _KV('Giorni Pagamento Reg.', pr?.giorniPagReg?.toString() ?? ''),
-            _KV('Giorni Mora Regolazione', pr?.giorniMoraRegolazione?.toString() ?? ''),
-            _KV('Cadenza Regolazione', pr?.cadenzaRegolazione ?? ''),
-          ]),
-        ],
-      ),
-    );
-  }
+  // Mappature richieste
+  final tipo           = _tipoContratto(id.tpCar);                        // COND / APP0 / APP€
+  final rischio        = ram?.descrizione ?? '';                         // "Rischio"
+  final compagnia      = id.compagnia;
+  final numeroPolApp   = id.numeroPolizza;                               // "Numero di Polizza/Appendice"
+  final premioImp      = _fmtMoney(prem?.netto);                          // "Premio Annuo Imponibile"
+  final imposte        = _fmtMoney(prem?.imposte);                        // "Imposte"
+  final premioLordo    = _fmtMoney(prem?.premio);                         // "Premio Annuo Lordo"
+  final frazionamento  = amm?.frazionamento ?? '';                        // "Frazionamento"
+  final dtEffetto      = _fmtDate(amm?.effetto);                          // "Effetto"
+  final dtScadenza     = _fmtDate(amm?.scadenza);                         // "Scadenza"
+  final dtCopertura    = _fmtDate(amm?.scadenzaCopertura);                // "Scadenza Copertura"
+  final dtEmissione    = _fmtDate(amm?.dataEmissione);                    // "Data di Emissione"
+  final giorniMora     = (rinn?.giorniMora ?? '').toString();             // "Giorni di Mora"
+  final broker         = uv?.intermediario ?? '';                         // "Broker"
+  // Non esiste un campo "indirizzo" esplicito nel modello usato qui:
+  // usiamo il miglior proxy disponibile (Punto Vendita 2 -> Punto Vendita -> Account)
+final brokerAddress = _firstNonBlank([
+  uv?.puntoVendita,   // ⬅️ qui salviamo "broker_indirizzo" in creazione
+  uv?.puntoVendita2,
+  uv?.account,
+]) ?? '';
+
+  final tacitoRinnovo  = _siNo(rinn?.rinnovo);                            // "Sì/No"
+  final disdetta       = rinn?.disdetta ?? '';
+  final proroga        = rinn?.proroga ?? '';                             // "Facoltà di Proroga"
+  final regolazioneFin = _siNo(op?.regolazione);                          // "Sì/No"
+
+  return SingleChildScrollView(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1) Identificativi principali
+        _section('Identificativi', [
+          _KV('Tipo', tipo),
+          _KV('Rischio', rischio),
+          _KV('Compagnia', compagnia),
+          _KV('Numero di Polizza/Appendice', numeroPolApp),
+        ]),
+
+        // 2) Premi / importi
+        _section('Premi', [
+          _KV('Premio Annuo Imponibile', premioImp),
+          _KV('Imposte', imposte),
+          _KV('Premio Annuo Lordo', premioLordo),
+          _KV('Frazionamento', frazionamento),
+        ]),
+
+        // 3) Scadenze e date
+        _section('Scadenze', [
+          _KV('Effetto', dtEffetto),
+          _KV('Scadenza', dtScadenza),
+          _KV('Scadenza Copertura', dtCopertura),
+          _KV('Data di Emissione', dtEmissione),
+          _KV('Giorni di Mora', giorniMora),
+        ]),
+
+        // 4) Broker / Rinnovo / Regolazione
+        _section('Broker & Rinnovo', [
+          _KV('Broker', broker),
+          _KV('Indirizzo del Broker', brokerAddress),
+          _KV('Tacito Rinnovo', tacitoRinnovo),
+          _KV('Disdetta', disdetta),
+          _KV('Facoltà di Proroga', proroga),
+          _KV('Regolazione al termine del periodo', regolazioneFin),
+        ]),
+      ],
+    ),
+  );
+}
+
 
   Widget _section(String t, List<_KV> rows) => Padding(
         padding: const EdgeInsets.only(top: 28),

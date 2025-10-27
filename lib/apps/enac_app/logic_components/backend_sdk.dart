@@ -176,11 +176,11 @@ class UnitaVendita {
 class Amministrativi {
   final DateTime effetto;
   final DateTime dataEmissione;
-  final DateTime ultimaRataPagata;
+  final DateTime? ultimaRataPagata;
   final String frazionamento; // "annuale" (stringa)
   final bool compresoFirma;
   final DateTime scadenza;
-  final DateTime scadenzaOriginaria;
+  final DateTime? scadenzaOriginaria;
   final DateTime? scadenzaMora;
   final String? numeroProposta;
   final String modalitaIncasso;
@@ -192,11 +192,11 @@ class Amministrativi {
   Amministrativi({
     required this.effetto,
     required this.dataEmissione,
-    required this.ultimaRataPagata,
+    this.ultimaRataPagata,
     this.frazionamento = 'annuale',
     this.compresoFirma = false,
     required this.scadenza,
-    required this.scadenzaOriginaria,
+    this.scadenzaOriginaria,
     this.scadenzaMora,
     this.numeroProposta,
     this.modalitaIncasso = '-',
@@ -209,11 +209,12 @@ class Amministrativi {
   factory Amministrativi.fromJson(Map<String, dynamic> json) => Amministrativi(
         effetto: DateTime.parse(json['Effetto']),
         dataEmissione: DateTime.parse(json['DataEmissione']),
-        ultimaRataPagata: DateTime.parse(json['UltRataPagata']),
+        // ⬇️ tutti gli opzionali ora sono "opt parse" (safe se assenti)
+        ultimaRataPagata: _parseDateOpt(json['UltRataPagata']),
         frazionamento: json['Frazionamento'] ?? 'annuale',
         compresoFirma: (json['CompresoFirma'] ?? false) as bool,
         scadenza: DateTime.parse(json['Scadenza']),
-        scadenzaOriginaria: DateTime.parse(json['ScadenzaOriginaria']),
+        scadenzaOriginaria: _parseDateOpt(json['ScadenzaOriginaria']),
         scadenzaMora: _parseDateOpt(json['ScadenzaMora']),
         numeroProposta: _optStr(json['NumeroProposta']),
         modalitaIncasso: json['ModalitaIncasso'] ?? '-',
@@ -223,22 +224,45 @@ class Amministrativi {
         fineCoperturaProroga: _parseDateOpt(json['FineCoperturaProroga']),
       );
 
-  Map<String, dynamic> toJson() => {
-        'Effetto': _dateToIsoOpt(effetto),
-        'DataEmissione': _dateToIsoOpt(dataEmissione),
-        'UltRataPagata': _dateToIsoOpt(ultimaRataPagata),
-        'Frazionamento': frazionamento,
-        'CompresoFirma': compresoFirma,
-        'Scadenza': _dateToIsoOpt(scadenza),
-        'ScadenzaOriginaria': _dateToIsoOpt(scadenzaOriginaria),
-        'ScadenzaMora': _dateToIsoOpt(scadenzaMora),
-        'NumeroProposta': numeroProposta,
-        'ModalitaIncasso': modalitaIncasso,
-        'CodConvenzione': codConvenzione,
-        'ScadenzaVincolo': _dateToIsoOpt(scadenzaVincolo),
-        'ScadenzaCopertura': _dateToIsoOpt(scadenzaCopertura),
-        'FineCoperturaProroga': _dateToIsoOpt(fineCoperturaProroga),
-      };
+  Map<String, dynamic> toJson() {
+    // Campi obbligatori sempre presenti
+    final m = <String, dynamic>{
+      'Effetto': _dateToIsoOpt(effetto),
+      'DataEmissione': _dateToIsoOpt(dataEmissione),
+      'Frazionamento': frazionamento,
+      'CompresoFirma': compresoFirma,
+      'Scadenza': _dateToIsoOpt(scadenza),
+      'ModalitaIncasso': modalitaIncasso,
+    };
+
+    // ⬇️ Aggiungi SOLO se valorizzati (evita chiavi con null)
+    if (ultimaRataPagata != null) {
+      m['UltRataPagata'] = _dateToIsoOpt(ultimaRataPagata);
+    }
+    if (scadenzaOriginaria != null) {
+      m['ScadenzaOriginaria'] = _dateToIsoOpt(scadenzaOriginaria);
+    }
+    if (scadenzaMora != null) {
+      m['ScadenzaMora'] = _dateToIsoOpt(scadenzaMora);
+    }
+    if (numeroProposta != null && numeroProposta!.isNotEmpty) {
+      m['NumeroProposta'] = numeroProposta;
+    }
+    if (codConvenzione != null && codConvenzione!.isNotEmpty) {
+      m['CodConvenzione'] = codConvenzione;
+    }
+    if (scadenzaVincolo != null) {
+      m['ScadenzaVincolo'] = _dateToIsoOpt(scadenzaVincolo);
+    }
+    if (scadenzaCopertura != null) {
+      m['ScadenzaCopertura'] = _dateToIsoOpt(scadenzaCopertura);
+    }
+    if (fineCoperturaProroga != null) {
+      m['FineCoperturaProroga'] = _dateToIsoOpt(fineCoperturaProroga);
+    }
+
+    return m;
+  }
 }
 
 class Premi {
@@ -795,10 +819,12 @@ class Omnia8Sdk {
     http.Client? httpClient,
     Map<String, String>? headers,
   })  : _http = httpClient ?? http.Client(),
-        defaultHeaders = {
-          'Content-Type': 'application/json',
-          if (headers != null) ...headers,
-        };
+      defaultHeaders = {
+        // ⬇️ charset esplicito anche nelle richieste
+        'Content-Type': 'application/json; charset=utf-8',
+        'Accept': 'application/json; charset=utf-8',
+        if (headers != null) ...headers,
+      };
 
   /// Chiude il client HTTP.
   void dispose() => _http.close();
@@ -825,44 +851,42 @@ Uri _buildUri(String path, [Map<String, dynamic>? query]) {
 }
 
 
-  Future<dynamic> _request(
-    String method,
-    String path, {
-    Map<String, dynamic>? body,
-    Map<String, dynamic>? query,
-    Map<String, String>? headers,
-    int? expectedStatus, // opzionale, altrimenti accetta 2xx
-  }) async {
-    final uri = _buildUri(path, query);
-    final hdrs = {...defaultHeaders, if (headers != null) ...headers};
-    late http.Response res;
 
-    switch (method) {
-      case 'GET':
-        res = await _http.get(uri, headers: hdrs);
-        break;
-      case 'POST':
-        res = await _http.post(uri, headers: hdrs, body: jsonEncode(body ?? {}));
-        break;
-      case 'PUT':
-        res = await _http.put(uri, headers: hdrs, body: jsonEncode(body ?? {}));
-        break;
-      case 'DELETE':
-        res = await _http.delete(uri, headers: hdrs);
-        break;
-      default:
-        throw ArgumentError('Metodo HTTP non supportato: $method');
-    }
+Future<dynamic> _request(
+  String method,
+  String path, {
+  Map<String, dynamic>? body,
+  Map<String, dynamic>? query,
+  Map<String, String>? headers,
+  int? expectedStatus,
+}) async {
+  final uri = _buildUri(path, query);
+  final hdrs = {...defaultHeaders, if (headers != null) ...headers};
+  late http.Response res;
 
-    final ok = expectedStatus != null
-        ? (res.statusCode == expectedStatus)
-        : (res.statusCode >= 200 && res.statusCode < 300);
-
-    if (!ok) {
-      throw ApiException(res.statusCode, res.body);
-    }
-    return res.body.isNotEmpty ? jsonDecode(res.body) : null;
+  switch (method) {
+    case 'GET':    res = await _http.get(uri, headers: hdrs); break;
+    case 'POST':   res = await _http.post(uri, headers: hdrs, body: jsonEncode(body ?? {})); break;
+    case 'PUT':    res = await _http.put(uri, headers: hdrs, body: jsonEncode(body ?? {})); break;
+    case 'DELETE': res = await _http.delete(uri, headers: hdrs); break;
+    default: throw ArgumentError('Metodo HTTP non supportato: $method');
   }
+
+  final ok = expectedStatus != null
+      ? (res.statusCode == expectedStatus)
+      : (res.statusCode >= 200 && res.statusCode < 300);
+
+  if (!ok) {
+    // NB: anche qui, se vuoi messaggi leggibili:
+    final errText = utf8.decode(res.bodyBytes, allowMalformed: true);
+    throw ApiException(res.statusCode, errText);
+  }
+
+  // ⬇️ DECODIFICA SEMPRE UTF-8, ignorando charset sbagliati/assenti
+  if (res.bodyBytes.isEmpty) return null;
+  final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+  return text.isNotEmpty ? jsonDecode(text) : null;
+}
 
   Future<Uint8List> _requestBytes(
     String method,

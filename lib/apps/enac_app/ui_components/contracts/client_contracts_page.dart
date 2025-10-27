@@ -3,7 +3,7 @@
  *  – dettaglio cliente + lista contratti + “Nuovo contratto”
  * *****************************************************************/
 import 'package:flutter/material.dart';
-import 'package:boxed_ai/apps/enac_app/ui_components/contracts/create_contract_dialog.dart';
+//import 'package:boxed_ai/apps/enac_app/ui_components/contracts/create_contract_dialog.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
@@ -205,8 +205,8 @@ Widget _infoColumn(List<Widget> children) => Column(
                               child: _infoColumn([
                                 _kv('PARTITA IVA',     c.vat     ?? 'n.d.'),
                                 _kv('COD. FISCALE',    c.taxCode ?? 'n.d.'),
-                                _kv('LEG. RAPP.',      c.legalRep ?? 'n.d.'),
-                                _kv('CF LEG. RAPP.',   c.legalRepTaxCode ?? 'n.d.'),
+                                //_kv('LEG. RAPP.',      c.legalRep ?? 'n.d.'),
+                                //_kv('CF LEG. RAPP.',   c.legalRepTaxCode ?? 'n.d.'),
                               ]),
                             ),
                           ],
@@ -225,7 +225,7 @@ Widget _infoColumn(List<Widget> children) => Column(
         /* ---------- titolo + pulsante ---------- */
         Row(
           children: [
-            const Text('Contratti',
+            const Text('Polizze',
                 style:
                     TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
             const Spacer(),
@@ -238,14 +238,14 @@ Widget _infoColumn(List<Widget> children) => Column(
                   borderRadius: BorderRadius.circular(3)),
             ),
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Nuovo contratto'),
+              label: const Text('Nuova polizza'),
 onPressed: () => widget.onCreateContract?.call(),
             ),
           ],
         ),
         const SizedBox(height: 8),
         const Text('Elenco',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+            style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
 
         /* ---------- tabella contratti ---------- */

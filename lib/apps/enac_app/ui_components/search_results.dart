@@ -238,7 +238,7 @@ class _SearchResultsPanelState extends State<SearchResultsPanel> {
           }
         }
       } catch (e) {
-        _errContracts = 'Impossibile caricare i contratti: $e';
+        _errContracts = 'Impossibile caricare le polizze: $e';
       }
     }
 
@@ -853,7 +853,7 @@ class _SearchResultsPanelState extends State<SearchResultsPanel> {
                   child: Text(_errContracts!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 ),
               if (_contractsAll.isEmpty)
-                const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('Nessun contratto trovato'))
+                const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('Nessuna polizza trovata'))
               else ...[
                 for (final r in _contractsShown) _contractCard(r),
                 if (_contractsNext < _contractsAll.length)
@@ -877,7 +877,7 @@ class _SearchResultsPanelState extends State<SearchResultsPanel> {
                     ),
                   )
                 else
-                  const Center(child: Padding(padding: EdgeInsets.only(top: 6), child: Text('Tutti i contratti sono stati caricati'))),
+                  const Center(child: Padding(padding: EdgeInsets.only(top: 6), child: Text('Tutte le polizze sono state caricate'))),
               ],
 
               // ───────────────────────── SINISTRI ──────────────────────

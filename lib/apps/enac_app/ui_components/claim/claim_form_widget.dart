@@ -280,7 +280,7 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
         }
       }
     } catch (e) {
-      _loadError = 'Errore nel caricamento dei contratti: $e';
+      _loadError = 'Errore nel caricamento delle Polizze: $e';
     } finally {
       if (mounted) setState(() => _loadingContracts = false);
     }
@@ -478,7 +478,7 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 8),
-                Text('Carico contratti...'),
+                Text('Carico Polizze...'),
               ],
             )
           else if (_loadError != null)

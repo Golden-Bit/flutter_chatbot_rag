@@ -1,10 +1,12 @@
+// lib/apps/enac_app/ui_components/create_contract_page.dart
 import 'dart:async';
 import 'package:boxed_ai/apps/enac_app/ui_components/contracts/contract_form_widget.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
 import 'package:boxed_ai/chatbot.dart';
 import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
-import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:boxed_ai/apps/enac_app/logic_components/backend_sdk.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
@@ -31,8 +33,8 @@ class CreateContractPage extends StatefulWidget with ChatBotExtensions {
 
   final String title;
 
-  // ── ChatBotExtensions: *ri-esponiamo* i tool del ContractFormPane ──
-  static const _delegate = ContractFormPane(); // per accedere ai suoi builders
+  // ── ChatBotExtensions: re-esponiamo i tool del nuovo ContractFormPane ──
+  static const _delegate = ContractFormPane();
 
   @override
   List<ToolSpec> get toolSpecs => [ContractFormPane.fillTool, ContractFormPane.setTool];
@@ -69,70 +71,61 @@ class _CreateContractPageState extends State<CreateContractPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       );
 
-  // Espone gli stessi getter del pane (se ti servono altrove)
-  Map<String,String> get model        => _paneKey.currentState?.model ?? {};
-  bool get regolazione                => _paneKey.currentState?.regolazione ?? false;
+  Map<String, String> get model => _paneKey.currentState?.model ?? {};
 
-@override
-Widget build(BuildContext context) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      // ───────────────── HEADER allineato come il form ─────────────────
-      Align(
-        alignment: Alignment.topLeft,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: _kFormMaxWidth),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              children: [
-                Text(
-                  widget.title,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-                ),
-                const Spacer(),
-                OutlinedButton(
-                  onPressed: widget.onCancel,
-                  style: _cancelStyle,
-                  child: const Text('Annulla'),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _onCreatePressed,
-                  style: _saveStyle,
-                  child: const Text('Crea'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-
-      // ───────────────── CONTENUTO: form allineato a sinistra ───────────
-      Expanded(
-        child: Align(
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ───────────────── HEADER ─────────────────
+        Align(
           alignment: Alignment.topLeft,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: _kFormMaxWidth),
-            child: ContractFormPane(key: _paneKey),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Text(widget.title,
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  OutlinedButton(
+                    onPressed: widget.onCancel,
+                    style: _cancelStyle,
+                    child: const Text('Annulla'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _onCreatePressed,
+                    style: _saveStyle,
+                    child: const Text('Crea'),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-      ),
-    ],
-  );
-}
 
+        // ───────────────── FORM ────────────────
+        Expanded(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: _kFormMaxWidth),
+              child: ContractFormPane(key: _paneKey),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   /*───────────────────────────────────────────────────────────────────*/
-  /*  Salvataggio (portato dal vecchio dialog)                         */
+  /*  Salvataggio                                                       */
   /*───────────────────────────────────────────────────────────────────*/
   Future<void> _onCreatePressed() async {
-    final pane = _paneKey.currentState;
-    if (pane == null) return;
-
-    final m   = pane.model;         // Map<String,String> esposta dal pane
-    final reg = pane.regolazione;   // bool esposto dal pane
+    final m = model;
 
     String t(String k) => (m[k] ?? '').trim();
     String? nn(String k) => t(k).isEmpty ? null : t(k);
@@ -142,35 +135,43 @@ Widget build(BuildContext context) {
       if (s.isEmpty) return null;
       try { return _fmt.parseStrict(s); } catch (_) { return null; }
     }
-    int? pint(String k) => (t(k).isEmpty) ? null : int.tryParse(t(k));
-    String pstr(String k) {
+
+    String moneyStr(String k) {
       final s = t(k);
       if (s.isEmpty) return '0.00';
-      final d = double.tryParse(s.replaceAll(',', '.')) ?? 0.0;
+      // virgola o punto come separatore decimale
+      final d = double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ??
+          double.tryParse(s) ?? 0.0;
       return d.toStringAsFixed(2);
     }
 
-    // Obbligatori minimi (come prima)
+    bool yesNo(String k) {
+      final s = t(k).toLowerCase();
+      return s == 'sì' || s == 'si' || s == 'true' || s == '1';
+    }
+
+    // ── Validazione: SOLO i campi del capitolato ──
     final requiredFields = {
-      'tipo'        : t('tipo'),
-      'ramo'        : t('ramo'),
-      'compagnia'   : t('compagnia'),
-      'numero'      : t('numero'),
-      'effetto'     : t('effetto'),
-      'scadenza'    : t('scadenza'),
-      'fraz'        : t('fraz'),
-      'modIncasso'  : t('modIncasso'),
-      'pv1'         : t('pv1'),
-      'account'     : t('account'),
-      'intermediario': t('intermediario'),
-      'premio'      : t('premio'),
-      'netto'       : t('netto'),
-      'rami_desc'   : t('rami_desc'),
+      'tipo'               : t('tipo'),
+      'rischio'            : t('rischio'),
+      'compagnia'          : t('compagnia'),
+      'numero'             : t('numero'),
+      'premio_imponibile'  : t('premio_imponibile'),
+      'imposte'            : t('imposte'),
+      'premio_lordo'       : t('premio_lordo'),
+      'fraz'               : t('fraz'),
+      'effetto'            : t('effetto'),
+      'scadenza'           : t('scadenza'),
+      'scadenza_copertura' : t('scadenza_copertura'),
+      'data_emissione'     : t('data_emissione'),
+      'tacito_rinnovo'     : t('tacito_rinnovo'),
     };
+
     final missing = requiredFields.entries
         .where((e) => e.value.isEmpty)
         .map((e) => e.key)
         .toList();
+
     if (missing.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Compila i campi obbligatori: ${missing.join(', ')}')),
@@ -180,85 +181,67 @@ Widget build(BuildContext context) {
 
     final effetto  = pd('effetto');
     final scadenza = pd('scadenza');
-    if (effetto == null) {
+    final scCop    = pd('scadenza_copertura');
+    final emesso   = pd('data_emissione');
+
+    if (effetto == null || scadenza == null || scCop == null || emesso == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Formato data Effetto non valido (gg/mm/aaaa).')),
-      );
-      return;
-    }
-    if (scadenza == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Formato data Scadenza non valido (gg/mm/aaaa).')),
+        const SnackBar(content: Text('Verifica il formato delle date (gg/mm/aaaa).')),
       );
       return;
     }
 
-    // Build payload (stesso del dialog)
+    // ── Mapping ai modelli SDK (usando SOLO i campi richiesti) ──
+    // Nota: per compatibilità UI correnti:
+    // - usiamo Identificativi.tipo per mostrare il “Rischio” nel dettaglio,
+    // - conserviamo il "Tipo (COND/APP0/APP€)" in Identificativi.tpCar.
     final contratto = ContrattoOmnia8(
       identificativi: Identificativi(
-        tipo          : t('tipo'),
-        tpCar         : nn('tpCar'),
-        ramo          : t('ramo'),
+        tipo          : t('rischio'),      // mostrato come "RISCHIO" nelle view esistenti
+        tpCar         : t('tipo'),         // COND | APP0 | APP€
+        ramo          : '',                // non richiesto ora
         compagnia     : t('compagnia'),
         numeroPolizza : t('numero'),
       ),
+      // Usiamo "intermediario" come Broker e "puntoVendita" per l'indirizzo
       unitaVendita: UnitaVendita(
-        puntoVendita  : t('pv1'),
-        puntoVendita2 : t('pv2'),
-        account       : t('account'),
-        intermediario : t('intermediario'),
+        puntoVendita  : t('broker_indirizzo'),
+        intermediario : t('broker'),
       ),
       amministrativi: Amministrativi(
-        effetto            : effetto,
-        scadenza           : scadenza,
-        dataEmissione      : pd('emissione') ?? effetto,
-        ultimaRataPagata   : pd('ultima_rata_pagata') ?? pd('emissione') ?? effetto,
-        frazionamento      : t('fraz').toLowerCase(),
-        modalitaIncasso    : t('modIncasso'),
-        compresoFirma      : t('compresoFirma').toLowerCase() == 'true',
-        scadenzaOriginaria : pd('scadenza_originaria') ?? scadenza,
-        scadenzaMora       : pd('sc_mora'),
-        numeroProposta     : nn('numeroProposta'),
-        codConvenzione     : nn('codConvenzione'),
-        scadenzaVincolo    : pd('sc_vincolo'),
-        scadenzaCopertura  : pd('sc_copertura'),
-        fineCoperturaProroga: pd('fine_proroga'),
+        effetto           : effetto,
+        scadenza          : scadenza,
+        dataEmissione     : emesso,
+        frazionamento     : t('fraz'),
+        scadenzaCopertura : scCop,
       ),
       premi: Premi(
-        premio    : pstr('premio'),
-        netto     : pstr('netto'),
-        accessori : pstr('accessori'),
-        diritti   : pstr('diritti'),
-        imposte   : pstr('imposte'),
-        spese     : pstr('spese'),
-        fondo     : pstr('fondo'),
-        sconto    : t('sconto').isEmpty ? null : pstr('sconto'),
+        netto   : moneyStr('premio_imponibile'),
+        imposte : moneyStr('imposte'),
+        premio  : moneyStr('premio_lordo'),
       ),
       rinnovo: Rinnovo(
-        rinnovo    : t('rinnovo'),
+        rinnovo    : t('tacito_rinnovo'), // "Sì" | "No"
         disdetta   : t('disdetta'),
-        giorniMora : t('gMora'),
         proroga    : t('proroga'),
+        giorniMora : t('giorni_mora'),
       ),
       operativita: Operativita(
-        regolazione: reg,
+        regolazione: yesNo('regolazione_fine_periodo'),
+        // opzionale: diamo comunque inizio/fine per coerenza report
         parametriRegolazione: ParametriRegolazione(
-          inizio                : pd('inizioReg') ?? effetto,
-          fine                  : pd('fineReg')   ?? scadenza,
-          ultimaRegEmessa       : pd('ultReg'),
-          giorniInvioDati       : pint('gInvio'),
-          giorniPagReg          : pint('gPag'),
-          giorniMoraRegolazione : pint('gMoraReg'),
-          cadenzaRegolazione    : (nn('cadReg')?.toLowerCase() ?? 'annuale'),
+          inizio: effetto,
+          fine  : scadenza,
         ),
       ),
-      ramiEl: RamiEl(descrizione: t('rami_desc')),
+      // Per tabelle/ricerche che leggono il rischio da qui
+      ramiEl: RamiEl(descrizione: t('rischio')),
     );
 
     try {
       final resp = await widget.sdk.createContract(
-        widget.user.username,     // userId
-        widget.clientId,          // entityId
+        widget.user.username, // userId
+        widget.clientId,      // entityId
         contratto,
       );
       await widget.onCreated(resp.contractId);
@@ -269,10 +252,4 @@ Widget build(BuildContext context) {
       );
     }
   }
-}
-
-// piccola estensione per assegnare una GlobalKey a un const widget
-extension on ContractFormPane {
-  Widget withKey(GlobalKey<ContractFormPaneState> key) =>
-      KeyedSubtree(key: key, child: this);
 }

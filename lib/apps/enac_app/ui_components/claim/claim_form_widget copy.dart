@@ -18,13 +18,18 @@ class ClaimFormPane extends StatefulWidget with ChatBotExtensions {
     required this.token,
     required this.sdk,
     required this.entityId,
+    this.initialValues,
+    this.initialContractId,
+    this.lockContract = false,
   });
 
   final User user;
   final Token token;
   final Omnia8Sdk sdk;
   final String entityId;
-
+  final Map<String, String>? initialValues;
+  final String? initialContractId;
+  final bool lockContract;
   @override
   State<ClaimFormPane> createState() => ClaimFormPaneState();
 
@@ -233,6 +238,14 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
     super.initState();
     _ClaimFormHostCbs.bind(this);
     _loadContracts();
+
+        // ⬇️ NEW: precompila campi e selezione contratto se passati
+    if (widget.initialValues != null && widget.initialValues!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _setInitialValues(widget.initialValues!);
+      });
+    }
+    _selectedContractId = widget.initialContractId; // ⬅️ NEW
   }
 
   @override
@@ -267,7 +280,7 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
         }
       }
     } catch (e) {
-      _loadError = 'Errore nel caricamento dei contratti: $e';
+      _loadError = 'Errore nel caricamento delle Polizze: $e';
     } finally {
       if (mounted) setState(() => _loadingContracts = false);
     }
@@ -421,6 +434,33 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
         decoration: _dec(label).copyWith(hintText: hint),
       );
 
+
+  @override
+  void didUpdateWidget(covariant ClaimFormPane old) {
+    super.didUpdateWidget(old);
+    if (widget.initialValues != old.initialValues &&
+        widget.initialValues != null) {
+      _setInitialValues(widget.initialValues!);            // ⬅️ NEW
+    }
+    if (widget.initialContractId != old.initialContractId) {
+      setState(() => _selectedContractId = widget.initialContractId); // ⬅️ NEW
+    }
+  }
+
+  // ⬇️ NEW: prefill “immediato” dei controller
+  void _setInitialValues(Map<String, String> m) {
+    for (final e in m.entries) {
+      final k = e.key;
+      final v = e.value;
+      if (_c.containsKey(k)) {
+        _c[k]!.text = v;
+        _c[k]!.selection =
+            TextSelection.collapsed(offset: _c[k]!.text.length);
+      }
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -438,7 +478,7 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 8),
-                Text('Carico contratti...'),
+                Text('Carico Polizze...'),
               ],
             )
           else if (_loadError != null)
@@ -463,7 +503,9 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
                         ),
                       ))
                   .toList(),
-              onChanged: (v) => setState(() => _selectedContractId = v),
+                            onChanged: widget.lockContract
+                  ? null                                   // ⬅️ NEW: blocca in edit
+                  : (v) => setState(() => _selectedContractId = v),
             ),
 
           const SizedBox(height: 12),

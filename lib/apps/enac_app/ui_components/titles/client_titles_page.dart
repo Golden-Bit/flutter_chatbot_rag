@@ -184,8 +184,8 @@ class _ClientTitlesPageState extends State<ClientTitlesPage> {
                               child: _infoColumn([
                                 _kv('PARTITA IVA', c.vat ?? 'n.d.'),
                                 _kv('COD. FISCALE', c.taxCode ?? 'n.d.'),
-                                _kv('LEG. RAPP.', c.legalRep ?? 'n.d.'),
-                                _kv('CF LEG. RAPP.', c.legalRepTaxCode ?? 'n.d.'),
+                                //_kv('LEG. RAPP.', c.legalRep ?? 'n.d.'),
+                                //_kv('CF LEG. RAPP.', c.legalRepTaxCode ?? 'n.d.'),
                               ]),
                             ),
                           ],
@@ -203,10 +203,10 @@ class _ClientTitlesPageState extends State<ClientTitlesPage> {
         /* ---------- titolo pagina ---------- */
         Row(
           children: [
-            const Text('Titoli',
+            const Text('Stato Pagamenti',
                 style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
             const Spacer(),
-            TextButton.icon(
+            /*TextButton.icon(
               style: TextButton.styleFrom(
                 foregroundColor: Colors.white,
                 backgroundColor: const Color(0xFF00A651),
@@ -216,7 +216,7 @@ class _ClientTitlesPageState extends State<ClientTitlesPage> {
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Nuovo titolo'),
               onPressed: () => widget.onCreateTitle?.call(), // NEW: delega al parent
-            ),
+            ),*/
           ],
         ),
         const SizedBox(height: 8),

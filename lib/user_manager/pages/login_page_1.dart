@@ -140,7 +140,7 @@ Future<void> _handleRedirectOrLocalToken() async {
     // Navigo sostituendo la pagina corrente
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
+      MaterialPageRoute(builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
     ));
   }
 
@@ -224,7 +224,7 @@ Future<void> _onSocialPressed(String providerName) async {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
         return;

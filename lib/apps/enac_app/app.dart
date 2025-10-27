@@ -372,7 +372,7 @@ onPressed: () => setState(() {
             ),
             IconButton(
               icon: const Icon(Icons.arrow_back),
-              tooltip: 'Contratti',
+              tooltip: 'Polizze',
 onPressed: () => setState(() {
   _resetChats(); 
   _chatsOpen = false;
@@ -381,12 +381,12 @@ onPressed: () => setState(() {
   _selClientSection   = _ClientSection.contratti;
 }),
             ),
-            const Text('Contratti'),
+            const Text('Polizze'),
           ],
         ),
         const Divider(),
         row('Riepilogo', _ContractSection.riepilogo),
-        row('Titoli',    _ContractSection.titoli),
+        row('Stato Pagamenti',    _ContractSection.titoli),
         row('Sinistri',  _ContractSection.sinistri),
 row('Documenti', _ContractSection.documenti,
     trailing: _docBadge(0)),
@@ -462,8 +462,8 @@ return Container(
       ),
       const Divider(),
       row('Cliente',   _ClientSection.cliente),
-      row('Contratti', _ClientSection.contratti),
-      row('Titoli',    _ClientSection.titoli),
+      row('Polizze', _ClientSection.contratti),
+      row('Sato Pagamenti',    _ClientSection.titoli),
 row('Sinistri',  _ClientSection.sinistri),              // ← niente chevron
 row('Documenti', _ClientSection.documenti,              // ← badge fisso a 0
     trailing: _docBadge(0),

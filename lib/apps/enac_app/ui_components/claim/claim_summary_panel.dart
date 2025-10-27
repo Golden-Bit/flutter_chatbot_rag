@@ -14,6 +14,7 @@ import 'package:intl/intl.dart';
 import '../../logic_components/backend_sdk.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
+
 final _dateFmt = DateFormat('dd/MM/yyyy');
 String _fmtDate(DateTime? dt) => (dt == null) ? '—' : _dateFmt.format(dt);
 

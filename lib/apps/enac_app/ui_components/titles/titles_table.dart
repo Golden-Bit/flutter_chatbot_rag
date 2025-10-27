@@ -37,7 +37,7 @@ class _TitlesTableState extends State<TitlesTable> {
   final NumberFormat _currencyFmt = NumberFormat.currency(locale: 'it_IT', symbol: '€');
   final DateFormat _dateFmt = DateFormat('dd/MM/yyyy');
 
-  // ------- Money parser robusto (fix ×100) -------
+  // ------- Money parser robusto -------
   double? _parseMoney(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
@@ -48,11 +48,9 @@ class _TitlesTableState extends State<TitlesTable> {
       final lastDot = s0.lastIndexOf('.');
       final lastComma = s0.lastIndexOf(',');
       if (lastDot > lastComma) {
-        final norm = s0.replaceAll(',', '');
-        return double.tryParse(norm);
+        return double.tryParse(s0.replaceAll(',', ''));
       } else {
-        final norm = s0.replaceAll('.', '').replaceAll(',', '.');
-        return double.tryParse(norm);
+        return double.tryParse(s0.replaceAll('.', '').replaceAll(',', '.'));
       }
     }
     if (s0.contains(',') && !s0.contains('.')) {
@@ -72,10 +70,9 @@ class _TitlesTableState extends State<TitlesTable> {
     if (v is DateTime) return _dateFmt.format(v);
     final s = v.toString();
     try {
-      // prova ISO (YYYY-MM-DD...)
-      return _dateFmt.format(DateTime.parse(s));
+      return _dateFmt.format(DateTime.parse(s)); // ISO
     } catch (_) {
-      return s;
+      return s; // fallback
     }
   }
 
@@ -112,9 +109,7 @@ class _TitlesTableState extends State<TitlesTable> {
     } catch (e) {
       _error = 'Errore inatteso: $e';
     } finally {
-      if (mounted) {
-        setState(() => _isInitialLoading = false);
-      }
+      if (mounted) setState(() => _isInitialLoading = false);
     }
   }
 
@@ -144,25 +139,20 @@ class _TitlesTableState extends State<TitlesTable> {
   DataRow _row(BuildContext context, Map<String, dynamic> v) {
     // campi attesi dalla view (fallback a stringa vuota)
     final compagnia = (v['compagnia'] ?? v['Compagnia'] ?? '').toString();
-    final numeroPolizza =
-        (v['numero_polizza'] ?? v['NumeroPolizza'] ?? '').toString();
+    final numeroPolizza = (v['numero_polizza'] ?? v['NumeroPolizza'] ?? '').toString();
     final rischio = (v['rischio'] ?? v['Rischio'] ?? '').toString();
-    final scadenza = v['scadenza_titolo'] ?? v['ScadenzaTitolo'];
+    final scadenza = v['scadenza_titolo'] ?? v['ScadenzaTitolo']; // rinominata in header
     final stato = (v['stato'] ?? v['Stato'] ?? '').toString();
-    final pv = (v['pv'] ?? v['PV'] ?? '').toString();
-    final pv2 = (v['pv2'] ?? v['PV2'] ?? '').toString();
     final premio = (v['premio_lordo'] ?? v['PremioLordo'] ?? v['premio'] ?? '').toString();
 
     return DataRow(cells: [
-      const DataCell(Icon(Icons.receipt_long, size: 18)),
-      DataCell(Text(compagnia, maxLines: 2)),
-      DataCell(Text(numeroPolizza)),
-      DataCell(Text(rischio, maxLines: 2)),
-      DataCell(Text(_fmtDate(scadenza))),
-      DataCell(Text(stato)),
-      DataCell(Text(pv)),
-      DataCell(Text(pv2)),
-      DataCell(Text(_fmtMoney(premio))),
+      const DataCell(Icon(Icons.receipt_long, size: 18)), // TIPO
+      DataCell(Text(compagnia, maxLines: 2)),             // COMPAGNIA
+      DataCell(Text(numeroPolizza)),                      // NUM. CONTRATTO
+      DataCell(Text(rischio, maxLines: 2)),               // RISCHIO
+      DataCell(Text(_fmtDate(scadenza))),                 // SCADENZA
+      DataCell(Text(stato)),                              // STATO
+      DataCell(Text(_fmtMoney(premio))),                  // PREMIO
       DataCell(
         IconButton(
           icon: const Icon(Icons.search, size: 20),
@@ -178,17 +168,16 @@ class _TitlesTableState extends State<TitlesTable> {
     if (_isInitialLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-
     if (_error != null && _rows.isEmpty) {
       return Center(child: Text(_error!));
     }
-
     if (_rows.isEmpty) {
       return const Center(child: Text('Nessun titolo'));
     }
 
     final table = LayoutBuilder(
       builder: (context, constraints) {
+        // Adattiva: riempie la pagina; se lo spazio non basta, è disponibile lo scroll orizzontale
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: ConstrainedBox(
@@ -202,10 +191,8 @@ class _TitlesTableState extends State<TitlesTable> {
                 DataColumn(label: Text('COMPAGNIA')),
                 DataColumn(label: Text('NUM. CONTRATTO')),
                 DataColumn(label: Text('RISCHIO')),
-                DataColumn(label: Text('SCADENZA TITOLO')),
+                DataColumn(label: Text('SCADENZA')),
                 DataColumn(label: Text('STATO')),
-                DataColumn(label: Text('P.V')),
-                DataColumn(label: Text('P.V 2')),
                 DataColumn(label: Text('PREMIO')),
                 DataColumn(label: SizedBox()), // lente
               ],
@@ -235,8 +222,7 @@ class _TitlesTableState extends State<TitlesTable> {
                 onPressed: _isLoadingMore ? null : _loadMore,
                 icon: _isLoadingMore
                     ? const SizedBox(
-                        width: 18,
-                        height: 18,
+                        width: 18, height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.expand_more),

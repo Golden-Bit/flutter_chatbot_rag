@@ -6,10 +6,11 @@ import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
 
 class ContractFormPane extends StatefulWidget with ChatBotExtensions {
-  const ContractFormPane({super.key});
+  const ContractFormPane({super.key, this.initialValues});
 
   @override
   State<ContractFormPane> createState() => ContractFormPaneState();
+  final Map<String, String>? initialValues;
 
   /*───────────────────────────────────────────────────────────────────────*/
   /* ToolSpec: COMPILA TUTTO (ogni parametro è opzionale)                  */
@@ -17,69 +18,36 @@ class ContractFormPane extends StatefulWidget with ChatBotExtensions {
   static final ToolSpec fillTool = ToolSpec(
     toolName: 'FillContractFormWidget',
     description:
-        'Compila il form contratto con digitazione simulata. Ogni parametro è opzionale: se assente, il campo non viene toccato.',
+        'Compila il form contratto (solo campi richiesti). Ogni parametro è opzionale: se assente, il campo non viene toccato.',
     params: const [
       // Identificativi
-      ToolParamSpec(name: 'tipo',      paramType: ParamType.string,  description: 'Tipo',            example: 'Auto'),
-      ToolParamSpec(name: 'tpCar',     paramType: ParamType.string,  description: 'TpCar',           example: 'Autovettura'),
-      ToolParamSpec(name: 'ramo',      paramType: ParamType.string,  description: 'Ramo',            example: 'RCA'),
-      ToolParamSpec(name: 'compagnia', paramType: ParamType.string,  description: 'Compagnia',       example: 'ACME Assicurazioni'),
-      ToolParamSpec(name: 'numero',    paramType: ParamType.string,  description: 'Numero polizza',  example: 'POL123456'),
+      ToolParamSpec(name: 'tipo',                paramType: ParamType.string,  description: 'Tipo (COND | APP0 | APP€)', example: 'COND'),
+      ToolParamSpec(name: 'rischio',             paramType: ParamType.string,  description: 'Rischio',                   example: 'Responsabilità Civile Auto'),
+      ToolParamSpec(name: 'compagnia',           paramType: ParamType.string,  description: 'Compagnia',                 example: 'ACME Assicurazioni'),
+      ToolParamSpec(name: 'numero',              paramType: ParamType.string,  description: 'Numero di Polizza/Appendice', example: 'POL-2025-001'),
 
-      // Date (formato dd/MM/yyyy)
-      ToolParamSpec(name: 'effetto',        paramType: ParamType.string, description: 'Data effetto (dd/MM/yyyy)',        example: '01/01/2026'),
-      ToolParamSpec(name: 'scadenza',       paramType: ParamType.string, description: 'Data scadenza (dd/MM/yyyy)',       example: '01/01/2027'),
-      ToolParamSpec(name: 'data_emissione', paramType: ParamType.string, description: 'Data emissione (dd/MM/yyyy)',      example: '01/01/2026'),
+      // Importi
+      ToolParamSpec(name: 'premio_imponibile',   paramType: ParamType.number,  description: 'Premio Annuo Imponibile',   example: 1000.0, minValue: 0),
+      ToolParamSpec(name: 'imposte',             paramType: ParamType.number,  description: 'Imposte',                   example: 220.0,  minValue: 0),
+      ToolParamSpec(name: 'premio_lordo',        paramType: ParamType.number,  description: 'Premio Annuo Lordo',        example: 1220.0, minValue: 0),
 
-      // Amministrativi base
-      ToolParamSpec(name: 'fraz',       paramType: ParamType.string,  description: 'Frazionamento',                 example: 'Annuale'),
-      ToolParamSpec(name: 'modIncasso', paramType: ParamType.string,  description: 'Modalità incasso',              example: 'Bonifico'),
+      // Amministrativi / date
+      ToolParamSpec(name: 'fraz',                paramType: ParamType.string,  description: 'Frazionamento',             example: 'Annuale'),
+      ToolParamSpec(name: 'effetto',             paramType: ParamType.string,  description: 'Effetto (dd/MM/yyyy)',      example: '01/01/2026'),
+      ToolParamSpec(name: 'scadenza',            paramType: ParamType.string,  description: 'Scadenza (dd/MM/yyyy)',     example: '01/01/2027'),
+      ToolParamSpec(name: 'scadenza_copertura',  paramType: ParamType.string,  description: 'Scadenza Copertura (dd/MM/yyyy)', example: '31/01/2027'),
+      ToolParamSpec(name: 'data_emissione',      paramType: ParamType.string,  description: 'Data di Emissione (dd/MM/yyyy)', example: '01/01/2026'),
+      ToolParamSpec(name: 'giorni_mora',         paramType: ParamType.string,  description: 'Giorni di Mora',            example: '15'),
 
-      // Amministrativi opzionali/extra (SDK nuovo)
-      ToolParamSpec(name: 'compresoFirma',        paramType: ParamType.boolean, description: 'Flag “Compreso firma”',                  example: true),
-      ToolParamSpec(name: 'scadenza_originaria',  paramType: ParamType.string,  description: 'Scadenza originaria (dd/MM/yyyy)',       example: '01/01/2027'),
-      ToolParamSpec(name: 'ultima_rata_pagata',   paramType: ParamType.string,  description: 'Ultima rata pagata (dd/MM/yyyy)',        example: '15/01/2026'),
-      ToolParamSpec(name: 'scadenza_mora',        paramType: ParamType.string,  description: 'Scadenza Mora (dd/MM/yyyy)',             example: '01/02/2026'),
-      ToolParamSpec(name: 'numeroProposta',       paramType: ParamType.string,  description: 'Numero proposta',                         example: 'PR123'),
-      ToolParamSpec(name: 'codConvenzione',       paramType: ParamType.string,  description: 'Codice convenzione',                      example: 'CONV01'),
-      ToolParamSpec(name: 'scadenza_vincolo',     paramType: ParamType.string,  description: 'Scadenza vincolo (dd/MM/yyyy)',           example: '01/03/2026'),
-      ToolParamSpec(name: 'scadenza_copertura',   paramType: ParamType.string,  description: 'Scadenza copertura (dd/MM/yyyy)',         example: '01/04/2026'),
-      ToolParamSpec(name: 'fine_copertura_proroga', paramType: ParamType.string, description: 'Fine copertura proroga (dd/MM/yyyy)',   example: '15/04/2026'),
+      // Broker
+      ToolParamSpec(name: 'broker',              paramType: ParamType.string,  description: 'Broker',                    example: 'Intermediario ABC'),
+      ToolParamSpec(name: 'broker_indirizzo',    paramType: ParamType.string,  description: 'Indirizzo del Broker',      example: 'Via Roma 1, Milano'),
 
-      // Premi (numeri)
-      ToolParamSpec(name: 'premio',    paramType: ParamType.number, description: 'Premio',    example: 1200.0, minValue: 0),
-      ToolParamSpec(name: 'netto',     paramType: ParamType.number, description: 'Netto',     example: 1000.0, minValue: 0),
-      ToolParamSpec(name: 'accessori', paramType: ParamType.number, description: 'Accessori', example: 10.0,   minValue: 0),
-      ToolParamSpec(name: 'diritti',   paramType: ParamType.number, description: 'Diritti',   example: 5.0,    minValue: 0),
-      ToolParamSpec(name: 'imposte',   paramType: ParamType.number, description: 'Imposte',   example: 200.0,  minValue: 0),
-      ToolParamSpec(name: 'spese',     paramType: ParamType.number, description: 'Spese',     example: 15.0,   minValue: 0),
-      ToolParamSpec(name: 'fondo',     paramType: ParamType.number, description: 'Fondo',     example: 0.0,    minValue: 0),
-      ToolParamSpec(name: 'sconto',    paramType: ParamType.number, description: 'Sconto (può essere omesso)', example: 0.0),
-
-      // Unità vendita
-      ToolParamSpec(name: 'pv1',           paramType: ParamType.string, description: 'Punto vendita',   example: 'PV Milano 1'),
-      ToolParamSpec(name: 'pv2',           paramType: ParamType.string, description: 'Punto vendita 2', example: 'PV Milano 2'),
-      ToolParamSpec(name: 'account',       paramType: ParamType.string, description: 'Account',         example: 'Marco Bianchi'),
-      ToolParamSpec(name: 'intermediario', paramType: ParamType.string, description: 'Intermediario',   example: 'INT01'),
-
-      // Rinnovo
-      ToolParamSpec(name: 'rinnovo',  paramType: ParamType.string, description: 'Rinnovo',     example: 'Tacito'),
-      ToolParamSpec(name: 'disdetta', paramType: ParamType.string, description: 'Disdetta',    example: '30gg'),
-      ToolParamSpec(name: 'gMora',    paramType: ParamType.string, description: 'Giorni Mora', example: '15'),
-      ToolParamSpec(name: 'proroga',  paramType: ParamType.string, description: 'Proroga',     example: '15gg'),
-
-      // Operatività / Regolazione
-      ToolParamSpec(name: 'regolazione', paramType: ParamType.boolean, description: 'Abilita regolazione',                       example: true),
-      ToolParamSpec(name: 'inizio_reg',  paramType: ParamType.string,  description: 'Inizio regolazione (dd/MM/yyyy)',           example: '01/01/2026'),
-      ToolParamSpec(name: 'fine_reg',    paramType: ParamType.string,  description: 'Fine regolazione (dd/MM/yyyy)',             example: '31/12/2026'),
-      ToolParamSpec(name: 'ultima_reg',  paramType: ParamType.string,  description: 'Ultima regolazione emessa (dd/MM/yyyy)',    example: '01/10/2026'),
-      ToolParamSpec(name: 'gInvio',      paramType: ParamType.integer, description: 'Giorni invio dati',                         example: 15, minValue: 0),
-      ToolParamSpec(name: 'gPag',        paramType: ParamType.integer, description: 'Giorni pagamento reg.',                     example: 30, minValue: 0),
-      ToolParamSpec(name: 'gMoraReg',    paramType: ParamType.integer, description: 'Giorni mora regolazione',                   example: 10, minValue: 0),
-      ToolParamSpec(name: 'cadReg',      paramType: ParamType.string,  description: 'Cadenza regolazione',                       example: 'Mensile'),
-
-      // Rischio / Prodotto
-      ToolParamSpec(name: 'ramiDesc', paramType: ParamType.string, description: 'Descrizione rischio/prodotto', example: 'RCA + Furto/Incendio'),
+      // Rinnovo / opzionali a scelta
+      ToolParamSpec(name: 'tacito_rinnovo',            paramType: ParamType.string,  description: 'Tacito Rinnovo (Sì | No)', example: 'Sì'),
+      ToolParamSpec(name: 'disdetta',                  paramType: ParamType.string,  description: 'Disdetta',                  example: '30 gg prima'),
+      ToolParamSpec(name: 'proroga',                   paramType: ParamType.string,  description: 'Facoltà di Proroga',        example: '15 gg'),
+      ToolParamSpec(name: 'regolazione_fine_periodo',  paramType: ParamType.boolean, description: 'Regolazione al termine del periodo', example: true),
 
       // Digitazione
       ToolParamSpec(
@@ -96,30 +64,15 @@ class ContractFormPane extends StatefulWidget with ChatBotExtensions {
   /*───────────────────────────────────────────────────────────────────────*/
   static final List<String> _allFields = [
     // Identificativi
-    'tipo','tpCar','ramo','compagnia','numero',
-
-    // Amministrativi base
-    'effetto','scadenza','data_emissione','fraz','modIncasso',
-
-    // Amministrativi opz./extra (SDK)
-    'compresoFirma','scadenza_originaria','ultima_rata_pagata',
-    'scadenza_mora','numeroProposta','codConvenzione',
-    'scadenza_vincolo','scadenza_copertura','fine_copertura_proroga',
-
-    // Premi
-    'premio','netto','accessori','diritti','imposte','spese','fondo','sconto',
-
-    // Unità vendita
-    'pv1','pv2','account','intermediario',
-
+    'tipo','rischio','compagnia','numero',
+    // Importi
+    'premio_imponibile','imposte','premio_lordo',
+    // Amministrativi / date
+    'fraz','effetto','scadenza','scadenza_copertura','data_emissione','giorni_mora',
+    // Broker
+    'broker','broker_indirizzo',
     // Rinnovo
-    'rinnovo','disdetta','gMora','proroga',
-
-    // Operatività / Regolazione
-    'regolazione','inizio_reg','fine_reg','ultima_reg','gInvio','gPag','gMoraReg','cadReg',
-
-    // Rischio / Prodotto
-    'ramiDesc',
+    'tacito_rinnovo','disdetta','proroga','regolazione_fine_periodo',
   ];
 
   static final ToolSpec setTool = ToolSpec(
@@ -134,7 +87,7 @@ class ContractFormPane extends StatefulWidget with ChatBotExtensions {
       ToolParamSpec(
         name: 'value', paramType: ParamType.string,
         description: 'Valore (per boolean usare "true"/"false"; per date dd/MM/yyyy; i numeri sono accettati come stringa).',
-        example: 'POL123456',
+        example: 'POL-2025-001',
       ),
       ToolParamSpec(
         name: 'typing_ms', paramType: ParamType.integer,
@@ -163,149 +116,78 @@ class ContractFormPane extends StatefulWidget with ChatBotExtensions {
 /*  STATE: controllers, digitazione, UI, export modello                    */
 /*─────────────────────────────────────────────────────────────────────────*/
 class ContractFormPaneState extends State<ContractFormPane> {
+  static const double _kFormMaxWidth = 600;
 
-  static const double _kFormMaxWidth = 600; // ⬅️ nuovo
+  // Selettori a scelta vincolata
+  static const List<String> _tipoOptions = ['COND', 'APP0', 'APP€'];
+  static const List<String> _siNoOptions = ['Sì', 'No'];
 
-  @override
-  void initState() { super.initState(); _ContractFormHostCbs.bind(this); }
-  @override
-  void dispose() { _ContractFormHostCbs.unbind(this); super.dispose(); }
+  String _tipo = _tipoOptions.first;
+  String _tacito = _siNoOptions.first;
+  bool _regolazioneFinePeriodo = false;
 
-  // Espone la mappa con le CHIAVI attese dal dialog (_onCreatePressed)
-  Map<String, String> get model => {
-    // Identificativi
-    'tipo'        : _c['tipo']?.text.trim() ?? '',
-    'tpCar'       : _c['tpCar']?.text.trim() ?? '',
-    'ramo'        : _c['ramo']?.text.trim() ?? '',
-    'compagnia'   : _c['compagnia']?.text.trim() ?? '',
-    'numero'      : _c['numero']?.text.trim() ?? '',
-
-    // Amministrativi base
-    'effetto'     : _c['effetto']?.text.trim() ?? '',
-    'scadenza'    : _c['scadenza']?.text.trim() ?? '',
-    'emissione'   : _c['data_emissione']?.text.trim() ?? '',
-    'fraz'        : _c['fraz']?.text.trim() ?? '',
-    'modIncasso'  : _c['modIncasso']?.text.trim() ?? '',
-
-    // Amministrativi opz./extra (chiavi attese dal dialog)
-    'compresoFirma'      : _compresoFirma ? 'true' : 'false', // stringa che il dialogo convertirà
-    'scadenza_originaria': _c['scadenza_originaria']?.text.trim() ?? '',
-    'ultima_rata_pagata' : _c['ultima_rata_pagata']?.text.trim() ?? '',
-    'sc_mora'            : _c['scadenza_mora']?.text.trim() ?? '',
-    'numeroProposta'     : _c['numeroProposta']?.text.trim() ?? '',
-    'codConvenzione'     : _c['codConvenzione']?.text.trim() ?? '',
-    'sc_vincolo'         : _c['scadenza_vincolo']?.text.trim() ?? '',
-    'sc_copertura'       : _c['scadenza_copertura']?.text.trim() ?? '',
-    'fine_proroga'       : _c['fine_copertura_proroga']?.text.trim() ?? '',
-
-    // Premi
-    'premio'     : _c['premio']?.text.trim() ?? '',
-    'netto'      : _c['netto']?.text.trim() ?? '',
-    'accessori'  : _c['accessori']?.text.trim() ?? '',
-    'diritti'    : _c['diritti']?.text.trim() ?? '',
-    'imposte'    : _c['imposte']?.text.trim() ?? '',
-    'spese'      : _c['spese']?.text.trim() ?? '',
-    'fondo'      : _c['fondo']?.text.trim() ?? '',
-    'sconto'     : _c['sconto']?.text.trim() ?? '',
-
-    // Unità vendita
-    'pv1'         : _c['pv1']?.text.trim() ?? '',
-    'pv2'         : _c['pv2']?.text.trim() ?? '',
-    'account'     : _c['account']?.text.trim() ?? '',
-    'intermediario': _c['intermediario']?.text.trim() ?? '',
-
-    // Rinnovo
-    'rinnovo'    : _c['rinnovo']?.text.trim() ?? '',
-    'disdetta'   : _c['disdetta']?.text.trim() ?? '',
-    'gMora'      : _c['gMora']?.text.trim() ?? '',
-    'proroga'    : _c['proroga']?.text.trim() ?? '',
-
-    // Operatività / Regolazione
-    'inizioReg'  : _c['inizio_reg']?.text.trim() ?? '',
-    'fineReg'    : _c['fine_reg']?.text.trim() ?? '',
-    'ultReg'     : _c['ultima_reg']?.text.trim() ?? '',
-    'gInvio'     : _c['gInvio']?.text.trim() ?? '',
-    'gPag'       : _c['gPag']?.text.trim() ?? '',
-    'gMoraReg'   : _c['gMoraReg']?.text.trim() ?? '',
-    'cadReg'     : _c['cadReg']?.text.trim() ?? '',
-
-    // Rischio / Prodotto
-    'rami_desc'  : _c['ramiDesc']?.text.trim() ?? '',
-  };
-
-  // Controllers di TUTTI i campi
+  // Controllers
   final _c = <String, TextEditingController>{
     // Identificativi
-    'tipo': TextEditingController(),
-    'tpCar': TextEditingController(),
-    'ramo': TextEditingController(),
+    'rischio': TextEditingController(),
     'compagnia': TextEditingController(),
     'numero': TextEditingController(),
 
-    // Amministrativi base
+    // Importi
+    'premio_imponibile': TextEditingController(text: '0'),
+    'imposte': TextEditingController(text: '0'),
+    'premio_lordo': TextEditingController(text: '0'),
+
+    // Amministrativi / date
+    'fraz': TextEditingController(text: 'Annuale'),
     'effetto': TextEditingController(),
     'scadenza': TextEditingController(),
-    'data_emissione': TextEditingController(),
-    'fraz': TextEditingController(text: 'Annuale'),
-    'modIncasso': TextEditingController(text: 'Bonifico'),
-
-    // Amministrativi opz./extra
-    'scadenza_mora': TextEditingController(),
-    'numeroProposta': TextEditingController(),
-    'codConvenzione': TextEditingController(),
-    'scadenza_vincolo': TextEditingController(),
     'scadenza_copertura': TextEditingController(),
-    'fine_copertura_proroga': TextEditingController(),
-    'scadenza_originaria': TextEditingController(),
-    'ultima_rata_pagata': TextEditingController(),
+    'data_emissione': TextEditingController(),
+    'giorni_mora': TextEditingController(),
 
-    // Premi
-    'premio': TextEditingController(text: '0'),
-    'netto': TextEditingController(text: '0'),
-    'accessori': TextEditingController(text: '0'),
-    'diritti': TextEditingController(text: '0'),
-    'imposte': TextEditingController(text: '0'),
-    'spese': TextEditingController(text: '0'),
-    'fondo': TextEditingController(text: '0'),
-    'sconto': TextEditingController(text: '0'),
-
-    // Unità vendita
-    'pv1': TextEditingController(),
-    'pv2': TextEditingController(),
-    'account': TextEditingController(),
-    'intermediario': TextEditingController(),
+    // Broker
+    'broker': TextEditingController(),
+    'broker_indirizzo': TextEditingController(),
 
     // Rinnovo
-    'rinnovo': TextEditingController(),
     'disdetta': TextEditingController(),
-    'gMora': TextEditingController(),
     'proroga': TextEditingController(),
-
-    // Operatività / Regolazione
-    'inizio_reg': TextEditingController(),
-    'fine_reg': TextEditingController(),
-    'ultima_reg': TextEditingController(),
-    'gInvio': TextEditingController(),
-    'gPag': TextEditingController(),
-    'gMoraReg': TextEditingController(),
-    'cadReg': TextEditingController(),
-
-    // Rischio / Prodotto
-    'ramiDesc': TextEditingController(),
   };
 
   // Focus nodes
   final _f = { for (final k in ContractFormPane._allFields) k: FocusNode() };
 
-  // Checkbox / flag
-  bool _regolazione = false;
-  bool _compresoFirma = false; // ⬅️ nuovo flag allineato al SDK
-  bool get regolazione => _regolazione;
-
   // typing
   final _gen = <String,int>{};
   static const _kDefaultTypingMs = 22;
 
+  /* -------------------- Helpers -------------------- */
+  InputDecoration _dec(String l) =>
+      InputDecoration(labelText: l, isDense: true, border: const OutlineInputBorder());
+  Widget _t(String key, String label, {String? hint}) =>
+      TextField(controller: _c[key], focusNode: _f[key], decoration: _dec(label).copyWith(hintText: hint));
+
+  static String _normSiNo(dynamic v) {
+    if (v == null) return 'Sì';
+    final s = v.toString().trim().toLowerCase();
+    const yes = {'si','sì','true','1','y','yes'};
+    const no  = {'no','false','0','n'};
+    if (yes.contains(s)) return 'Sì';
+    if (no.contains(s))  return 'No';
+    return (s == 'app€' || s == 'app0' || s == 'cond') ? 'Sì' : (s.isEmpty ? 'Sì' : (v.toString())); // fallback
+  }
+
+  static String _normTipo(dynamic v) {
+    if (v == null) return 'COND';
+    final s = v.toString().trim().toUpperCase();
+    if (s.startsWith('COND')) return 'COND';
+    if (s == 'APP0' || s.contains('PREMIO NULLO')) return 'APP0';
+    if (s == 'APP€' || s.contains('CON PREMIO'))  return 'APP€';
+    return _tipoOptions.contains(s) ? s : 'COND';
+  }
+
+  // Digitazione simulata
   Future<void> _typeInto(String key, String target, {required int ms}) async {
     final ctrl = _c[key]; if (ctrl == null) return;
     final id = (_gen[key] ?? 0) + 1; _gen[key] = id;
@@ -333,25 +215,102 @@ class ContractFormPaneState extends State<ContractFormPane> {
     return i;
   }
 
-  // UI helper
-  InputDecoration _dec(String l) =>
-      InputDecoration(labelText: l, isDense: true, border: const OutlineInputBorder());
-  Widget _t(String key, String label, {String? hint}) =>
-      TextField(controller: _c[key], focusNode: _f[key], decoration: _dec(label).copyWith(hintText: hint));
+  /* -------------------- Initial values -------------------- */
+  void _setInitialValues(Map<String, String> m) {
+    // testi
+    for (final e in m.entries) {
+      final k = e.key;
+      final v = e.value;
+      if (_c.containsKey(k)) {
+        _c[k]!.text = v;
+        _c[k]!.selection = TextSelection.collapsed(offset: _c[k]!.text.length);
+      }
+    }
+    // select / booleani
+    if (m.containsKey('tipo')) setState(() => _tipo = _normTipo(m['tipo']));
+    if (m.containsKey('tacito_rinnovo')) setState(() => _tacito = _normSiNo(m['tacito_rinnovo']));
+    if (m.containsKey('regolazione_fine_periodo')) {
+      final v = m['regolazione_fine_periodo']!;
+      setState(() => _regolazioneFinePeriodo =
+          (v.toLowerCase() == 'true') || (v.toLowerCase() == 'sì') || (v.toLowerCase() == 'si') || (v == '1'));
+    }
+  }
 
-  // Esposizione "raw" (facoltativa)
-  Map<String,String> get values => { for (final e in _c.entries) e.key: e.value.text.trim() };
+  @override
+  void initState() {
+    super.initState();
+    _ContractFormHostCbs.bind(this);
+    if (widget.initialValues != null && widget.initialValues!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _setInitialValues(widget.initialValues!);
+      });
+    }
+  }
 
-  // Host API (gestisce anche i booleani)
+  @override
+  void didUpdateWidget(covariant ContractFormPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialValues != oldWidget.initialValues &&
+        widget.initialValues != null) {
+      _setInitialValues(widget.initialValues!);
+    }
+  }
+
+  @override
+  void dispose() { _ContractFormHostCbs.unbind(this); super.dispose(); }
+
+  // Modello (chiavi "pulite" per il dialog utilizzatore)
+  Map<String, String> get model => {
+    'tipo'                 : _tipo,
+    'rischio'              : _c['rischio']?.text.trim() ?? '',
+    'compagnia'            : _c['compagnia']?.text.trim() ?? '',
+    'numero'               : _c['numero']?.text.trim() ?? '',
+    'premio_imponibile'    : _c['premio_imponibile']?.text.trim() ?? '',
+    'imposte'              : _c['imposte']?.text.trim() ?? '',
+    'premio_lordo'         : _c['premio_lordo']?.text.trim() ?? '',
+    'fraz'                 : _c['fraz']?.text.trim() ?? '',
+    'effetto'              : _c['effetto']?.text.trim() ?? '',
+    'scadenza'             : _c['scadenza']?.text.trim() ?? '',
+    'scadenza_copertura'   : _c['scadenza_copertura']?.text.trim() ?? '',
+    'data_emissione'       : _c['data_emissione']?.text.trim() ?? '',
+    'giorni_mora'          : _c['giorni_mora']?.text.trim() ?? '',
+    'broker'               : _c['broker']?.text.trim() ?? '',
+    'broker_indirizzo'     : _c['broker_indirizzo']?.text.trim() ?? '',
+    'tacito_rinnovo'       : _tacito,
+    'disdetta'             : _c['disdetta']?.text.trim() ?? '',
+    'proroga'              : _c['proroga']?.text.trim() ?? '',
+    'regolazione_fine_periodo' : _regolazioneFinePeriodo ? 'Sì' : 'No',
+  };
+
+  // Esposizione "raw" (debug)
+  Map<String,String> get values =>
+      { for (final e in _c.entries) e.key: e.value.text.trim() }
+        ..addAll({
+          'tipo': _tipo,
+          'tacito_rinnovo': _tacito,
+          'regolazione_fine_periodo': _regolazioneFinePeriodo ? 'Sì' : 'No',
+        });
+
+  // Host API (gestisce select/booleani)
   Future<void> setField(String field, dynamic value, {int? typingMs}) async {
     final ms = typingMs ?? _kDefaultTypingMs;
 
-    if (field == 'regolazione' || field == 'compresoFirma') {
-      final v = (value is bool) ? value : (value.toString().toLowerCase() == 'true');
-      setState(() {
-        if (field == 'regolazione') _regolazione = v;
-        if (field == 'compresoFirma') _compresoFirma = v;
-      });
+    if (field == 'tipo') {
+      setState(() => _tipo = _normTipo(value));
+      return;
+    }
+    if (field == 'tacito_rinnovo') {
+      setState(() => _tacito = _normSiNo(value));
+      return;
+    }
+    if (field == 'regolazione_fine_periodo') {
+      final v = (value is bool)
+          ? value
+          : (value.toString().toLowerCase() == 'true' ||
+             value.toString().toLowerCase() == 'sì' ||
+             value.toString().toLowerCase() == 'si'  ||
+             value.toString() == '1');
+      setState(() => _regolazioneFinePeriodo = v);
       return;
     }
 
@@ -365,36 +324,13 @@ class ContractFormPaneState extends State<ContractFormPane> {
   Future<void> fill(Map<String, dynamic> m, {int? typingMs}) async {
     final ms = typingMs ?? _kDefaultTypingMs;
 
-    // ordine “umano”: mettiamo i nuovi campi vicino agli omologhi
+    // ordine “umano”
     final order = [
-      // Identificativi
-      'tipo','ramo','compagnia','numero',
-
-      // Amministrativi base
-      'effetto','scadenza','data_emissione','fraz','modIncasso',
-
-      // Amministrativi extra
-      'scadenza_originaria','ultima_rata_pagata','compresoFirma',
-      'scadenza_mora','numeroProposta','codConvenzione',
-      'scadenza_vincolo','scadenza_copertura','fine_copertura_proroga',
-
-      // Premi
-      'premio','netto','imposte','accessori','diritti','spese','fondo','sconto',
-
-      // Unità vendita
-      'pv1','pv2','account','intermediario',
-
-      // Rinnovo
-      'rinnovo','disdetta','gMora','proroga',
-
-      // Operatività / Regolazione
-      'regolazione','inizio_reg','fine_reg','ultima_reg','gInvio','gPag','gMoraReg','cadReg',
-
-      // Extra identificativi
-      'tpCar',
-
-      // Rischio / Prodotto
-      'ramiDesc',
+      'tipo','rischio','compagnia','numero',
+      'premio_imponibile','imposte','premio_lordo',
+      'fraz','effetto','scadenza','scadenza_copertura','data_emissione','giorni_mora',
+      'broker','broker_indirizzo',
+      'tacito_rinnovo','disdetta','proroga','regolazione_fine_periodo',
     ];
 
     final keys = [...order.where(m.containsKey), ...m.keys.where((k) => !order.contains(k))];
@@ -406,6 +342,7 @@ class ContractFormPaneState extends State<ContractFormPane> {
     }
   }
 
+  /* ---------------------------- UI ---------------------------- */
   @override
   Widget build(BuildContext context) {
     return Align(
@@ -413,149 +350,110 @@ class ContractFormPaneState extends State<ContractFormPane> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _kFormMaxWidth),
         child: SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Identificativi
-          Text('Identificativi', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: _t('tipo', 'Tipo *')),
-            const SizedBox(width: 8),
-            Expanded(child: _t('tpCar', 'TpCar')),
-          ]),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: _t('ramo', 'Ramo *')),
-            const SizedBox(width: 8),
-            Expanded(child: _t('compagnia', 'Compagnia *')),
-          ]),
-          const SizedBox(height: 8),
-          _t('numero', 'Numero polizza *'),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Identificativi
+              Text('Identificativi', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
 
-          const Divider(height: 24),
-          Text('Amministrativi', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: _t('effetto',   'Effetto *',  hint: 'gg/mm/aaaa')),
-            const SizedBox(width: 8),
-            Expanded(child: _t('scadenza',  'Scadenza *', hint: 'gg/mm/aaaa')),
-          ]),
-          const SizedBox(height: 8),
-          _t('data_emissione', 'Data emissione *', hint: 'gg/mm/aaaa'),
-          const SizedBox(height: 8),
+              // Tipo (dropdown vincolato)
+              DropdownButtonFormField<String>(
+                value: _tipo,
+                decoration: _dec('Tipo *'),
+                items: const [
+                  DropdownMenuItem(value: 'COND', child: Text('Condizioni di Polizza (COND)')),
+                  DropdownMenuItem(value: 'APP0', child: Text('Appendice a premio nullo (APP0)')),
+                  DropdownMenuItem(value: 'APP€', child: Text('Appendice con premio (APP€)')),
+                ],
+                onChanged: (v) => setState(() => _tipo = v ?? 'COND'),
+              ),
+              const SizedBox(height: 8),
 
-          // Nuovi campi SDK
-          Row(children: [
-            Expanded(child: _t('scadenza_originaria', 'Scadenza originaria *', hint: 'gg/mm/aaaa')),
-            const SizedBox(width: 8),
-            Expanded(child: _t('ultima_rata_pagata',  'Ultima rata pagata *',   hint: 'gg/mm/aaaa')),
-          ]),
-          const SizedBox(height: 8),
+              _t('rischio', 'Rischio *'),
+              const SizedBox(height: 8),
 
-          // Compreso firma (checkbox)
-          Row(children: [
-            Checkbox(
-              value: _compresoFirma,
-              onChanged: (v) => setState(() => _compresoFirma = v ?? false),
-            ),
-            const Text('Compreso firma'),
-          ]),
-          const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _t('compagnia', 'Compagnia *')),
+                const SizedBox(width: 8),
+                Expanded(child: _t('numero', 'Numero di Polizza/Appendice *')),
+              ]),
 
-          _t('fraz', 'Frazionamento *'),
-          const SizedBox(height: 8),
-          _t('modIncasso', 'Modalità incasso *'),
+              const Divider(height: 24),
+              Text('Importi', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _t('premio_imponibile', 'Premio Annuo Imponibile *')),
+                const SizedBox(width: 8),
+                Expanded(child: _t('imposte', 'Imposte *')),
+              ]),
+              const SizedBox(height: 8),
+              _t('premio_lordo', 'Premio Annuo Lordo *'),
 
-          const Divider(height: 24),
-          Text('Altri dati Amministrativi (facoltativi)', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          _t('scadenza_mora', 'Scadenza Mora', hint: 'gg/mm/aaaa'),
-          const SizedBox(height: 8),
-          _t('numeroProposta', 'Numero proposta'),
-          const SizedBox(height: 8),
-          _t('codConvenzione', 'Codice convenzione'),
-          const SizedBox(height: 8),
-          _t('scadenza_vincolo', 'Scadenza Vincolo', hint: 'gg/mm/aaaa'),
-          const SizedBox(height: 8),
-          _t('scadenza_copertura', 'Scadenza Copertura', hint: 'gg/mm/aaaa'),
-          const SizedBox(height: 8),
-          _t('fine_copertura_proroga', 'Fine copertura proroga', hint: 'gg/mm/aaaa'),
+              const Divider(height: 24),
+              Text('Amministrativi', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _t('fraz', 'Frazionamento *'),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _t('effetto',   'Effetto *',  hint: 'gg/mm/aaaa')),
+                const SizedBox(width: 8),
+                Expanded(child: _t('scadenza',  'Scadenza *', hint: 'gg/mm/aaaa')),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _t('scadenza_copertura', 'Scadenza Copertura *', hint: 'gg/mm/aaaa')),
+                const SizedBox(width: 8),
+                Expanded(child: _t('data_emissione', 'Data di Emissione *', hint: 'gg/mm/aaaa')),
+              ]),
+              const SizedBox(height: 8),
+              _t('giorni_mora', 'Giorni di Mora'),
 
-          const Divider(height: 24),
-          Text('Premi', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            SizedBox(width:110, child: _t('premio',    'Premio *')),
-            SizedBox(width:110, child: _t('netto',     'Netto *')),
-            SizedBox(width:110, child: _t('accessori', 'Accessori')),
-            SizedBox(width:110, child: _t('diritti',   'Diritti')),
-            SizedBox(width:110, child: _t('imposte',   'Imposte')),
-            SizedBox(width:110, child: _t('spese',     'Spese')),
-            SizedBox(width:110, child: _t('fondo',     'Fondo')),
-            SizedBox(width:110, child: _t('sconto',    'Sconto')),
-          ]),
+              const Divider(height: 24),
+              Text('Broker & Rinnovo', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _t('broker', 'Broker *'),
+              const SizedBox(height: 8),
+              _t('broker_indirizzo', 'Indirizzo del Broker *'),
+              const SizedBox(height: 8),
+              Row(children: [
+                // Tacito Rinnovo (dropdown Sì/No)
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _tacito,
+                    decoration: _dec('Tacito Rinnovo *'),
+                    items: _siNoOptions
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(growable: false),
+                    onChanged: (v) => setState(() => _tacito = v ?? 'Sì'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: _t('disdetta', 'Disdetta')),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _t('proroga', 'Facoltà di Proroga')),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _regolazioneFinePeriodo ? 'Sì' : 'No',
+                    decoration: _dec('Regolazione al termine del periodo *'),
+                    items: _siNoOptions
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(growable: false),
+                    onChanged: (v) => setState(() => _regolazioneFinePeriodo = (v == 'Sì')),
+                  ),
+                ),
+              ]),
 
-          const Divider(height: 24),
-          Text('Unità vendita', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          _t('pv1', 'Punto vendita *'),
-          const SizedBox(height: 8),
-          _t('pv2', 'Punto vendita 2'),
-          const SizedBox(height: 8),
-          _t('account', 'Account *'),
-          const SizedBox(height: 8),
-          _t('intermediario', 'Intermediario *'),
-
-          const Divider(height: 24),
-          Text('Rinnovo', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          _t('rinnovo', 'Rinnovo'),
-          const SizedBox(height: 8),
-          _t('disdetta', 'Disdetta'),
-          const SizedBox(height: 8),
-          _t('gMora', 'Giorni Mora'),
-          const SizedBox(height: 8),
-          _t('proroga', 'Proroga'),
-
-          const Divider(height: 24),
-          Text('Operatività', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Row(children: [
-            Checkbox(
-              value: _regolazione,
-              onChanged: (v) => setState(() => _regolazione = v ?? false),
-            ),
-            const Text('Regolazione'),
-          ]),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: _t('inizio_reg', 'Inizio *', hint: 'gg/mm/aaaa')),
-            const SizedBox(width: 8),
-            Expanded(child: _t('fine_reg',   'Fine *',   hint: 'gg/mm/aaaa')),
-          ]),
-          const SizedBox(height: 8),
-          _t('ultima_reg', 'Ultima reg. emessa', hint: 'gg/mm/aaaa'),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: SizedBox(width:110, child: _t('gInvio', 'Giorni invio dati'))),
-            const SizedBox(width: 8),
-            Expanded(child: SizedBox(width:110, child: _t('gPag',  'Giorni pag. reg.'))),
-          ]),
-          const SizedBox(height: 8),
-          SizedBox(width:110, child: _t('gMoraReg', 'Giorni mora regolaz.')),
-          const SizedBox(height: 8),
-          _t('cadReg', 'Cadenza regolazione'),
-
-          const Divider(height: 24),
-          Text('Rischio / Prodotto', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          _t('ramiDesc', 'Descrizione *'),
-          const SizedBox(height: 8),
-        ],
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
       ),
-    )));
+    );
   }
 }
 

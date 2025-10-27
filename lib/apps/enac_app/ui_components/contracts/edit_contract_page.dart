@@ -1,8 +1,9 @@
+// lib/apps/enac_app/ui_components/edit_contract_page.dart
 import 'dart:async';
+import 'package:boxed_ai/apps/enac_app/ui_components/contracts/contract_form_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import 'package:boxed_ai/apps/enac_app/ui_components/contracts/contract_form_widget.dart';
 import 'package:boxed_ai/chatbot.dart';
 import 'package:boxed_ai/context_api_sdk.dart';
 import 'package:boxed_ai/dual_pane_wrapper.dart';
@@ -37,7 +38,7 @@ class EditContractPage extends StatefulWidget with ChatBotExtensions {
 
   final String title;
 
-  // esponiamo gli stessi tool del pane
+  // Esponiamo i tool del nuovo ContractFormPane
   static const _delegate = ContractFormPane();
   @override
   List<ToolSpec> get toolSpecs => [ContractFormPane.fillTool, ContractFormPane.setTool];
@@ -57,96 +58,96 @@ class _EditContractPageState extends State<EditContractPage> {
   final _fmt = DateFormat('dd/MM/yyyy');
 
   ButtonStyle get _cancelStyle => OutlinedButton.styleFrom(
-    foregroundColor: Colors.grey.shade800,
-    side: BorderSide(color: Colors.grey.shade400),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-  );
+        foregroundColor: Colors.grey.shade800,
+        side: BorderSide(color: Colors.grey.shade400),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      );
   ButtonStyle get _saveStyle => ElevatedButton.styleFrom(
-    backgroundColor: _kBrandGreen,
-    foregroundColor: Colors.white,
-    elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-  );
+        backgroundColor: _kBrandGreen,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      );
 
-  // mapping ContrattoOmnia8 -> initialValues per ContractFormPane
-  Map<String, String> _contractToInitialMap(ContrattoOmnia8 c) {
-    String d(DateTime? x) => (x == null) ? '' : _fmt.format(x);
-    String n(dynamic v) {
-      if (v == null) return '';
-      final s = v.toString();
-      if (s.isEmpty) return '';
-      // numeri: normalizziamo al punto decimale
-      return s.replaceAll(',', '.');
+  /* ───────────────────── Helpers di normalizzazione ───────────────────── */
+  String _d(DateTime? x) => (x == null) ? '' : _fmt.format(x);
+  String _num(dynamic v) {
+    if (v == null) return '';
+    final s = v.toString().trim();
+    if (s.isEmpty) return '';
+    // normalizza eventuale formato 1.234,56 → 1234.56
+    final norm = s.replaceAll('.', '').replaceAll(',', '.');
+    return norm;
+  }
+
+  String _normTipo(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return 'COND';
+    final s = raw.trim().toUpperCase();
+    if (s.startsWith('COND')) return 'COND';
+    if (s == 'APP0' || s.contains('NULLO')) return 'APP0';
+    if (s == 'APP€' || s.contains('PREMIO')) return 'APP€';
+    return (['COND', 'APP0', 'APP€'].contains(s)) ? s : 'COND';
     }
 
-    final id   = c.identificativi;
-    final amm  = c.amministrativi;
+  String _normSiNoFromRinnovo(String? raw) {
+    final s = (raw ?? '').trim().toLowerCase();
+    const yes = {'sì','si','yes','y','1','true','t','tacito','tacito rinnovo'};
+    const no  = {'no','n','0','false','f','non tacito'};
+    if (yes.contains(s)) return 'Sì';
+    if (no.contains(s))  return 'No';
+    // fallback: stringa non riconosciuta ⇒ lascio vuoto (verrà richiesto)
+    return (s.isEmpty) ? '' : 'Sì';
+  }
+
+  /* ───────────── mapping ContrattoOmnia8 → initialValues per il form ───────────── */
+  Map<String, String> _contractToInitialMap(ContrattoOmnia8 c) {
+    final id  = c.identificativi;
+    final amm = c.amministrativi;
     final prem = c.premi;
-    final rin  = c.rinnovo;
-    final op   = c.operativita;
-    final pr   = op?.parametriRegolazione;
-    final ram  = c.ramiEl;
+    final rin = c.rinnovo;
+    final uv  = c.unitaVendita;
+    final op  = c.operativita;
+
+    // Preferisco il rischio da ramiEl.descrizione; fallback a identificativi.tipo
+    final rischio = (c.ramiEl?.descrizione?.trim().isNotEmpty ?? false)
+        ? c.ramiEl!.descrizione!
+        : (id.tipo);
 
     return {
       // Identificativi
-      'tipo'      : id.tipo,
-      'tpCar'     : id.tpCar ?? '',
-      'ramo'      : id.ramo,
-      'compagnia' : id.compagnia,
-      'numero'    : id.numeroPolizza,
+      'tipo'              : _normTipo(id.tpCar),
+      'rischio'           : rischio,
+      'compagnia'         : id.compagnia,
+      'numero'            : id.numeroPolizza,
 
-      // Amministrativi base + extra
-      'effetto'               : d(amm?.effetto),
-      'scadenza'              : d(amm?.scadenza),
-      'data_emissione'        : d(amm?.dataEmissione ?? amm?.effetto),
-      'fraz'                  : (amm?.frazionamento ?? '').toString(),
-      'modIncasso'            : (amm?.modalitaIncasso ?? '').toString(),
-      'scadenza_originaria'   : d(amm?.scadenzaOriginaria ?? amm?.scadenza),
-      'ultima_rata_pagata'    : d(amm?.ultimaRataPagata ?? amm?.dataEmissione),
-      'scadenza_mora'         : d(amm?.scadenzaMora),
-      'numeroProposta'        : (amm?.numeroProposta ?? '').toString(),
-      'codConvenzione'        : (amm?.codConvenzione ?? '').toString(),
-      'scadenza_vincolo'      : d(amm?.scadenzaVincolo),
-      'scadenza_copertura'    : d(amm?.scadenzaCopertura),
-      'fine_copertura_proroga': d(amm?.fineCoperturaProroga),
-      'compresoFirma'         : (amm?.compresoFirma ?? false).toString(),
+      // Importi
+      'premio_imponibile' : _num(prem?.netto),
+      'imposte'           : _num(prem?.imposte),
+      'premio_lordo'      : _num(prem?.premio),
 
-      // Premi
-      'premio'     : n(prem?.premio),
-      'netto'      : n(prem?.netto),
-      'accessori'  : n(prem?.accessori),
-      'diritti'    : n(prem?.diritti),
-      'imposte'    : n(prem?.imposte),
-      'spese'      : n(prem?.spese),
-      'fondo'      : n(prem?.fondo),
-      'sconto'     : prem?.sconto == null ? '' : n(prem?.sconto),
+      // Amministrativi / date
+      'fraz'              : (amm?.frazionamento ?? '').toString(),
+      'effetto'           : _d(amm?.effetto),
+      'scadenza'          : _d(amm?.scadenza),
+      'scadenza_copertura': _d(amm?.scadenzaCopertura),
+      'data_emissione'    : _d(amm?.dataEmissione),
 
-      // Unità vendita
-      'pv1'          : (c.unitaVendita?.puntoVendita ?? '').toString(),
-      'pv2'          : (c.unitaVendita?.puntoVendita2 ?? '').toString(),
-      'account'      : (c.unitaVendita?.account ?? '').toString(),
-      'intermediario': (c.unitaVendita?.intermediario ?? '').toString(),
+      // Varie
+      'giorni_mora'       : (rin?.giorniMora ?? '').toString(),
+
+      // Broker
+      'broker'            : (uv?.intermediario ?? '').toString(),
+      'broker_indirizzo'  : (uv?.puntoVendita ?? '').toString(),
 
       // Rinnovo
-      'rinnovo'  : (rin?.rinnovo ?? '').toString(),
-      'disdetta' : (rin?.disdetta ?? '').toString(),
-      'gMora'    : (rin?.giorniMora ?? '').toString(),
-      'proroga'  : (rin?.proroga ?? '').toString(),
+      'tacito_rinnovo'    : _normSiNoFromRinnovo(rin?.rinnovo),
+      'disdetta'          : (rin?.disdetta ?? '').toString(),
+      'proroga'           : (rin?.proroga ?? '').toString(),
 
-      // Operatività / Regolazione
-      'regolazione' : (op?.regolazione ?? false).toString(),
-      'inizio_reg'  : d(pr?.inizio),
-      'fine_reg'    : d(pr?.fine),
-      'ultima_reg'  : d(pr?.ultimaRegEmessa),
-      'gInvio'      : (pr?.giorniInvioDati ?? '').toString(),
-      'gPag'        : (pr?.giorniPagReg ?? '').toString(),
-      'gMoraReg'    : (pr?.giorniMoraRegolazione ?? '').toString(),
-      'cadReg'      : (pr?.cadenzaRegolazione ?? '').toString(),
-
-      // Rischio / Prodotto
-      'ramiDesc' : (ram?.descrizione ?? '').toString(),
+      // Regolazione al termine del periodo (Sì/No)
+      'regolazione_fine_periodo': (op?.regolazione ?? false) ? 'Sì' : 'No',
     };
   }
 
@@ -157,7 +158,7 @@ class _EditContractPageState extends State<EditContractPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // HEADER allineato al form
+        // ───────────────── HEADER ─────────────────
         Align(
           alignment: Alignment.topLeft,
           child: ConstrainedBox(
@@ -166,18 +167,27 @@ class _EditContractPageState extends State<EditContractPage> {
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Text(widget.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                  Text(widget.title,
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                   const Spacer(),
-                  OutlinedButton(onPressed: widget.onCancel, style: _cancelStyle, child: const Text('Annulla')),
+                  OutlinedButton(
+                    onPressed: widget.onCancel,
+                    style: _cancelStyle,
+                    child: const Text('Annulla'),
+                  ),
                   const SizedBox(width: 8),
-                  ElevatedButton(onPressed: _onSavePressed, style: _saveStyle, child: const Text('Salva')),
+                  ElevatedButton(
+                    onPressed: _onSavePressed,
+                    style: _saveStyle,
+                    child: const Text('Salva'),
+                  ),
                 ],
               ),
             ),
           ),
         ),
 
-        // FORM precompilato
+        // ───────────────── FORM (precompilato) ────────────────
         Expanded(
           child: Align(
             alignment: Alignment.topLeft,
@@ -185,7 +195,7 @@ class _EditContractPageState extends State<EditContractPage> {
               constraints: const BoxConstraints(maxWidth: _kFormMaxWidth),
               child: ContractFormPane(
                 key: _paneKey,
-                initialValues: initial,   // ⬅️ prefill
+                initialValues: initial,
               ),
             ),
           ),
@@ -194,44 +204,50 @@ class _EditContractPageState extends State<EditContractPage> {
     );
   }
 
+  /* ───────────────────────── Salvataggio ───────────────────────── */
   Future<void> _onSavePressed() async {
     final pane = _paneKey.currentState; if (pane == null) return;
-
-    final m   = pane.model;              // Map<String,String>
-    final reg = pane.regolazione;        // bool
+    final m = pane.model;
 
     String t(String k) => (m[k] ?? '').trim();
-    String? nn(String k) => t(k).isEmpty ? null : t(k);
     DateTime? pd(String k) {
       final s = t(k); if (s.isEmpty) return null;
       try { return _fmt.parseStrict(s); } catch (_) { return null; }
     }
-    int? pint(String k) => (t(k).isEmpty) ? null : int.tryParse(t(k));
-    String pstr(String k) {
+    String moneyStr(String k) {
       final s = t(k);
       if (s.isEmpty) return '0.00';
-      final d = double.tryParse(s.replaceAll(',', '.')) ?? 0.0;
+      final d = double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ??
+          double.tryParse(s) ?? 0.0;
       return d.toStringAsFixed(2);
     }
+    bool yesNo(String k) {
+      final s = t(k).toLowerCase();
+      return s == 'sì' || s == 'si' || s == 'true' || s == '1';
+    }
 
-    // validazioni minime come Create
+    // Validazioni: SOLO campi del capitolato
     final requiredFields = {
-      'tipo'        : t('tipo'),
-      'ramo'        : t('ramo'),
-      'compagnia'   : t('compagnia'),
-      'numero'      : t('numero'),
-      'effetto'     : t('effetto'),
-      'scadenza'    : t('scadenza'),
-      'fraz'        : t('fraz'),
-      'modIncasso'  : t('modIncasso'),
-      'pv1'         : t('pv1'),
-      'account'     : t('account'),
-      'intermediario': t('intermediario'),
-      'premio'      : t('premio'),
-      'netto'       : t('netto'),
-      'rami_desc'   : t('rami_desc'),
+      'tipo'               : t('tipo'),
+      'rischio'            : t('rischio'),
+      'compagnia'          : t('compagnia'),
+      'numero'             : t('numero'),
+      'premio_imponibile'  : t('premio_imponibile'),
+      'imposte'            : t('imposte'),
+      'premio_lordo'       : t('premio_lordo'),
+      'fraz'               : t('fraz'),
+      'effetto'            : t('effetto'),
+      'scadenza'           : t('scadenza'),
+      'scadenza_copertura' : t('scadenza_copertura'),
+      'data_emissione'     : t('data_emissione'),
+      'tacito_rinnovo'     : t('tacito_rinnovo'),
     };
-    final missing = requiredFields.entries.where((e) => e.value.isEmpty).map((e) => e.key).toList();
+
+    final missing = requiredFields.entries
+        .where((e) => e.value.isEmpty)
+        .map((e) => e.key)
+        .toList();
+
     if (missing.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Compila i campi obbligatori: ${missing.join(', ')}')),
@@ -241,89 +257,74 @@ class _EditContractPageState extends State<EditContractPage> {
 
     final effetto  = pd('effetto');
     final scadenza = pd('scadenza');
-    if (effetto == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Formato data Effetto non valido (gg/mm/aaaa).')));
-      return;
-    }
-    if (scadenza == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Formato data Scadenza non valido (gg/mm/aaaa).')));
+    final scCop    = pd('scadenza_copertura');
+    final emesso   = pd('data_emissione');
+
+    if (effetto == null || scadenza == null || scCop == null || emesso == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Verifica il formato delle date (gg/mm/aaaa).')),
+      );
       return;
     }
 
     final updated = ContrattoOmnia8(
       identificativi: Identificativi(
-        tipo          : t('tipo'),
-        tpCar         : nn('tpCar'),
-        ramo          : t('ramo'),
+        // “Rischio” nel campo tipo per compatibilità con le view
+        tipo          : t('rischio'),
+        // “Tipo” (COND | APP0 | APP€) nel tpCar
+        tpCar         : t('tipo'),
+        ramo          : '', // non richiesto
         compagnia     : t('compagnia'),
         numeroPolizza : t('numero'),
       ),
+      // Broker & indirizzo
       unitaVendita: UnitaVendita(
-        puntoVendita  : t('pv1'),
-        puntoVendita2 : t('pv2'),
-        account       : t('account'),
-        intermediario : t('intermediario'),
+        intermediario : t('broker'),
+        puntoVendita  : t('broker_indirizzo'),
       ),
       amministrativi: Amministrativi(
-        effetto            : effetto,
-        scadenza           : scadenza,
-        dataEmissione      : pd('emissione') ?? pd('data_emissione') ?? effetto,
-        ultimaRataPagata   : pd('ultima_rata_pagata') ?? pd('data_emissione') ?? effetto,
-        frazionamento      : t('fraz').toLowerCase(),
-        modalitaIncasso    : t('modIncasso'),
-        compresoFirma      : t('compresoFirma').toLowerCase() == 'true',
-        scadenzaOriginaria : pd('scadenza_originaria') ?? scadenza,
-        scadenzaMora       : pd('scadenza_mora'),
-        numeroProposta     : nn('numeroProposta'),
-        codConvenzione     : nn('codConvenzione'),
-        scadenzaVincolo    : pd('scadenza_vincolo'),
-        scadenzaCopertura  : pd('scadenza_copertura'),
-        fineCoperturaProroga: pd('fine_copertura_proroga'),
+        effetto           : effetto,
+        scadenza          : scadenza,
+        dataEmissione     : emesso,
+        frazionamento     : t('fraz'),
+        scadenzaCopertura : scCop,
       ),
       premi: Premi(
-        premio    : pstr('premio'),
-        netto     : pstr('netto'),
-        accessori : pstr('accessori'),
-        diritti   : pstr('diritti'),
-        imposte   : pstr('imposte'),
-        spese     : pstr('spese'),
-        fondo     : pstr('fondo'),
-        sconto    : t('sconto').isEmpty ? null : pstr('sconto'),
+        netto   : moneyStr('premio_imponibile'),
+        imposte : moneyStr('imposte'),
+        premio  : moneyStr('premio_lordo'),
       ),
       rinnovo: Rinnovo(
-        rinnovo    : t('rinnovo'),
+        rinnovo    : t('tacito_rinnovo'), // "Sì" | "No"
         disdetta   : t('disdetta'),
-        giorniMora : t('gMora'),
         proroga    : t('proroga'),
+        giorniMora : t('giorni_mora'),
       ),
       operativita: Operativita(
-        regolazione: reg,
+        regolazione: yesNo('regolazione_fine_periodo'),
         parametriRegolazione: ParametriRegolazione(
-          inizio                : pd('inizio_reg') ?? effetto,
-          fine                  : pd('fine_reg')   ?? scadenza,
-          ultimaRegEmessa       : pd('ultima_reg'),
-          giorniInvioDati       : pint('gInvio'),
-          giorniPagReg          : pint('gPag'),
-          giorniMoraRegolazione : pint('gMoraReg'),
-          cadenzaRegolazione    : (nn('cadReg')?.toLowerCase() ?? 'annuale'),
+          inizio: effetto,
+          fine  : scadenza,
         ),
       ),
-      ramiEl: RamiEl(descrizione: t('rami_desc')),
+      ramiEl: RamiEl(descrizione: t('rischio')),
     );
 
     try {
       final resp = await widget.sdk.updateContract(
-        widget.user.username,    // userId
-        widget.entityId,         // entityId
-        widget.contractId,       // contractId
+        widget.user.username, // userId
+        widget.entityId,      // entityId
+        widget.contractId,    // contractId
         updated,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Contratto aggiornato.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Contratto aggiornato.')));
       await widget.onUpdated(resp);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Errore aggiornamento contratto: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Errore aggiornamento contratto: $e')));
     }
   }
 }

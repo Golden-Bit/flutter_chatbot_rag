@@ -35,10 +35,11 @@ class _ClaimsTableState extends State<ClaimsTable> {
   bool _isLoadingMore = false;
   String? _error;
 
-  final NumberFormat _currencyFmt = NumberFormat.currency(locale: 'it_IT', symbol: '€');
+  final NumberFormat _currencyFmt =
+      NumberFormat.currency(locale: 'it_IT', symbol: '€');
   final DateFormat _dateFmt = DateFormat('dd/MM/yyyy');
 
-  // ------- Money parser robusto (fix ×100) -------
+  // ------- Money parser robusto -------
   double? _parseMoney(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
@@ -49,11 +50,9 @@ class _ClaimsTableState extends State<ClaimsTable> {
       final lastDot = s0.lastIndexOf('.');
       final lastComma = s0.lastIndexOf(',');
       if (lastDot > lastComma) {
-        final norm = s0.replaceAll(',', '');
-        return double.tryParse(norm);
+        return double.tryParse(s0.replaceAll(',', ''));
       } else {
-        final norm = s0.replaceAll('.', '').replaceAll(',', '.');
-        return double.tryParse(norm);
+        return double.tryParse(s0.replaceAll('.', '').replaceAll(',', '.'));
       }
     }
     if (s0.contains(',') && !s0.contains('.')) {
@@ -97,7 +96,10 @@ class _ClaimsTableState extends State<ClaimsTable> {
 
     try {
       // View denormalizzata con tutti i sinistri dell’entità
-      final list = await widget.sdk.viewEntityClaims(widget.userId, widget.clientId);
+      final list = await widget.sdk.viewEntityClaims(
+        widget.userId,
+        widget.clientId,
+      );
       _allViews = list.map((e) => Map<String, dynamic>.from(e)).toList();
       if (_allViews.isNotEmpty) {
         await _loadMore();
@@ -142,30 +144,35 @@ class _ClaimsTableState extends State<ClaimsTable> {
   }
 
   DataRow _row(BuildContext context, Map<String, dynamic> v) {
-    // Colonne richieste:
-    // COMPAGNIA, NUM CONTRATTO, ESERCIZIO, NUM. SINISTRO,
-    // AVVENIMENTO, IMPORTO LIQUID., TARGA, DANNEGGIAMENTO, STATO SINISTRO
+    // Colonne finali: COMPAGNIA, NUM. CONTRATTO, ESERCIZIO, NUM. SINISTRO,
+    // AVVENIMENTO, IMPORTO LIQUID., DESCRIZIONE, STATO SINISTRO, lente
     final compagnia   = (v['compagnia'] ?? v['Compagnia'] ?? '').toString();
     final numPolizza  = (v['numero_polizza'] ?? v['NumeroPolizza'] ?? '').toString();
     final esercizio   = (v['esercizio'] ?? v['Esercizio'] ?? '').toString();
     final numSinistro = (v['numero_sinistro'] ?? v['NumeroSinistro'] ?? v['num_sinistro'] ?? '').toString();
     final avvenimento = v['data_avvenimento'] ?? v['DataAvvenimento'];
     final importo     = (v['importo_liquidato'] ?? v['ImportoLiquidato'] ?? v['importo'] ?? '').toString();
-    final targa       = (v['targa'] ?? v['Targa'] ?? '').toString();
-    final danno       = (v['dinamica'] ?? v['Dinamica'] ?? v['danneggiamento'] ?? '').toString();
+
+    // DESCRIZIONE: usa descrizione/dinamica/danneggiamento come fallback
+    final descrizione = (v['descrizione'] ??
+                         v['Descrizione'] ??
+                         v['dinamica'] ??
+                         v['Dinamica'] ??
+                         v['danneggiamento'] ??
+                         '').toString();
+
     final stato       = (v['stato_compagnia'] ?? v['StatoCompagnia'] ?? v['codice_stato'] ?? v['CodiceStato'] ?? '').toString();
 
     return DataRow(cells: [
-      const DataCell(Icon(Icons.report_gmailerrorred, size: 18)),
-      DataCell(Text(compagnia, maxLines: 2)),
-      DataCell(Text(numPolizza)),
-      DataCell(Text(esercizio)),
-      DataCell(Text(numSinistro)),
-      DataCell(Text(_fmtDate(avvenimento))),
-      DataCell(Text(_fmtMoney(importo))),
-      DataCell(Text(targa)),
-      DataCell(Text(danno, maxLines: 2)),
-      DataCell(Text(stato)),
+      // (TIPO eliminato)
+      DataCell(Text(compagnia, maxLines: 2)),        // COMPAGNIA
+      DataCell(Text(numPolizza)),                    // NUM. CONTRATTO
+      DataCell(Text(esercizio)),                     // ESERCIZIO
+      DataCell(Text(numSinistro)),                   // NUM. SINISTRO
+      DataCell(Text(_fmtDate(avvenimento))),         // AVVENIMENTO
+      DataCell(Text(_fmtMoney(importo))),            // IMPORTO LIQUID.
+      DataCell(Text(descrizione, maxLines: 2)),      // DESCRIZIONE (ex DANNEGGIAMENTO)
+      DataCell(Text(stato)),                         // STATO SINISTRO
       DataCell(
         IconButton(
           icon: const Icon(Icons.search, size: 20),
@@ -192,6 +199,7 @@ class _ClaimsTableState extends State<ClaimsTable> {
 
     final table = LayoutBuilder(
       builder: (context, constraints) {
+        // Adattiva: riempie la pagina; se lo spazio non basta, è disponibile lo scroll orizzontale
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: ConstrainedBox(
@@ -201,15 +209,14 @@ class _ClaimsTableState extends State<ClaimsTable> {
               headingRowHeight: 36,
               dataRowMinHeight: 48,
               columns: const [
-                DataColumn(label: Text('TIPO')),
+                // (TIPO rimosso)
                 DataColumn(label: Text('COMPAGNIA')),
                 DataColumn(label: Text('NUM. CONTRATTO')),
                 DataColumn(label: Text('ESERCIZIO')),
                 DataColumn(label: Text('NUM. SINISTRO')),
                 DataColumn(label: Text('AVVENIMENTO')),
                 DataColumn(label: Text('IMPORTO LIQUID.')),
-                DataColumn(label: Text('TARGA')),
-                DataColumn(label: Text('DANNEGGIAMENTO')),
+                DataColumn(label: Text('DESCRIZIONE')),       // ex DANNEGGIAMENTO
                 DataColumn(label: Text('STATO SINISTRO')),
                 DataColumn(label: SizedBox()), // lente
               ],

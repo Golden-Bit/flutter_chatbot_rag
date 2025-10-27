@@ -29,20 +29,18 @@ class _Pair {
   const _Pair(this.entityId, this.contractId);
 }
 
-/* Riga tabella “forte” con tutto quello che serve */
+/* Riga tabella con tutto quello che serve (senza "scadenza titolo") */
 class _RowData {
   final String entityId;
   final String entityName;
   final String contractId;
   final ContrattoOmnia8 c;
-  final DateTime? nextTitleDue; // prossima Scadenza Titolo (se trovata)
 
   const _RowData({
     required this.entityId,
     required this.entityName,
     required this.contractId,
     required this.c,
-    required this.nextTitleDue,
   });
 }
 
@@ -53,9 +51,8 @@ class _PolizzePageState extends State<PolizzePage> {
   int _nextIndex = 0;
   final List<_RowData> _rows = [];
 
-  // Cache entità e indice scadenze titoli per NumeroPolizza
+  // Cache entità
   final Map<String, Entity> _entityCache = {};
-  final Map<String, Map<String, DateTime?>> _entityTitlesNextByPolicy = {};
 
   // UI
   bool _initialLoading = true;
@@ -81,7 +78,6 @@ class _PolizzePageState extends State<PolizzePage> {
       _rows.clear();
       _nextIndex = 0;
       _entityCache.clear();
-      _entityTitlesNextByPolicy.clear();
     });
 
     try {
@@ -125,49 +121,6 @@ class _PolizzePageState extends State<PolizzePage> {
     }
   }
 
-  /// Costruisce (una sola volta per entità) un indice:
-  ///   numero_polizza -> prossima scadenza_titolo (se disponibile)
-  Future<void> _ensureTitlesIndex(String entityId) async {
-    if (_entityTitlesNextByPolicy.containsKey(entityId)) return;
-
-    try {
-      final list = await widget.sdk.viewEntityTitles(widget.userId, entityId);
-      final idx = <String, DateTime?>{};
-      final now = DateTime.now();
-
-      for (final row in list) {
-        final m = Map<String, dynamic>.from(row);
-        final pol =
-            (m['numero_polizza'] ?? m['NumeroPolizza'] ?? '').toString();
-        if (pol.isEmpty) continue;
-
-        final raw = m['scadenza_titolo'] ?? m['ScadenzaTitolo'];
-        DateTime? dt;
-        if (raw != null) {
-          try {
-            dt = DateTime.parse(raw.toString());
-          } catch (_) {}
-        }
-        if (dt == null) continue;
-
-        // tieni la scadenza futura più prossima (fallback: qualsiasi)
-        final cur = idx[pol];
-        if (cur == null) {
-          idx[pol] = dt;
-        } else {
-          final bothFuture = dt.isAfter(now) && cur.isAfter(now);
-          if ((bothFuture && dt.isBefore(cur)) ||
-              (!bothFuture && dt.isBefore(cur))) {
-            idx[pol] = dt;
-          }
-        }
-      }
-      _entityTitlesNextByPolicy[entityId] = idx;
-    } catch (_) {
-      _entityTitlesNextByPolicy[entityId] = {};
-    }
-  }
-
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore) return;
     setState(() {
@@ -180,7 +133,6 @@ class _PolizzePageState extends State<PolizzePage> {
       final pair = _allPairs[i];
       try {
         await _ensureEntity(pair.entityId);
-        await _ensureTitlesIndex(pair.entityId);
 
         final c = await widget.sdk.getContract(
           widget.userId,
@@ -189,16 +141,11 @@ class _PolizzePageState extends State<PolizzePage> {
         );
 
         final ent = _entityCache[pair.entityId]!;
-        final polNum = c.identificativi.numeroPolizza;
-        final nextTitle =
-            _entityTitlesNextByPolicy[pair.entityId]?[polNum];
-
         _rows.add(_RowData(
           entityId: pair.entityId,
           entityName: ent.name,
           contractId: pair.contractId,
           c: c,
-          nextTitleDue: nextTitle,
         ));
       } on ApiException catch (e) {
         _error = 'Errore ${pair.contractId}: ${e.statusCode} ${e.message}';
@@ -244,16 +191,16 @@ class _PolizzePageState extends State<PolizzePage> {
     final prem = r.c.premi;
 
     return DataRow(cells: [
-      DataCell(Text(r.entityName, maxLines: 2)),                // CONTRAENTE
-      DataCell(Text(id.ramo)),
-      DataCell(Text(id.compagnia, maxLines: 2)),
-      DataCell(Text(id.numeroPolizza)),
-      DataCell(Text(ram?.descrizione ?? '', maxLines: 2)),      // RISCHIO/PRODOTTO
-      DataCell(Text(amm?.frazionamento ?? '')),
-      DataCell(Text(_fmtDate(amm?.effetto))),
-      DataCell(Text(_fmtDate(amm?.scadenza))),
-      DataCell(Text(_fmtDate(r.nextTitleDue))),                 // SCADENZA TITOLO
-      DataCell(Text(_currencyFmt.format(_parseMoney(prem?.premio)))), // PREMIO
+      const DataCell(Icon(Icons.description_outlined, size: 18)),      // TIPO
+      DataCell(Text(r.entityName, maxLines: 2)),                       // CONTRAENTE
+      DataCell(Text(id.compagnia, maxLines: 2)),                       // COMPAGNIA
+      DataCell(Text(id.numeroPolizza)),                                // NUMERO
+      DataCell(Text(ram?.descrizione ?? '', maxLines: 2)),             // RISCHIO
+      DataCell(Text(amm?.frazionamento ?? '')),                        // FRAZIONAMENTO
+      DataCell(Text(_fmtDate(amm?.effetto))),                          // EFFETTO
+      DataCell(Text(_fmtDate(amm?.scadenza))),                         // SCADENZA
+      DataCell(Text(_fmtDate(amm?.scadenzaCopertura))),                // SCAD. COPERTURA
+      DataCell(Text(_currencyFmt.format(_parseMoney(prem?.premio)))),  // PREMIO
       DataCell(
         IconButton(
           icon: const Icon(Icons.search, size: 20),
@@ -279,6 +226,7 @@ class _PolizzePageState extends State<PolizzePage> {
 
     final table = LayoutBuilder(
       builder: (context, constraints) {
+        // Si adatta sempre alla pagina: riempie la larghezza e abilita lo scroll se serve.
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: ConstrainedBox(
@@ -288,15 +236,15 @@ class _PolizzePageState extends State<PolizzePage> {
               headingRowHeight: 36,
               dataRowMinHeight: 48,
               columns: const [
+                DataColumn(label: Text('TIPO')),
                 DataColumn(label: Text('CONTRAENTE')),
-                DataColumn(label: Text('RAMO')),
                 DataColumn(label: Text('COMPAGNIA')),
                 DataColumn(label: Text('NUMERO')),
-                DataColumn(label: Text('RISCHIO / PRODOTTO')),
+                DataColumn(label: Text('RISCHIO')),
                 DataColumn(label: Text('FRAZIONAMENTO')),
                 DataColumn(label: Text('EFFETTO')),
                 DataColumn(label: Text('SCADENZA')),
-                DataColumn(label: Text('SCADENZA TITOLO')),
+                DataColumn(label: Text('SCAD. COPERTURA')),
                 DataColumn(label: Text('PREMIO')),
                 DataColumn(label: SizedBox()), // lente
               ],

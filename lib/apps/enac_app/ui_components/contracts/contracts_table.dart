@@ -7,7 +7,7 @@ class ContractsTable extends StatefulWidget {
   final String clientId;
   final Omnia8Sdk sdk;
 
-  // ⬇⬇⬇ FIRMA AGGIORNATA: passa anche contractId
+  // Passa anche contractId
   final void Function(String contractId, ContrattoOmnia8 c)? onOpenContract;
 
   const ContractsTable({
@@ -22,7 +22,7 @@ class ContractsTable extends StatefulWidget {
   State<ContractsTable> createState() => _ContractsTableState();
 }
 
-/* Riga “forte” con ID + oggetto */
+/* Riga tabellare con ID + oggetto contratto */
 class _Row {
   final String id;
   final ContrattoOmnia8 c;
@@ -30,15 +30,15 @@ class _Row {
 }
 
 class _ContractsTableState extends State<ContractsTable> {
-  // Stato paginazione
+  // Paginazione
   final int _pageSize = 10;
   List<String> _allIds = [];
   int _nextIndex = 0;
 
-  // ⬇⬇⬇ Prima avevi List<ContrattoOmnia8>; ora teniamo ID+Contratto
+  // elenco righe (id + contratto)
   final List<_Row> _rows = [];
 
-  // Stato UI
+  // UI state
   bool _isInitialLoading = true;
   bool _isLoadingMore = false;
   String? _error;
@@ -91,7 +91,7 @@ class _ContractsTableState extends State<ContractsTable> {
   bool get _hasMore => _nextIndex < _allIds.length;
 
   /* ------------------------------------------------------------------
-   *  CARICA ALTRI 10 CONTRATTI
+   *  CARICA ALTRI _pageSize CONTRATTI
    * ----------------------------------------------------------------*/
   Future<void> _loadMore() async {
     if (_isLoadingMore || !_hasMore) return;
@@ -103,7 +103,7 @@ class _ContractsTableState extends State<ContractsTable> {
 
     final end = (_nextIndex + _pageSize).clamp(0, _allIds.length);
     for (int i = _nextIndex; i < end; i++) {
-      final contractId = _allIds[i]; // <— stringa ID
+      final contractId = _allIds[i];
       try {
         final c = await widget.sdk.getContract(
           widget.userId,
@@ -112,7 +112,7 @@ class _ContractsTableState extends State<ContractsTable> {
         );
         if (mounted) {
           setState(() {
-            _rows.add(_Row(contractId, c)); // <— salvi coppia (id, contratto)
+            _rows.add(_Row(contractId, c));
           });
         }
       } on ApiException catch (e) {
@@ -145,22 +145,20 @@ class _ContractsTableState extends State<ContractsTable> {
   }
 
   /* ------------------------------------------------------------------
-   *  RIGA TABELLA (usa _Row per avere anche l'ID)
+   *  RIGA TABELLA (versione aggiornata senza TP CAR. e RAMO)
    * ----------------------------------------------------------------*/
   DataRow _row(BuildContext context, _Row r) {
-    final c   = r.c;
-    final id  = c.identificativi; // non-null (required nel modello)
+    final c = r.c;
+    final id = c.identificativi; // non-null (required nel modello)
     final amm = c.amministrativi; // nullable
     final premi = c.premi;        // nullable
     final ramiEl = c.ramiEl;      // nullable
 
     return DataRow(cells: [
       const DataCell(Icon(Icons.description_outlined, size: 18)),
-      DataCell(Text(id.tpCar ?? '')),
-      DataCell(Text(id.ramo)),
       DataCell(Text(id.compagnia, maxLines: 2)),
       DataCell(Text(id.numeroPolizza)),
-      DataCell(Text(ramiEl?.descrizione ?? '', maxLines: 2)),
+      DataCell(Text(ramiEl?.descrizione ?? '', maxLines: 2)), // Rischio
       DataCell(Text(amm?.frazionamento ?? '')),
       DataCell(Text(_fmtDate(amm?.effetto))),
       DataCell(Text(_fmtDate(amm?.scadenza))),
@@ -170,14 +168,14 @@ class _ContractsTableState extends State<ContractsTable> {
         IconButton(
           icon: const Icon(Icons.search, size: 20),
           tooltip: 'Dettaglio contratto',
-          onPressed: () => widget.onOpenContract?.call(r.id, r.c), // ⬅️ PASSA ID + OGGETTO
+          onPressed: () => widget.onOpenContract?.call(r.id, r.c),
         ),
       ),
     ]);
   }
 
   /* ------------------------------------------------------------------
-   *  BUILD
+   *  BUILD: tabella adattiva alla larghezza della pagina
    * ----------------------------------------------------------------*/
   @override
   Widget build(BuildContext context) {
@@ -195,6 +193,9 @@ class _ContractsTableState extends State<ContractsTable> {
 
     final table = LayoutBuilder(
       builder: (context, constraints) {
+        // Larghezza tabella:
+        // - se le colonne “stanno”, la tabella si espande fino a riempire la pagina
+        // - se non stanno, resta lo scroll orizzontale senza tagli
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: ConstrainedBox(
@@ -205,11 +206,9 @@ class _ContractsTableState extends State<ContractsTable> {
               dataRowMinHeight: 48,
               columns: const [
                 DataColumn(label: Text('TIPO')),
-                DataColumn(label: Text('TP CAR.')),
-                DataColumn(label: Text('RAMO')),
                 DataColumn(label: Text('COMPAGNIA')),
                 DataColumn(label: Text('NUMERO')),
-                DataColumn(label: Text('RISCHIO / PRODOTTO')),
+                DataColumn(label: Text('RISCHIO')),
                 DataColumn(label: Text('FRAZIONAMENTO')),
                 DataColumn(label: Text('EFFETTO')),
                 DataColumn(label: Text('SCADENZA')),
@@ -252,7 +251,7 @@ class _ContractsTableState extends State<ContractsTable> {
               ),
             )
           else
-            const Text('Tutti i contratti sono stati caricati'),
+            const Text('Tutte le polizze sono state caricate'),
         ],
       ),
     );

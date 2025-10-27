@@ -176,8 +176,8 @@ class _ClientTitlesPageState extends State<ClientTitlesPage> {
                               child: _infoColumn([
                                 _kv('PARTITA IVA', c.vat ?? 'n.d.'),
                                 _kv('COD. FISCALE', c.taxCode ?? 'n.d.'),
-                                _kv('LEG. RAPP.', c.legalRep ?? 'n.d.'),
-                                _kv('CF LEG. RAPP.', c.legalRepTaxCode ?? 'n.d.'),
+                                //_kv('LEG. RAPP.', c.legalRep ?? 'n.d.'),
+                                //_kv('CF LEG. RAPP.', c.legalRepTaxCode ?? 'n.d.'),
                               ]),
                             ),
                           ],

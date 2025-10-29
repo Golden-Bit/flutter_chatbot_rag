@@ -2822,7 +2822,7 @@ class ChatBotPageState extends State<ChatBotPage> {
 
 // Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
   Map<String, ChatWidgetBuilder> get _internalWidgetMap => {
-        "ShowChatVarsWidget": _wrap2((data, onReply) => ShowChatVarsWidgetTool(
+        /*"ShowChatVarsWidget": _wrap2((data, onReply) => ShowChatVarsWidgetTool(
               jsonData: data,
               getVars: () =>
                   _chatVars, // ← mappa che contiene tutte le chatVars
@@ -2830,7 +2830,7 @@ class ChatBotPageState extends State<ChatBotPage> {
         "ChatVarsWidget": _wrap2((data, onReply) => ChatVarsWidgetTool(
               jsonData: data,
               applyPatch: _applyChatVars, // callback definita al § 1.4
-            )),
+            )),*/
         "FileUploadWidget": _wrap2((data, onReply) => FileUploadWidget(
               info: FileUploadInfo.fromJson(data),
               onDownload: () {
@@ -2840,9 +2840,9 @@ class ChatBotPageState extends State<ChatBotPage> {
             )),
         "ToolEventWidget": _wrap2((data, onReply) =>
             ToolEventCard(data: data)), // non serve onReply qui
-        "JSRunnerWidget":
-            _wrap2((data, onReply) => JSRunnerWidgetTool(jsonData: data)),
-        "AutoSequenceWidget": (data, onReply, pageCbs, hostCbs) =>
+        /*"JSRunnerWidget":
+            _wrap2((data, onReply) => JSRunnerWidgetTool(jsonData: data)),*/
+        /*"AutoSequenceWidget": (data, onReply, pageCbs, hostCbs) =>
             AutoSequenceWidgetTool(
               jsonData: data,
               onReply: (txt, {meta}) {
@@ -2855,17 +2855,17 @@ class ChatBotPageState extends State<ChatBotPage> {
                   pageCbs.sendReply(txt); // messaggio normale
                 }
               },
-            ),
+            ),*/
         "NButtonWidget": _wrap2(
             (data, onReply) => NButtonWidget(data: data, onReply: onReply)),
-        "RadarChart": _wrap2((data, onReply) =>
+        /*"RadarChart": _wrap2((data, onReply) =>
             RadarChartWidgetTool(jsonData: data, onReply: onReply)),
         "TradingViewAdvancedChart": _wrap2((data, onReply) =>
             TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply)),
         "TradingViewMarketOverview": _wrap2((data, onReply) =>
             TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply)),
         "CustomChartWidget": _wrap2((data, onReply) =>
-            CustomChartWidgetTool(jsonData: data, onReply: onReply)),
+            CustomChartWidgetTool(jsonData: data, onReply: onReply)),*/
         "ChangeChatNameWidget":
             _wrap2((data, onReply) => ChangeChatNameWidgetTool(
                   jsonData: data,

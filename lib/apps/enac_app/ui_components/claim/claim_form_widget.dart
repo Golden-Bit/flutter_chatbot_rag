@@ -8,7 +8,7 @@ import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
 import '../../logic_components/backend_sdk.dart';
 
-/// Pane di form per SINISTRO con estensioni ChatBot.
+/// Pane di form per SINISTRO (nuovo schema) con estensioni ChatBot.
 /// PRIMO campo: selezione Contratto (OBBLIGATORIO, NON autocompilabile).
 /// Espone `selectedContractId` e `model` al dialog.
 class ClaimFormPane extends StatefulWidget with ChatBotExtensions {
@@ -30,189 +30,202 @@ class ClaimFormPane extends StatefulWidget with ChatBotExtensions {
   final Map<String, String>? initialValues;
   final String? initialContractId;
   final bool lockContract;
+
   @override
   State<ClaimFormPane> createState() => ClaimFormPaneState();
 
   /*───────────────────────────────────────────────────────────────*/
   /* Tool: riempi TUTTI i campi (tutti opzionali)                   */
-  /*  ⚠️ NON include il contratto!                                  */
+  /*  ⚠️ NON include la selezione CONTRATTO (dropdown)!              */
+  /*  ⚠️ NON include: compagnia, numero_contratto, rischio           */
+  /*     (derivati dal contratto scelto; non autocompilabili)       */
   /*───────────────────────────────────────────────────────────────*/
   static final ToolSpec fillTool = ToolSpec(
-    toolName: 'FillClaimFormWidget',
-    description:
-        'Compila il form sinistro con digitazione simulata. Tutti i parametri sono opzionali. Il contratto NON è autocompilabile.',
-    params: const [
-      // Obbligatori del modello Sinistro
-      ToolParamSpec(
-          name: 'esercizio',
-          paramType: ParamType.integer,
-          description: 'Esercizio (anno intero)',
-          example: 2025,
-          minValue: 1900),
-      ToolParamSpec(
-          name: 'numero_sinistro',
-          paramType: ParamType.string,
-          description: 'Numero sinistro',
-          example: 'SIN-000123'),
-      ToolParamSpec(
-          name: 'data_avvenimento',
-          paramType: ParamType.string,
-          description: 'Data avvenimento (dd/MM/yyyy)',
-          example: '15/05/2025'),
+  toolName: 'FillClaimFormWidget',
+  description:
+        '''Compila il form sinistro. Ogni parametro è opzionale: se assente, il campo non viene toccato.
+Se ti viene chiesto di compilare un sinistro, o anche se non viene specificato alcun tipo di form specifico 
+(ma ti viene solo cheisto di compialr eun form generico), dovrai impiegare tale tool ui per compilare form.'''
+      'Compila il form sinistro (nuovo schema) con digitazione simulata. '
+      'Tutti i parametri sono opzionali. '
+      '⚠️ Il contratto NON è autocompilabile e i campi compagnia/numero_contratto/rischio sono derivati dal contratto selezionato '
+      '(se la polizza non è caricata l’UI mostrerà “POLIZZA NON TROVATA”). '
+      'Linee guida: '
+      '• “esercizio” è l’anno ricavato da data_accadimento, altrimenti anno corrente; '
+      '• “data_denuncia” se omessa viene impostata alla data odierna (giorno di apertura); '
+      '• “stato” parte da “In Valutazione” e potrà evolvere in Aperto/Senza Seguito/Chiuso; '
+      '• “importo_riservato” inizialmente = “danno_stimato”; “importo_liquidato” iniziale = 0.00; '
+      '• “descrizione_evento” corrisponde alla “Modalità di Accadimento”; '
+      '• indirizzo/città: prelevare da “Località”/“prov” quando presenti nel modulo.'
+,
+  params: const [
+    // ▼ Campo non visibile in UI: valorizzato da data_accadimento o anno corrente
+    ToolParamSpec(
+      name: 'esercizio',
+      paramType: ParamType.integer,
+      description:
+          'Anno esercizio (1900+). Se mancante, viene ricavato dall’anno di data_accadimento; in assenza, anno corrente.',
+      example: 2025,
+      minValue: 1900,
+    ),
 
-      // Opzionali
-      ToolParamSpec(
-          name: 'numero_sinistro_compagnia',
-          paramType: ParamType.string,
-          description: 'Numero sinistro compagnia',
-          example: 'C-99123'),
-      ToolParamSpec(
-          name: 'numero_polizza',
-          paramType: ParamType.string,
-          description: 'Numero polizza (denormalizzato)',
-          example: 'POL123'),
-      ToolParamSpec(
-          name: 'compagnia',
-          paramType: ParamType.string,
-          description: 'Compagnia',
-          example: 'Allianz'),
-      ToolParamSpec(
-          name: 'rischio',
-          paramType: ParamType.string,
-          description: 'Rischio',
-          example: 'RCA'),
-      ToolParamSpec(
-          name: 'intermediario',
-          paramType: ParamType.string,
-          description: 'Intermediario',
-          example: 'Intermediario S.p.A.'),
-      ToolParamSpec(
-          name: 'descrizione_assicurato',
-          paramType: ParamType.string,
-          description: 'Descrizione assicurato',
-          example: 'Parco mezzi aziendale'),
-      ToolParamSpec(
-          name: 'citta',
-          paramType: ParamType.string,
-          description: 'Città avvenimento',
-          example: 'Milano'),
-      ToolParamSpec(
-          name: 'indirizzo',
-          paramType: ParamType.string,
-          description: 'Indirizzo avvenimento',
-          example: 'Via Roma 10'),
-      ToolParamSpec(
-          name: 'cap',
-          paramType: ParamType.string,
-          description: 'CAP avvenimento',
-          example: '20100'),
-      ToolParamSpec(
-          name: 'provincia',
-          paramType: ParamType.string,
-          description: 'Provincia',
-          example: 'MI'),
-      ToolParamSpec(
-          name: 'codice_stato',
-          paramType: ParamType.string,
-          description: 'Codice stato sinistro',
-          example: 'APERTO'),
-      ToolParamSpec(
-          name: 'targa',
-          paramType: ParamType.string,
-          description: 'Targa veicolo',
-          example: 'AB123CD'),
-      ToolParamSpec(
-          name: 'dinamica',
-          paramType: ParamType.string,
-          description: 'Dinamica del sinistro',
-          example: 'Tamponamento al semaforo'),
-      ToolParamSpec(
-          name: 'stato_compagnia',
-          paramType: ParamType.string,
-          description: 'Stato presso compagnia',
-          example: 'Istruttoria'),
+    // ▼ Campi VISIBILI/COMPILABILI (esclusi quelli derivati dal contratto)
+    ToolParamSpec(
+      name: 'numero_sinistro',
+      paramType: ParamType.string,
+      description:
+          'Numero interno di sinistro. Può essere fornito (es. “ENACSX001/2025”) o lasciato al sistema per l’assegnazione.',
+      example: 'ENACSX001/2025',
+    ),
+    ToolParamSpec(
+      name: 'descrizione_evento',
+      paramType: ParamType.string,
+      description:
+          'Descrizione dell’evento / modalità di accadimento così come nel modulo di denuncia.',
+      example: 'Tamponamento in colonna su tangenziale.',
+    ),
+    ToolParamSpec(
+      name: 'data_accadimento',
+      paramType: ParamType.string,
+      description:
+          'Data dell’evento nel formato dd/MM/yyyy. Deve essere ≤ oggi ed è obbligatoria per l’apertura.',
+      example: '15/05/2025',
+    ),
+    ToolParamSpec(
+      name: 'data_denuncia',
+      paramType: ParamType.string,
+      description:
+          'Data di denuncia nel formato dd/MM/yyyy. Se omessa, viene impostata alla data odierna (giorno di apertura). '
+          'Deve essere ≥ data_accadimento e ≤ oggi.',
+      example: '16/05/2025',
+    ),
+    ToolParamSpec(
+      name: 'danno_stimato',
+      paramType: ParamType.string,
+      description:
+          'Danno preventivamente stimato (stringa numerica con punto decimale). Fonte: “Entità Approssimativa” del modulo.',
+      example: '1500.00',
+    ),
+    ToolParamSpec(
+      name: 'importo_riservato',
+      paramType: ParamType.string,
+      description:
+          'Importo riservato (stringa numerica). Se omesso, inizialmente = danno_stimato; sarà poi aggiornato dal Broker.',
+      example: '1500.00',
+    ),
+    ToolParamSpec(
+      name: 'importo_liquidato',
+      paramType: ParamType.string,
+      description:
+          'Importo liquidato (stringa numerica). Di norma iniziale 0.00; viene valorizzato successivamente dal Broker.',
+      example: '0.00',
+      defaultValue: '0.00',
+    ),
+    ToolParamSpec(
+      name: 'stato',
+      paramType: ParamType.string,
+      description:
+          'Stato del sinistro alla creazione. Flusso tipico: In Valutazione → Aperto | Senza Seguito → Chiuso.',
+      example: 'In Valutazione',
+      defaultValue: 'In Valutazione',
+      allowedValues: [
+        'Aperto',
+        'Chiuso',
+        'Senza Seguito',
+        'In Valutazione',
+      ],
+    ),
+    ToolParamSpec(
+      name: 'indirizzo_evento',
+      paramType: ParamType.string,
+      description:
+          'Indirizzo/località dell’evento (dal campo “Località” del modulo).',
+      example: 'Via Roma 10',
+    ),
+    ToolParamSpec(
+      name: 'cap',
+      paramType: ParamType.string,
+      description: 'CAP dell’evento (5 cifre ove applicabile).',
+      example: '20100',
+    ),
+    ToolParamSpec(
+      name: 'citta',
+      paramType: ParamType.string,
+      description:
+          'Città dell’evento. In assenza esplicita nel modulo, può essere ricavata dalla voce “prov” come approssimazione.',
+      example: 'Milano',
+    ),
 
-      // Date opzionali aggiuntive
-      ToolParamSpec(
-          name: 'data_apertura',
-          paramType: ParamType.string,
-          description: 'Data apertura (dd/MM/yyyy)',
-          example: '16/05/2025'),
-      ToolParamSpec(
-          name: 'data_chiusura',
-          paramType: ParamType.string,
-          description: 'Data chiusura (dd/MM/yyyy)',
-          example: '30/06/2025'),
+    // Digitazione simulata
+    ToolParamSpec(
+      name: 'typing_ms',
+      paramType: ParamType.integer,
+      description:
+          'Millisecondi per carattere (digitazione simulata). Default 22.',
+      example: 18,
+      defaultValue: 22,
+      minValue: 0,
+      maxValue: 200,
+    ),
+  ],
+);
 
-      // Digitazione
-      ToolParamSpec(
-        name: 'typing_ms',
-        paramType: ParamType.integer,
-        description:
-            'Millisecondi per carattere (digitazione simulata). Default 22.',
-        example: 18,
-        defaultValue: 22,
-        minValue: 0,
-        maxValue: 200,
-      ),
-    ],
-  );
+/*───────────────────────────────────────────────────────────────*/
+/* Tool: set SINGOLO campo (⚠️ niente selezione contratto)         */
+/*  ⚠️ allowedValues ESCLUDONO: compagnia, numero_contratto, rischio */
+/*     perché derivati dal contratto scelto (o “POLIZZA NON TROVATA”).*/
+/*───────────────────────────────────────────────────────────────*/
+static final List<String> _allFields = [
+  'esercizio', // non visibile ma settabile via tool
+  'numero_sinistro',
+  'descrizione_evento',
+  'data_accadimento',
+  'data_denuncia',
+  'danno_stimato',
+  'importo_riservato',
+  'importo_liquidato',
+  'stato', // dropdown
+  'indirizzo_evento',
+  'cap',
+  'citta',
+];
 
-  /*───────────────────────────────────────────────────────────────*/
-  /* Tool: set SINGOLO campo (⚠️ niente contratto)                   */
-  /*───────────────────────────────────────────────────────────────*/
-  static final List<String> _allFields = [
-    'esercizio',
-    'numero_sinistro',
-    'numero_sinistro_compagnia',
-    'numero_polizza',
-    'compagnia',
-    'rischio',
-    'intermediario',
-    'descrizione_assicurato',
-    'data_avvenimento',
-    'citta',
-    'indirizzo',
-    'cap',
-    'provincia',
-    'codice_stato',
-    'targa',
-    'dinamica',
-    'stato_compagnia',
-    'data_apertura',
-    'data_chiusura',
-  ];
+static final ToolSpec setTool = ToolSpec(
+  toolName: 'SetClaimFieldWidget',
+  description:
+      'Imposta un singolo campo del sinistro (nuovo schema) con digitazione simulata. '
+      'Il contratto e i campi derivati (compagnia/numero_contratto/rischio) NON sono impostabili via tool. '
+      'Regole: data_accadimento ≤ oggi; data_denuncia se omessa = oggi e deve essere ≥ data_accadimento; '
+      'importi come stringhe numeriche con punto decimale; stato iniziale suggerito: “In Valutazione”.'
+      'VALGONO LE STESSE INFO E DESCRIZIONI DEI CAMPI FORNITE PER [FillContractFormWidget].',
+  params: [
+    ToolParamSpec(
+      name: 'field',
+      paramType: ParamType.string,
+      description: 'Nome del campo da impostare.',
+      allowedValues: _allFields,
+      example: 'numero_sinistro',
+    ),
+    ToolParamSpec(
+      name: 'value',
+      paramType: ParamType.string,
+      description:
+          'Valore del campo. Date in formato dd/MM/yyyy; importi come stringhe numeriche (es. 1000.00); '
+          'per "stato" usare uno tra: Aperto, Chiuso, Senza Seguito, In Valutazione.',
+      example: 'ENACSX001/2025',
+    ),
+    ToolParamSpec(
+      name: 'typing_ms',
+      paramType: ParamType.integer,
+      description: 'Millisecondi per carattere (digitazione simulata).',
+      example: 20,
+      defaultValue: 22,
+      minValue: 0,
+      maxValue: 200,
+    ),
+  ],
+);
 
-  static final ToolSpec setTool = ToolSpec(
-    toolName: 'SetClaimFieldWidget',
-    description:
-        'Imposta un singolo campo del sinistro con digitazione simulata. Il contratto NON è impostabile via tool.',
-    params: [
-      ToolParamSpec(
-        name: 'field',
-        paramType: ParamType.string,
-        description: 'Nome del campo',
-        allowedValues: _allFields,
-        example: 'numero_sinistro',
-      ),
-      ToolParamSpec(
-        name: 'value',
-        paramType: ParamType.string,
-        description:
-            'Valore (date dd/MM/yyyy; numeri come stringa; per interi usa cifre).',
-        example: 'SIN-000123',
-      ),
-      ToolParamSpec(
-        name: 'typing_ms',
-        paramType: ParamType.integer,
-        description: 'Millisecondi per carattere (digitazione simulata).',
-        example: 20,
-        defaultValue: 22,
-        minValue: 0,
-        maxValue: 200,
-      ),
-    ],
-  );
 
   @override
   List<ToolSpec> get toolSpecs => [fillTool, setTool];
@@ -233,19 +246,27 @@ class ClaimFormPane extends StatefulWidget with ChatBotExtensions {
 /*  STATE                                                                  */
 /*─────────────────────────────────────────────────────────────────────────*/
 class ClaimFormPaneState extends State<ClaimFormPane> {
+  static const _kDefaultTypingMs = 22;
+  static const _kStati = <String>[
+    'Aperto',
+    'Chiuso',
+    'Senza Seguito',
+    'In Valutazione',
+  ];
+
   @override
   void initState() {
     super.initState();
     _ClaimFormHostCbs.bind(this);
     _loadContracts();
 
-        // ⬇️ NEW: precompila campi e selezione contratto se passati
+    // Pre-compila se passati initialValues
     if (widget.initialValues != null && widget.initialValues!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _setInitialValues(widget.initialValues!);
       });
     }
-    _selectedContractId = widget.initialContractId; // ⬅️ NEW
+    _selectedContractId = widget.initialContractId;
   }
 
   @override
@@ -254,7 +275,7 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
     super.dispose();
   }
 
-  // ▼▼▼ CONTRATTI — caricamento per il selettore (manuale) ▼▼▼
+  // ▼▼▼ CONTRATTI — caricamento per il selettore ▼▼▼
   bool _loadingContracts = true;
   String? _loadError;
   String? _selectedContractId; // scelto manualmente
@@ -279,6 +300,12 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
           _contractsLabel[id] = id; // fallback
         }
       }
+
+      // se già selezionato un contratto, prova a precompilare i 3 campi derivati
+      if (_selectedContractId != null &&
+          _contractsLabel.containsKey(_selectedContractId)) {
+        _applyContractDefaults(_selectedContractId!);
+      }
     } catch (e) {
       _loadError = 'Errore nel caricamento delle Polizze: $e';
     } finally {
@@ -289,60 +316,83 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
   // Espone l’id contratto selezionato al dialog
   String? get selectedContractId => _selectedContractId;
 
-  // ▼▼▼ MODELLO CAMPI ▼▼▼
-  Map<String, String> get model => {
-        'esercizio': _c['esercizio']?.text.trim() ?? '',
-        'numero_sinistro': _c['numero_sinistro']?.text.trim() ?? '',
-        'numero_sinistro_compagnia': _c['numero_sinistro_compagnia']?.text.trim() ?? '',
-        'numero_polizza': _c['numero_polizza']?.text.trim() ?? '',
-        'compagnia': _c['compagnia']?.text.trim() ?? '',
-        'rischio': _c['rischio']?.text.trim() ?? '',
-        'intermediario': _c['intermediario']?.text.trim() ?? '',
-        'descrizione_assicurato': _c['descrizione_assicurato']?.text.trim() ?? '',
-        'data_avvenimento': _c['data_avvenimento']?.text.trim() ?? '',
-        'citta': _c['citta']?.text.trim() ?? '',
-        'indirizzo': _c['indirizzo']?.text.trim() ?? '',
-        'cap': _c['cap']?.text.trim() ?? '',
-        'provincia': _c['provincia']?.text.trim() ?? '',
-        'codice_stato': _c['codice_stato']?.text.trim() ?? '',
-        'targa': _c['targa']?.text.trim() ?? '',
-        'dinamica': _c['dinamica']?.text.trim() ?? '',
-        'stato_compagnia': _c['stato_compagnia']?.text.trim() ?? '',
-        'data_apertura': _c['data_apertura']?.text.trim() ?? '',
-        'data_chiusura': _c['data_chiusura']?.text.trim() ?? '',
-      };
+  // ▼▼▼ MODELLO CAMPI (nuovo schema) ▼▼▼
+  Map<String, String> get model {
+    // esercizio NON visibile: se non impostato, prova da data_accadimento, altrimenti anno corrente
+    final dataAcc = _c['data_accadimento']?.text.trim();
+    String esercizio;
+    if (dataAcc != null && dataAcc.isNotEmpty) {
+      final parts = dataAcc.split('/');
+      esercizio = (parts.length == 3) ? parts[2] : DateTime.now().year.toString();
+    } else {
+      esercizio = DateTime.now().year.toString();
+    }
 
-  // Controllers
+    return {
+      'esercizio': _c['esercizio']?.text.trim().isNotEmpty == true
+          ? _c['esercizio']!.text.trim()
+          : esercizio,
+
+      'numero_sinistro': _c['numero_sinistro']?.text.trim() ?? '',
+      // derivati (non editabili): restano nel payload BE
+      'compagnia': (_c['compagnia']?.text ?? '').trim(),
+      'numero_contratto': (_c['numero_contratto']?.text ?? '').trim(),
+      'rischio': (_c['rischio']?.text ?? '').trim(),
+
+      'descrizione_evento': (_c['descrizione_evento']?.text ?? '').trim(),
+      'data_accadimento': (_c['data_accadimento']?.text ?? '').trim(),
+      'data_denuncia': (_c['data_denuncia']?.text ?? '').trim(),
+      'danno_stimato': (_c['danno_stimato']?.text ?? '').trim(),
+      'importo_riservato': (_c['importo_riservato']?.text ?? '').trim(),
+      'importo_liquidato': (_c['importo_liquidato']?.text ?? '').trim(),
+      'stato': _stato ?? '',
+      'indirizzo_evento': (_c['indirizzo_evento']?.text ?? '').trim(),
+      'cap': (_c['cap']?.text ?? '').trim(),
+      'citta': (_c['citta']?.text ?? '').trim(),
+    };
+  }
+
+  // Controllers (inclusi i 3 derivati, ma saranno read-only in UI)
   final _c = <String, TextEditingController>{
-    'esercizio': TextEditingController(),
+    'esercizio': TextEditingController(), // non mostrato
     'numero_sinistro': TextEditingController(),
-    'numero_sinistro_compagnia': TextEditingController(),
-    'numero_polizza': TextEditingController(),
-    'compagnia': TextEditingController(),
-    'rischio': TextEditingController(),
-    'intermediario': TextEditingController(),
-    'descrizione_assicurato': TextEditingController(),
-    'data_avvenimento': TextEditingController(),
-    'citta': TextEditingController(),
-    'indirizzo': TextEditingController(),
+    'compagnia': TextEditingController(),          // RO
+    'numero_contratto': TextEditingController(),   // RO
+    'rischio': TextEditingController(),            // RO
+    'descrizione_evento': TextEditingController(),
+    'data_accadimento': TextEditingController(),
+    'data_denuncia': TextEditingController(),
+    'danno_stimato': TextEditingController(),
+    'importo_riservato': TextEditingController(),
+    'importo_liquidato': TextEditingController(),
+    'indirizzo_evento': TextEditingController(),
     'cap': TextEditingController(),
-    'provincia': TextEditingController(),
-    'codice_stato': TextEditingController(),
-    'targa': TextEditingController(),
-    'dinamica': TextEditingController(),
-    'stato_compagnia': TextEditingController(),
-    'data_apertura': TextEditingController(),
-    'data_chiusura': TextEditingController(),
+    'citta': TextEditingController(),
   };
 
-  // Focus
-  final _f = {
-    for (final k in ClaimFormPane._allFields) k: FocusNode(),
+  // Stato (dropdown)
+  String? _stato;
+
+  // Focus (solo per i campi visibili + 'esercizio' invisibile per set via tool)
+  final _f = <String, FocusNode>{
+    'esercizio': FocusNode(),
+    'numero_sinistro': FocusNode(),
+    'compagnia': FocusNode(),
+    'numero_contratto': FocusNode(),
+    'rischio': FocusNode(),
+    'descrizione_evento': FocusNode(),
+    'data_accadimento': FocusNode(),
+    'data_denuncia': FocusNode(),
+    'danno_stimato': FocusNode(),
+    'importo_riservato': FocusNode(),
+    'importo_liquidato': FocusNode(),
+    'indirizzo_evento': FocusNode(),
+    'cap': FocusNode(),
+    'citta': FocusNode(),
   };
 
   // typing engine
   final _gen = <String, int>{};
-  static const _kDefaultTypingMs = 22;
 
   Future<void> _typeInto(String key, String target, {required int ms}) async {
     final ctrl = _c[key];
@@ -374,9 +424,20 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
     return i;
   }
 
-  // Host API (no contratto!)
+  // Host API (no selezione contratto! + no autocompilazione campi derivati)
+  static const _forbiddenByBot = {'compagnia', 'numero_contratto', 'rischio'};
+
   Future<void> setField(String field, dynamic value, {int? typingMs}) async {
+    // Blocca i campi derivati dal contratto
+    if (_forbiddenByBot.contains(field)) {
+      debugPrint('[ClaimHost] setField IGNORED for derived field: $field');
+      return;
+    }
     final ms = typingMs ?? _kDefaultTypingMs;
+    if (field == 'stato') {
+      setState(() => _stato = (value?.toString().trim().isEmpty ?? true) ? null : value.toString());
+      return;
+    }
     await _typeInto(field, value?.toString() ?? '', ms: ms);
     final node = _f[field];
     if (node != null) {
@@ -387,34 +448,32 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
   Future<void> fill(Map<String, dynamic> m, {int? typingMs}) async {
     final ms = typingMs ?? _kDefaultTypingMs;
 
-    // ordine umano (verticale, full-width)
+    // ordine di compilazione “umano” (ESCLUSI i derivati)
     final order = [
-      'esercizio',
       'numero_sinistro',
-      'numero_sinistro_compagnia',
-      'numero_polizza',
-      'compagnia',
-      'rischio',
-      'intermediario',
-      'descrizione_assicurato',
-      'data_avvenimento',
-      'citta',
-      'indirizzo',
+      'descrizione_evento',
+      'data_accadimento',
+      'data_denuncia',
+      'danno_stimato',
+      'importo_riservato',
+      'importo_liquidato',
+      'stato',
+      'indirizzo_evento',
       'cap',
-      'provincia',
-      'codice_stato',
-      'targa',
-      'dinamica',
-      'stato_compagnia',
-      'data_apertura',
-      'data_chiusura',
+      'citta',
+      'esercizio', // per ultimo (invisibile)
     ];
 
     final keys = [
       ...order.where(m.containsKey),
-      ...m.keys.where((k) => !order.contains(k))
+      ...m.keys.where((k) => !order.contains(k)),
     ];
+
     for (final k in keys) {
+      if (_forbiddenByBot.contains(k)) {
+        debugPrint('[ClaimHost] fill IGNORED derived key: $k');
+        continue;
+      }
       final v = m[k];
       if (v == null) continue;
       await setField(k, v, typingMs: ms);
@@ -434,39 +493,85 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
         decoration: _dec(label).copyWith(hintText: hint),
       );
 
+  // Read-only (derivati dal contratto selezionato)
+  Widget _tRO(String key, String label) => TextField(
+        controller: _c[key],
+        focusNode: _f[key],
+        readOnly: true,
+        enabled: false,
+        decoration: _dec(label).copyWith(
+          helperText: 'Derivato dal contratto selezionato',
+        ),
+      );
+
+  Future<void> _applyContractDefaults(String contractId) async {
+    try {
+      final c = await widget.sdk.getContract(widget.user.username, widget.entityId, contractId);
+      final compagnia = c.identificativi.compagnia;
+      final numPolizza = c.identificativi.numeroPolizza;
+      final rischio = c.ramiEl?.descrizione ?? c.identificativi.ramo;
+
+      // scrivi i derivati (UI read-only)
+      _c['compagnia']!.text = compagnia;
+      _c['numero_contratto']!.text = numPolizza;
+      _c['rischio']!.text = rischio;
+    } catch (_) {
+      // ignora errori di prefilling
+    }
+  }
 
   @override
   void didUpdateWidget(covariant ClaimFormPane old) {
     super.didUpdateWidget(old);
     if (widget.initialValues != old.initialValues &&
         widget.initialValues != null) {
-      _setInitialValues(widget.initialValues!);            // ⬅️ NEW
+      _setInitialValues(widget.initialValues!);
     }
     if (widget.initialContractId != old.initialContractId) {
-      setState(() => _selectedContractId = widget.initialContractId); // ⬅️ NEW
-    }
-  }
-
-  // ⬇️ NEW: prefill “immediato” dei controller
-  void _setInitialValues(Map<String, String> m) {
-    for (final e in m.entries) {
-      final k = e.key;
-      final v = e.value;
-      if (_c.containsKey(k)) {
-        _c[k]!.text = v;
-        _c[k]!.selection =
-            TextSelection.collapsed(offset: _c[k]!.text.length);
+      setState(() => _selectedContractId = widget.initialContractId);
+      if (_selectedContractId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _applyContractDefaults(_selectedContractId!);
+        });
       }
     }
   }
 
+  // Prefill “immediato” dei controller (accetta anche alias legacy)
+  void _setInitialValues(Map<String, String> m) {
+    // mappa alias legacy -> nuovi
+    final mapped = <String, String>{}
+      ..addAll(m)
+      ..addAll({
+        if (m['numero_polizza'] != null) 'numero_contratto': m['numero_polizza']!,
+        if (m['descrizione_assicurato'] != null)
+          'descrizione_evento': m['descrizione_assicurato']!,
+        if (m['data_avvenimento'] != null)
+          'data_accadimento': m['data_avvenimento']!,
+        if (m['data_apertura'] != null) 'data_denuncia': m['data_apertura']!,
+        if (m['città'] != null) 'citta': m['città']!,
+        if (m['indirizzo'] != null) 'indirizzo_evento': m['indirizzo']!,
+      });
+
+    for (final e in mapped.entries) {
+      final k = e.key;
+      final v = e.value;
+      if (_c.containsKey(k)) {
+        _c[k]!.text = v;
+        _c[k]!.selection = TextSelection.collapsed(offset: _c[k]!.text.length);
+      } else if (k == 'stato') {
+        _stato = v;
+      }
+    }
+    setState(() {}); // refresh per dropdown stato
+  }
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, // ⬅️ full width
+        crossAxisAlignment: CrossAxisAlignment.stretch, // full width
         children: [
           // ────────────────────── CONTRATTO (PRIMO CAMPO) ──────────────────────
           if (_loadingContracts)
@@ -503,56 +608,73 @@ class ClaimFormPaneState extends State<ClaimFormPane> {
                         ),
                       ))
                   .toList(),
-                            onChanged: widget.lockContract
-                  ? null                                   // ⬅️ NEW: blocca in edit
-                  : (v) => setState(() => _selectedContractId = v),
+              onChanged: widget.lockContract
+                  ? null
+                  : (v) async {
+                      setState(() => _selectedContractId = v);
+                      if (v != null) await _applyContractDefaults(v);
+                    },
             ),
 
           const SizedBox(height: 12),
 
-          // ────────────────────── Dati Sinistro (full-width) ───────────────────
-          _t('esercizio', 'Esercizio *', hint: 'AAAA'),
-          const SizedBox(height: 12),
+          // ────────────────────── Dati Sinistro (solo campi richiesti) ─────────
           _t('numero_sinistro', 'Numero sinistro *'),
           const SizedBox(height: 12),
-          _t('data_avvenimento', 'Data avvenimento *', hint: 'gg/mm/aaaa'),
+
+          // Derivati dal contratto: RO
+          _tRO('compagnia', 'Compagnia (derivata)'),
           const SizedBox(height: 12),
 
-          _t('numero_sinistro_compagnia', 'Numero sinistro compagnia'),
+          _tRO('numero_contratto', 'Numero contratto (derivato)'),
           const SizedBox(height: 12),
-          _t('numero_polizza', 'Numero polizza (denorm.)'),
+
+          _tRO('rischio', 'Rischio (derivato)'),
           const SizedBox(height: 12),
-          _t('compagnia', 'Compagnia'),
+
+          _t('descrizione_evento', 'Descrizione evento'),
           const SizedBox(height: 12),
-          _t('rischio', 'Rischio'),
+
+          _t('data_accadimento', 'Data accadimento *', hint: 'gg/mm/aaaa'),
           const SizedBox(height: 12),
-          _t('intermediario', 'Intermediario'),
+
+          _t('data_denuncia', 'Data di denuncia', hint: 'gg/mm/aaaa'),
           const SizedBox(height: 12),
-          _t('descrizione_assicurato', 'Descrizione assicurato'),
+
+          _t('danno_stimato', 'Danno preventivamente stimato'),
+          const SizedBox(height: 12),
+
+          _t('importo_riservato', 'Importo riservato'),
+          const SizedBox(height: 12),
+
+          _t('importo_liquidato', 'Importo liquidato'),
+          const SizedBox(height: 12),
+
+          DropdownButtonFormField<String>(
+            value: _stato,
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(),
+              labelText: 'Stato',
+            ),
+            items: _kStati
+                .map((s) => DropdownMenuItem<String>(
+                      value: s,
+                      child: Text(s),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() => _stato = v),
+          ),
 
           const SizedBox(height: 12),
-          _t('citta', 'Città avvenimento'),
-          const SizedBox(height: 12),
-          _t('indirizzo', 'Indirizzo avvenimento'),
-          const SizedBox(height: 12),
-          _t('cap', 'CAP avvenimento'),
-          const SizedBox(height: 12),
-          _t('provincia', 'Provincia'),
 
+          _t('indirizzo_evento', 'Indirizzo evento'),
           const SizedBox(height: 12),
-          _t('codice_stato', 'Codice stato'),
-          const SizedBox(height: 12),
-          _t('stato_compagnia', 'Stato presso compagnia'),
 
+          _t('cap', 'CAP'),
           const SizedBox(height: 12),
-          _t('targa', 'Targa veicolo'),
-          const SizedBox(height: 12),
-          _t('dinamica', 'Dinamica del sinistro'),
 
-          const SizedBox(height: 12),
-          _t('data_apertura', 'Data apertura', hint: 'gg/mm/aaaa'),
-          const SizedBox(height: 12),
-          _t('data_chiusura', 'Data chiusura', hint: 'gg/mm/aaaa'),
+          _t('citta', 'Città'),
         ],
       ),
     );
@@ -580,7 +702,8 @@ class _ClaimFormHostCbs extends ChatBotHostCallbacks {
 
   ClaimFormPaneState? get _s => _bound;
 
-  // ⚠️ Nessun metodo per impostare il contratto via tool
+  // ⚠️ Nessun metodo per impostare la SELEZIONE del contratto via tool
+  // ⚠️ Campi derivati (compagnia/numero_contratto/rischio) non impostabili via tool
   Future<void> setField(String field, dynamic value, {int? typingMs}) async {
     debugPrint(
         '[ClaimHost] setField $field="$value" typingMs=$typingMs bound=${_s != null}');
@@ -616,6 +739,8 @@ class _FillClaimFormExecState extends State<_FillClaimFormExec> {
     final ms = (widget.json['typing_ms'] is int)
         ? widget.json['typing_ms'] as int
         : null;
+
+    // estrai solo i campi previsti dal nuovo schema (esclusi derivati)
     final keys = ClaimFormPane._allFields;
     final map = <String, dynamic>{
       for (final k in keys)

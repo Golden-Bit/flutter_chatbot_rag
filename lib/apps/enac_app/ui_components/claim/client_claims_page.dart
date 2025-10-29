@@ -10,7 +10,7 @@ import 'package:boxed_ai/user_manager/auth_sdk/models/user_model.dart';
 
 import '../../logic_components/backend_sdk.dart';
 import 'claims_table.dart';
-import 'create_claim_dialog.dart';
+//import 'create_claim_dialog.dart';
 
 class ClientClaimsPage extends StatefulWidget {
   final User user;        // username = userId

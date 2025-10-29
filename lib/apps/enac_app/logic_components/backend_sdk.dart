@@ -569,92 +569,142 @@ class Titolo {
 /* ----------------------------- SINISTRI ------------------------- */
 
 class Sinistro {
+  // Amministrativo base
   final int esercizio;
   final String numeroSinistro;
-  final String? numeroSinistroCompagnia;
-  final String? numeroPolizza;
+
+  // Denorm/contesto
+  final String? numeroContratto; // ex numero_polizza
   final String? compagnia;
   final String? rischio;
   final String? intermediario;
-  final String? descrizioneAssicurato;
-  final DateTime dataAvvenimento;
-  final String? citta;
-  final String? indirizzo;
+
+  // Evento
+  final String? descrizioneEvento;     // ex descrizione_assicurato
+  final DateTime dataAccadimento;      // ex data_avvenimento
+  final DateTime? dataDenuncia;        // ex data_apertura
+  final String? indirizzoEvento;       // ex indirizzo
   final String? cap;
-  final String? provincia;
-  final String? codiceStato;
+  final String? citta;                 // accetta 'città' in input
   final String? targa;
   final String? dinamica;
-  final String? statoCompagnia;
-  final DateTime dataApertura;
-  final DateTime? dataChiusura;
+
+  // Economici (stringhe numeriche)
+  final String? dannoStimato;
+  final String? importoRiservato;
+  final String? importoLiquidato;
+
+  // Stato (UI: Aperto/Chiuso/Senza Seguito/In Valutazione)
+  final String? stato;
+
+  // opzionale/legacy
+  final String? codiceStato;
 
   Sinistro({
     required this.esercizio,
     required this.numeroSinistro,
-    this.numeroSinistroCompagnia,
-    this.numeroPolizza,
+    required this.dataAccadimento,
+    this.numeroContratto,
     this.compagnia,
     this.rischio,
     this.intermediario,
-    this.descrizioneAssicurato,
-    required this.dataAvvenimento,
-    this.citta,
-    this.indirizzo,
+    this.descrizioneEvento,
+    this.dataDenuncia,
+    this.indirizzoEvento,
     this.cap,
-    this.provincia,
-    this.codiceStato,
+    this.citta,
     this.targa,
     this.dinamica,
-    this.statoCompagnia,
-    DateTime? dataApertura,
-    this.dataChiusura,
-  }) : dataApertura = dataApertura ?? DateTime.now();
+    this.dannoStimato,
+    this.importoRiservato,
+    this.importoLiquidato,
+    this.stato,
+    this.codiceStato,
+  });
 
-  factory Sinistro.fromJson(Map<String, dynamic> json) => Sinistro(
-        esercizio: json['esercizio'],
-        numeroSinistro: json['numero_sinistro'],
-        numeroSinistroCompagnia: _optStr(json['numero_sinistro_compagnia']),
-        numeroPolizza: _optStr(json['numero_polizza']),
-        compagnia: _optStr(json['compagnia']),
-        rischio: _optStr(json['rischio']),
-        intermediario: _optStr(json['intermediario']),
-        descrizioneAssicurato: _optStr(json['descrizione_assicurato']),
-        dataAvvenimento: DateTime.parse(json['data_avvenimento']),
-        citta: _optStr(json['città']) ?? _optStr(json['citta']),
-        indirizzo: _optStr(json['indirizzo']),
-        cap: _optStr(json['cap']),
-        provincia: _optStr(json['provincia']),
-        codiceStato: _optStr(json['codice_stato']),
-        targa: _optStr(json['targa']),
-        dinamica: _optStr(json['dinamica']),
-        statoCompagnia: _optStr(json['stato_compagnia']),
-        dataApertura: _parseDateOpt(json['data_apertura']),
-        dataChiusura: _parseDateOpt(json['data_chiusura']),
-      );
+  static DateTime? _parseDateOpt(dynamic v) {
+    if (v == null || (v is String && v.isEmpty)) return null;
+    return DateTime.parse(v as String);
+  }
+
+  factory Sinistro.fromJson(Map<String, dynamic> json) {
+    // -------- Fallback legacy -> nuovi nomi --------
+    final numeroContratto = (json['numero_contratto'] ?? json['numero_polizza'])?.toString();
+    final descrizioneEvento = (json['descrizione_evento'] ?? json['descrizione_assicurato'])?.toString();
+    final dataAccadimentoStr =
+    (json['data_accadimento'] ?? json['data_avvenimento'])?.toString();
+
+final dataAccadimento = (dataAccadimentoStr == null || dataAccadimentoStr.isEmpty)
+    ? (throw FormatException('Campo obbligatorio mancante: data_accadimento (o data_avvenimento)'))
+    : DateTime.parse(dataAccadimentoStr);
+    final dataDenuncia = _parseDateOpt(json['data_denuncia'] ?? json['data_apertura']);
+    final indirizzoEvento = (json['indirizzo_evento'] ?? json['indirizzo'])?.toString();
+    final citta = (json['citta'] ?? json['città'])?.toString();
+
+    // Stato: normalizza da 'stato_compagnia' se serve
+    String? stato = json['stato']?.toString();
+    if (stato == null || stato.isEmpty) {
+      final legacy = json['stato_compagnia']?.toString().toLowerCase().trim();
+      if (legacy != null) {
+        const map = {
+          'aperto': 'Aperto',
+          'chiuso': 'Chiuso',
+          'senza seguito': 'Senza Seguito',
+          'in valutazione': 'In Valutazione',
+          'valutazione': 'In Valutazione',
+          'pendente': 'In Valutazione',
+          'da valutare': 'In Valutazione',
+        };
+        stato = map[legacy];
+      }
+    }
+
+    return Sinistro(
+      esercizio: (json['esercizio'] as num).toInt(),
+      numeroSinistro: json['numero_sinistro'].toString(),
+      numeroContratto: numeroContratto,
+      compagnia: json['compagnia']?.toString(),
+      rischio: json['rischio']?.toString(),
+      intermediario: json['intermediario']?.toString(),
+      descrizioneEvento: descrizioneEvento,
+      dataAccadimento: DateTime.parse(dataAccadimentoStr),
+      dataDenuncia: dataDenuncia,
+      indirizzoEvento: indirizzoEvento,
+      cap: json['cap']?.toString(),
+      citta: citta,
+      targa: json['targa']?.toString(),
+      dinamica: json['dinamica']?.toString(),
+      dannoStimato: json['danno_stimato']?.toString(),
+      importoRiservato: json['importo_riservato']?.toString(),
+      importoLiquidato: json['importo_liquidato']?.toString(),
+      stato: stato,
+      codiceStato: json['codice_stato']?.toString(),
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'esercizio': esercizio,
         'numero_sinistro': numeroSinistro,
-        'numero_sinistro_compagnia': numeroSinistroCompagnia,
-        'numero_polizza': numeroPolizza,
+        'numero_contratto': numeroContratto,
         'compagnia': compagnia,
         'rischio': rischio,
         'intermediario': intermediario,
-        'descrizione_assicurato': descrizioneAssicurato,
-        'data_avvenimento': _dateToIsoOpt(dataAvvenimento),
-        'città': citta,
-        'indirizzo': indirizzo,
+        'descrizione_evento': descrizioneEvento,
+        'data_accadimento': _dateToIsoOpt(dataAccadimento),
+        'data_denuncia': _dateToIsoOpt(dataDenuncia),
+        'indirizzo_evento': indirizzoEvento,
         'cap': cap,
-        'provincia': provincia,
-        'codice_stato': codiceStato,
+        'citta': citta,
         'targa': targa,
         'dinamica': dinamica,
-        'stato_compagnia': statoCompagnia,
-        'data_apertura': _dateToIsoOpt(dataApertura),
-        'data_chiusura': _dateToIsoOpt(dataChiusura),
+        'danno_stimato': dannoStimato,
+        'importo_riservato': importoRiservato,
+        'importo_liquidato': importoLiquidato,
+        'stato': stato,               // 'Aperto' | 'Chiuso' | 'Senza Seguito' | 'In Valutazione'
+        'codice_stato': codiceStato,  // opzionale
       };
 }
+
 
 /* ----------------------------- DIARIO --------------------------- */
 
@@ -815,7 +865,7 @@ class Omnia8Sdk {
   final Map<String, String> defaultHeaders;
 
   Omnia8Sdk({
-    this.baseUrl = 'https://www.goldbitweb.com/enac-api/', //'https://www.goldbitweb.com/enac-api/', //'http://127.0.0.1:8111',
+    this.baseUrl = 'https://www.goldbitweb.com/enac-api/', //'https://www.goldbitweb.com/enac-api/', //'https://www.goldbitweb.com/enac-api/', //'http://127.0.0.1:8111',
     http.Client? httpClient,
     Map<String, String>? headers,
   })  : _http = httpClient ?? http.Client(),
@@ -1496,17 +1546,27 @@ Future<List<Map<String, dynamic>>> viewContractTitles(
   return out;
 }
 
+/// ---------------------------------------------------------------------------
 /// Vista SINISTRI per un contratto specifico (proiezione client-side)
+/// - Nuovo schema: numero_contratto, descrizione_evento, data_accadimento,
+///   data_denuncia, stato (enum UI), indirizzo_evento, danno_stimato,
+///   importo_riservato, importo_liquidato, citta, cap.
+/// - Compat legacy: numero_polizza, data_avvenimento, data_apertura,
+///   stato_compagnia, indirizzo, DataAvvenimento, alias vari.
+/// - "importo" (colonna generica legacy) = importo_liquidato ?? danno_stimato ?? importo_riservato.
+/// ---------------------------------------------------------------------------
 Future<List<Map<String, dynamic>>> viewContractClaims(
   String userId,
   String entityId,
   String contractId,
 ) async {
-  // carico il contratto una volta per info condivise
+  // Carico il contratto una volta per info condivise (fallback se mancano lato claim)
   ContrattoOmnia8? contratto;
   try {
     contratto = await getContract(userId, entityId, contractId);
-  } catch (_) {}
+  } catch (_) {
+    // safe ignore: il fallback userà solo i campi del sinistro
+  }
 
   final claimIds = await listClaims(userId, entityId, contractId);
   final out = <Map<String, dynamic>>[];
@@ -1520,7 +1580,7 @@ Future<List<Map<String, dynamic>>> viewContractClaims(
         final c = await getClaim(userId, entityId, contractId, cid);
         return MapEntry(cid, c);
       } catch (_) {
-        return null;
+        return null; // skip singolo elemento in errore
       }
     }));
 
@@ -1529,48 +1589,71 @@ Future<List<Map<String, dynamic>>> viewContractClaims(
       final claimId = p.key;
       final s       = p.value;
 
-      final compagnia  = s.compagnia ?? contratto?.identificativi.compagnia ?? '';
-      final numPolizza = s.numeroPolizza ?? contratto?.identificativi.numeroPolizza ?? '';
-      final rischio    = s.rischio ?? contratto?.ramiEl?.descrizione ?? contratto?.identificativi.ramo ?? '';
+      // Context preferito: prendi dai dati del claim, poi fallback al contratto
+      final compagnia    = s.compagnia ?? contratto?.identificativi.compagnia ?? '';
+      final numContratto = s.numeroContratto ?? contratto?.identificativi.numeroPolizza ?? '';
+      final rischio      = s.rischio ?? contratto?.ramiEl?.descrizione ?? contratto?.identificativi.ramo ?? '';
+
+      // Economici: proiezione legacy "importo" usata in alcune tabelle
+      final importoLegacy = s.importoLiquidato ?? s.dannoStimato ?? s.importoRiservato;
 
       out.add({
-        // riferimenti
+        // Riferimenti
         'entity_id'   : entityId,
         'contract_id' : contractId,
         'claim_id'    : claimId,
-        'id'          : claimId,        // alias
-        'SinistroId'  : claimId,        // alias
+        'id'          : claimId,      // alias comodo
+        'SinistroId'  : claimId,      // altro alias
 
-        // contesto contratto utile alla UI
-        'compagnia'      : compagnia,
-        'numero_polizza' : numPolizza,
-        'rischio'        : rischio,
+        // Contesto contratto utile alla UI
+        'compagnia'        : compagnia,
+        'numero_contratto' : numContratto, // nuovo campo canonico
+        'numero_polizza'   : numContratto, // alias legacy per tabelle esistenti
+        'rischio'          : rischio,
 
-        // campi sinistro (con alias compatibili con le tabelle)
+        // Campi amministrativi/identificativi sinistro (con alias legacy)
         'esercizio'        : s.esercizio,
-        'Esercizio'        : s.esercizio,                 // alias
+        'Esercizio'        : s.esercizio,          // alias
         'numero_sinistro'  : s.numeroSinistro,
-        'NumeroSinistro'   : s.numeroSinistro,            // alias
-        'num_sinistro'     : s.numeroSinistro,            // alias
-        'data_avvenimento' : _dateToIsoOpt(s.dataAvvenimento),
-        'DataAvvenimento'  : _dateToIsoOpt(s.dataAvvenimento), // alias
+        'NumeroSinistro'   : s.numeroSinistro,     // alias
+        'num_sinistro'     : s.numeroSinistro,     // alias
 
-        // l’SDK del modello base non ha importo: lo lasciamo nullo (la UI gestisce '—')
-        'importo_liquidato': null,
-        'ImportoLiquidato' : null,
-        'importo'          : null,
+        // Evento: nuovi nomi + alias legacy
+        'descrizione_evento' : s.descrizioneEvento ?? '',
+        'data_accadimento'   : _dateToIsoOpt(s.dataAccadimento),
+        'data_denuncia'      : _dateToIsoOpt(s.dataDenuncia),
+        'indirizzo_evento'   : s.indirizzoEvento ?? '',
+        'cap'                : s.cap ?? '',
+        'citta'              : s.citta ?? '',
+        'targa'              : s.targa ?? '',
+        'dinamica'           : s.dinamica ?? '',
 
-        'targa'           : s.targa ?? '',
-        'Targa'           : s.targa ?? '',                // alias
-        'dinamica'        : s.dinamica ?? '',
-        'Dinamica'        : s.dinamica ?? '',
-        'danneggiamento'  : s.dinamica ?? '',             // alias alternativo usato in alcune viste
-        'stato_compagnia' : s.statoCompagnia ?? '',
-        'StatoCompagnia'  : s.statoCompagnia ?? '',
-        'codice_stato'    : s.codiceStato ?? '',
-        'CodiceStato'     : s.codiceStato ?? '',
-        'data_apertura'   : _dateToIsoOpt(s.dataApertura, dateOnly: false),
-        'data_chiusura'   : _dateToIsoOpt(s.dataChiusura, dateOnly: false),
+        // Economici (nuovo schema)
+        'danno_stimato'     : s.dannoStimato,
+        'importo_riservato' : s.importoRiservato,
+        'importo_liquidato' : s.importoLiquidato,
+
+        // Stato (nuovo schema) + alias legacy
+        'stato'            : s.stato ?? '',   // 'Aperto' | 'Chiuso' | 'Senza Seguito' | 'In Valutazione'
+        'codice_stato'     : s.codiceStato ?? '',
+
+        // ---- Alias legacy per compatibilità con viste già in uso ----
+        'data_avvenimento' : _dateToIsoOpt(s.dataAccadimento), // legacy
+        'DataAvvenimento'  : _dateToIsoOpt(s.dataAccadimento), // legacy alias
+        'data_apertura'    : _dateToIsoOpt(s.dataDenuncia),    // legacy (era data_apertura)
+        'indirizzo'        : s.indirizzoEvento,                // legacy
+        'stato_compagnia'  : s.stato ?? '',                    // legacy alias dello stato normalizzato
+        'StatoCompagnia'   : s.stato ?? '',                    // altro alias
+        'CodiceStato'      : s.codiceStato ?? '',
+
+        // Colonne economiche legacy
+        'ImportoLiquidato' : s.importoLiquidato,  // alias PascalCase usato in alcune tabelle
+        'importo'          : importoLegacy,       // fallback: liquidato -> stimato -> riservato
+
+        // Altri alias usati in viste storiche
+        'Targa'            : s.targa ?? '',
+        'Dinamica'         : s.dinamica ?? '',
+        'danneggiamento'   : s.dinamica ?? '',    // alias alternativo incontrato in alcune viste
       });
     }
   }

@@ -129,45 +129,37 @@ class ClaimSummaryPanel extends StatefulWidget {
   final VoidCallback? onEditRequested;
   final VoidCallback? onDeleted;
   /// Build da viewRow (fallback quando non abbiamo l’oggetto pieno)
-  static Sinistro claimFromViewRow(Map<String, dynamic> v) {
-    DateTime d(String k) {
-      final raw = v[k]?.toString();
-      if (raw == null || raw.isEmpty) return DateTime.now();
-      try {
-        return DateTime.parse(raw);
-      } catch (_) {
-        return DateTime.now();
-      }
-    }
-
-    String? s(String k) => v[k]?.toString();
-
-    return Sinistro(
-      esercizio: int.tryParse((s('esercizio') ?? s('Esercizio') ?? '0')) ?? 0,
-      numeroSinistro:
-          (s('numero_sinistro') ?? s('NumeroSinistro') ?? s('num_sinistro') ?? ''),
-      numeroSinistroCompagnia:
-          s('numero_sinistro_compagnia') ?? s('NumeroSinistroCompagnia'),
-      numeroPolizza: s('numero_polizza') ?? s('NumeroPolizza'),
-      compagnia: s('compagnia') ?? s('Compagnia'),
-      rischio: s('rischio') ?? s('Rischio'),
-      intermediario: s('intermediario') ?? s('Intermediario'),
-      descrizioneAssicurato:
-          s('descrizione_assicurato') ?? s('DescrizioneAssicurato'),
-      dataAvvenimento: d('data_avvenimento'),
-      citta: s('città') ?? s('citta') ?? s('Citta'),
-      indirizzo: s('indirizzo') ?? s('Indirizzo'),
-      cap: s('cap') ?? s('CAP'),
-      provincia: s('provincia') ?? s('Provincia'),
-      codiceStato: s('codice_stato') ?? s('CodiceStato'),
-      targa: s('targa') ?? s('Targa'),
-      dinamica: s('dinamica') ?? s('Dinamica'),
-      statoCompagnia: s('stato_compagnia') ?? s('StatoCompagnia'),
-      dataApertura: d('data_apertura'),
-      dataChiusura:
-          (s('data_chiusura')?.isNotEmpty ?? false) ? d('data_chiusura') : null,
-    );
+static Sinistro claimFromViewRow(Map<String, dynamic> v) {
+  DateTime? d(String k) {
+    final raw = v[k]?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    try { return DateTime.parse(raw); } catch (_) { return null; }
   }
+  String? s(String k) => v[k]?.toString();
+
+  return Sinistro(
+    esercizio: int.tryParse((s('esercizio') ?? '0')) ?? 0,
+    numeroSinistro: s('numero_sinistro') ?? '',
+    // denorm/contesto
+    numeroContratto: s('numero_contratto'),
+    compagnia: s('compagnia'),
+    rischio: s('rischio'),
+    // evento
+    descrizioneEvento: s('descrizione_evento'),
+    dataAccadimento: d('data_accadimento') ?? DateTime.now(),
+    dataDenuncia: d('data_denuncia'),
+    indirizzoEvento: s('indirizzo_evento'),
+    cap: s('cap'),
+    citta: s('citta'),
+    // economici
+    dannoStimato: s('danno_stimato'),
+    importoRiservato: s('importo_riservato'),
+    importoLiquidato: s('importo_liquidato'),
+    // stato
+    stato: s('stato'),
+  );
+}
+
 
   @override
   State<ClaimSummaryPanel> createState() => _ClaimSummaryPanelState();
@@ -892,310 +884,296 @@ Container(
   }
 
   Widget _header(BuildContext context) {
-    String _s(String a, [String? b]) =>
-        (widget.viewRow[a] ?? (b != null ? widget.viewRow[b] : null) ?? '')
-            .toString();
+  String _vs(String key, String? fallback) {
+    final v = widget.viewRow[key]?.toString();
+    if (v != null && v.isNotEmpty) return v;
+    return fallback ?? '';
+  }
 
-    final esercizio = _s('esercizio', 'Esercizio').isEmpty
-        ? widget.sinistro.esercizio.toString()
-        : _s('esercizio', 'Esercizio');
-    final nSinistro = _s('numero_sinistro', 'NumeroSinistro').isEmpty
-        ? widget.sinistro.numeroSinistro
-        : _s('numero_sinistro', 'NumeroSinistro');
-    final compagnia = _s('compagnia', 'Compagnia').isEmpty
-        ? (widget.sinistro.compagnia ?? '')
-        : _s('compagnia', 'Compagnia');
-    final numeroPolizza =
-        _s('numero_polizza', 'NumeroPolizza').isEmpty
-            ? (widget.sinistro.numeroPolizza ?? '')
-            : _s('numero_polizza', 'NumeroPolizza');
-    final clientName = _s('entity_name', 'cliente').isEmpty
-        ? (_s('Cliente', 'CLIENTE'))
-        : _s('entity_name', 'cliente');
-    final rischio = _s('rischio', 'Rischio').isEmpty
-        ? (widget.sinistro.rischio ?? '')
-        : _s('rischio', 'Rischio');
-    final intermediario = _s('intermediario', 'Intermediario').isEmpty
-        ? (widget.sinistro.intermediario ?? '')
-        : _s('intermediario', 'Intermediario');
+  // Nuovi campi / fallback su Sinistro (nuovo modello)
+  final esercizio       = _vs('esercizio', widget.sinistro.esercizio.toString());
+  final nSinistro       = _vs('numero_sinistro', widget.sinistro.numeroSinistro);
+  final compagnia       = _vs('compagnia', widget.sinistro.compagnia ?? '');
+  final numeroContratto = _vs('numero_contratto', widget.sinistro.numeroContratto ?? '');
+  final rischio         = _vs('rischio', widget.sinistro.rischio ?? '');
+  final stato           = _vs('stato', widget.sinistro.stato ?? '');
+  final dataAcc         = _fmtScadenza(
+    widget.viewRow['data_accadimento'] ?? widget.sinistro.dataAccadimento,
+  );
 
-    final dataAvvRaw = widget.viewRow['data_avvenimento'] ??
-        widget.viewRow['DataAvvenimento'] ??
-        widget.sinistro.dataAvvenimento;
-    final dataChiusRaw = widget.viewRow['data_chiusura'] ??
-        widget.viewRow['DataChiusura'] ??
-        widget.sinistro.dataChiusura;
-    final dataAvv = _fmtScadenza(dataAvvRaw);
-    final dataChius = _fmtScadenza(dataChiusRaw);
+  // (Extra contesto non parte dello schema del claim: nome entità/cliente)
+  final clientName = (() {
+    final a = widget.viewRow['entity_name']?.toString();
+    if (a != null && a.isNotEmpty) return a;
+    final b = widget.viewRow['cliente']?.toString();
+    if (b != null && b.isNotEmpty) return b;
+    final c = widget.viewRow['Cliente']?.toString() ?? widget.viewRow['CLIENTE']?.toString();
+    return (c ?? '');
+  })();
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F7FF),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            color: Colors.white,
-            alignment: Alignment.center,
-            child: const Icon(Icons.local_fire_department,
-                size: 28, color: Colors.grey),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade600,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                      child: const Text('SINISTRO',
-                          style:
-                              TextStyle(color: Colors.white, fontSize: 11)),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${esercizio.isEmpty ? '-' : esercizio} - ${nSinistro.isEmpty ? '-' : nSinistro}',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        color: Color(0xFF0082C8),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-
-                Wrap(
-                  spacing: 18,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('CONTRATTO  ',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.blueGrey)),
-                        const Icon(Icons.open_in_new,
-                            size: 14, color: Color(0xFF0082C8)),
-                        const SizedBox(width: 4),
-                        ConstrainedBox(
-                          constraints:
-                              const BoxConstraints(maxWidth: 360),
-                          child: _linkText(
-                              '${compagnia.isEmpty ? '—' : compagnia} - ${numeroPolizza.isEmpty ? '—' : numeroPolizza}'),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text("ENTITA'  ",
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.blueGrey)),
-                        const Icon(Icons.open_in_new,
-                            size: 14, color: Color(0xFF0082C8)),
-                        const SizedBox(width: 4),
-                        ConstrainedBox(
-                          constraints:
-                              const BoxConstraints(maxWidth: 360),
-                          child:
-                              _linkText(clientName.isEmpty ? '—' : clientName),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 24,
-                  runSpacing: 2,
-                  children: [
-                    _kvInline('RISCHIO', rischio),
-                    _kvInline('INTERMEDIARIO', intermediario),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+  return Container(
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF4F7FF),
+      border: Border.all(color: Colors.grey.shade300),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          color: Colors.white,
+          alignment: Alignment.center,
+          child: const Icon(Icons.local_fire_department, size: 28, color: Colors.grey),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-                            _HeaderActionIcons(                 // ⬅️ WAS: const _HeaderActionIcons()
-                onEdit: widget.onEditRequested,   // ⬅️ NEW
-                onDelete: _confirmAndDelete,      // ⬅️ NEW
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade600,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    child: const Text('SINISTRO', style: TextStyle(color: Colors.white, fontSize: 11)),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${esercizio.isEmpty ? '-' : esercizio} - ${nSinistro.isEmpty ? '-' : nSinistro}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      color: Color(0xFF0082C8),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
-              _pairRight('DATA AVVENIMENTO', dataAvv),
-              const SizedBox(height: 4),
-              _pairRight('DATA CHIUSURA', dataChius),
+              const SizedBox(height: 10),
+
+              // Riga link contratto + entità (usa numero_contratto, non numero_polizza)
+              Wrap(
+                spacing: 18,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('CONTRATTO  ', style: TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                      const Icon(Icons.open_in_new, size: 14, color: Color(0xFF0082C8)),
+                      const SizedBox(width: 4),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: _linkText(
+                          '${compagnia.isEmpty ? '—' : compagnia} - ${numeroContratto.isEmpty ? '—' : numeroContratto}',
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text("ENTITA'  ", style: TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                      const Icon(Icons.open_in_new, size: 14, color: Color(0xFF0082C8)),
+                      const SizedBox(width: 4),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: _linkText(clientName.isEmpty ? '—' : clientName),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              // Info sintetiche: solo Rischio (rimosso Intermediario)
+              Wrap(
+                spacing: 24,
+                runSpacing: 2,
+                children: [
+                  _kvInline('RISCHIO', rischio),
+                ],
+              ),
             ],
           ),
-        ],
-      ),
-    );
-  }
+        ),
+
+        // Lato destro: azioni + Data Accadimento + Stato (niente Data Chiusura)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _HeaderActionIcons(
+              onEdit: widget.onEditRequested,
+              onDelete: _confirmAndDelete,
+            ),
+            const SizedBox(height: 6),
+            _pairRight('DATA ACCADIMENTO', dataAcc),
+            const SizedBox(height: 4),
+            _pairRight('STATO', stato.isEmpty ? '—' : stato),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
-    String _s(String a, [String? b]) =>
-        (widget.viewRow[a] ?? (b != null ? widget.viewRow[b] : null) ?? '')
-            .toString();
-
-    final compagnia = _s('compagnia', 'Compagnia').isEmpty
-        ? (widget.sinistro.compagnia ?? '')
-        : _s('compagnia', 'Compagnia');
-    final numeroPolizza = _s('numero_polizza', 'NumeroPolizza').isEmpty
-        ? (widget.sinistro.numeroPolizza ?? '')
-        : _s('numero_polizza', 'NumeroPolizza');
-    final rischio = _s('rischio', 'Rischio').isEmpty
-        ? (widget.sinistro.rischio ?? '')
-        : _s('rischio', 'Rischio');
-    final descAssic =
-        _s('descrizione_assicurato', 'DescrizioneAssicurato');
-
-    final esercizio = _s('esercizio', 'Esercizio').isEmpty
-        ? widget.sinistro.esercizio.toString()
-        : _s('esercizio', 'Esercizio');
-    final numSinistro = _s('numero_sinistro', 'NumeroSinistro').isEmpty
-        ? widget.sinistro.numeroSinistro
-        : _s('numero_sinistro', 'NumeroSinistro');
-    final numSinComp =
-        _s('numero_sinistro_compagnia', 'NumeroSinistroCompagnia');
-    final statoComp = _s('stato_compagnia', 'StatoCompagnia');
-
-    final dataAvvRaw = widget.viewRow['data_avvenimento'] ??
-        widget.viewRow['DataAvvenimento'] ??
-        widget.sinistro.dataAvvenimento;
-    final citta = _s('città', 'citta').isEmpty
-        ? (widget.sinistro.citta ?? '')
-        : _s('città', 'citta');
-    final indirizzo = _s('indirizzo', 'Indirizzo').isEmpty
-        ? (widget.sinistro.indirizzo ?? '')
-        : _s('indirizzo', 'Indirizzo');
-    final cap = _s('cap', 'CAP').isEmpty
-        ? (widget.sinistro.cap ?? '')
-        : _s('cap', 'CAP');
-    final provincia = _s('provincia', 'Provincia').isEmpty
-        ? (widget.sinistro.provincia ?? '')
-        : _s('provincia', 'Provincia');
-    final codiceStato = _s('codice_stato', 'CodiceStato').isEmpty
-        ? (widget.sinistro.codiceStato ?? '')
-        : _s('codice_stato', 'CodiceStato');
-    final targa = _s('targa', 'Targa').isEmpty
-        ? (widget.sinistro.targa ?? '')
-        : _s('targa', 'Targa');
-    final dinamica = _s('dinamica', 'Dinamica').isEmpty
-        ? (widget.sinistro.dinamica ?? '')
-        : _s('dinamica', 'Dinamica');
-
-    return DefaultTabController(
-      length: 3,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _header(context),
-
-          // Barra tab
-          Container(
-            height: 44,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
-            ),
-            child: const TabBar(
-              labelPadding: EdgeInsets.symmetric(horizontal: 16),
-              isScrollable: true,
-              indicatorColor: Color(0xFF0082C8),
-              labelColor: Color(0xFF0A2B4E),
-              unselectedLabelColor: Colors.black54,
-              tabs: [
-                Tab(text: 'Riepilogo'),
-                Tab(text: 'Documenti'),
-                Tab(text: 'Diario di Andamento'),
-              ],
-            ),
-          ),
-
-          // Contenuto
-          Expanded(
-            child: TabBarView(
-              children: [
-                // ───────── RIEPILOGO ─────────
-                SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(8, 16, 8, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Polizza',
-                          style: TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 12),
-                      _SectionGrid(rows: [
-                        _KV('Compagnia', compagnia),
-                        _KV('Numero Contratto', numeroPolizza),
-                        _KV('Rischio', rischio),
-                        _KV('Descrizione Assicurato', descAssic),
-                        _KV('Targa', targa),
-                      ]),
-                      const SizedBox(height: 28),
-                      const Text('Numerazione',
-                          style: TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 12),
-                      _SectionGrid(rows: [
-                        _KV('Esercizio', esercizio),
-                        _KV('Numero Sinistro', numSinistro),
-                        _KV('Num. Sin. Compagnia', numSinComp ?? ''),
-                        _KV('Stato Sin. Compagnia', statoComp ?? ''),
-                      ]),
-                      const SizedBox(height: 28),
-                      const Text('Avvenimento',
-                          style: TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 12),
-                      _SectionGrid(rows: [
-                        _KV('Data Avvenimento', _fmtScadenza(dataAvvRaw)),
-                        _KV('Città Avvenimento', citta),
-                        _KV('Indirizzo Avvenimento', indirizzo),
-                        _KV('CAP Avvenimento', cap),
-                        _KV('Provincia', provincia),
-                        _KV('Codice Stato', codiceStato),
-                        _KV('Dinamica del Sinistro', dinamica),
-                      ]),
-                    ],
-                  ),
-                ),
-
-                // ───────── DOCUMENTI ─────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 16, 8, 16),
-                  child: _documentsTab(),
-                ),
-
-                // ───────── DIARIO ─────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-                  child: _diaryTab(),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+  // Helper: preferisci viewRow, altrimenti fallback su widget.sinistro / default
+  String _vs(String key, String? fallback) {
+    final v = widget.viewRow[key]?.toString();
+    if (v != null && v.isNotEmpty) return v;
+    return fallback ?? '';
   }
+
+  // ─── POLIZZA ───
+  final compagnia       = _vs('compagnia', widget.sinistro.compagnia ?? '');
+  final numeroContratto = _vs('numero_contratto', widget.sinistro.numeroContratto ?? '');
+  final rischio         = _vs('rischio', widget.sinistro.rischio ?? '');
+
+  // ─── NUMERAZIONE ───
+  final esercizio  = _vs('esercizio', widget.sinistro.esercizio.toString());
+  final numSinistro = _vs('numero_sinistro', widget.sinistro.numeroSinistro);
+
+  // ─── EVENTO ───
+  final descrizioneEvento = _vs('descrizione_evento', widget.sinistro.descrizioneEvento ?? '');
+  final dataAccadimento   = _fmtScadenza(
+    widget.viewRow['data_accadimento'] ?? widget.sinistro.dataAccadimento,
+  );
+  final dataDenuncia      = _fmtScadenza(
+    widget.viewRow['data_denuncia'] ?? widget.sinistro.dataDenuncia,
+  );
+  final indirizzoEvento = _vs('indirizzo_evento', widget.sinistro.indirizzoEvento ?? '');
+  final cap             = _vs('cap', widget.sinistro.cap ?? '');
+  final citta           = _vs('citta', widget.sinistro.citta ?? '');
+  final stato           = _vs('stato', widget.sinistro.stato ?? '');
+
+  // ─── VALORI ECONOMICI ───
+  final dannoStimato     = _vs('danno_stimato', widget.sinistro.dannoStimato ?? '');
+  final importoRiservato = _vs('importo_riservato', widget.sinistro.importoRiservato ?? '');
+  final importoLiquidato = _vs('importo_liquidato', widget.sinistro.importoLiquidato ?? '');
+
+  return DefaultTabController(
+    length: 3,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _header(context),
+
+        // ────────── Barra tab ──────────
+        Container(
+          height: 44,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
+          ),
+          child: const TabBar(
+            labelPadding: EdgeInsets.symmetric(horizontal: 16),
+            isScrollable: true,
+            indicatorColor: Color(0xFF0082C8),
+            labelColor: Color(0xFF0A2B4E),
+            unselectedLabelColor: Colors.black54,
+            tabs: [
+              Tab(text: 'Riepilogo'),
+              Tab(text: 'Documenti'),
+              Tab(text: 'Diario di Andamento'),
+            ],
+          ),
+        ),
+
+        // ────────── Contenuto ──────────
+        Expanded(
+          child: TabBarView(
+            children: [
+              // ───────── RIEPILOGO ─────────
+              SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(8, 16, 8, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // — Polizza —
+                    const Text(
+                      'Polizza',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    _SectionGrid(rows: [
+                      _KV('Compagnia', compagnia),
+                      _KV('Numero Contratto', numeroContratto),
+                      _KV('Rischio', rischio),
+                    ]),
+
+                    // — Numerazione —
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Numerazione',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    _SectionGrid(rows: [
+                      _KV('Esercizio', esercizio),
+                      _KV('Numero sinistro', numSinistro),
+                    ]),
+
+                    // — Evento —
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Evento',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    _SectionGrid(rows: [
+                      _KV('Descrizione Evento', descrizioneEvento),
+                      _KV('Data Accadimento', dataAccadimento),
+                      _KV('Data di Denuncia', dataDenuncia),
+                      _KV('Indirizzo Evento', indirizzoEvento),
+                      _KV('Cap', cap),
+                      _KV('Città', citta),
+                      _KV('Stato', stato),
+                    ]),
+
+                    // — Valori economici —
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Valori economici',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    _SectionGrid(rows: [
+                      _KV('Danno preventivamente stimato', dannoStimato),
+                      _KV('Importo Riservato', importoRiservato),
+                      _KV('Importo Liquidato', importoLiquidato),
+                    ]),
+                  ],
+                ),
+              ),
+
+              // ───────── DOCUMENTI ─────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 16, 8, 16),
+                child: _documentsTab(),
+              ),
+
+              // ───────── DIARIO ─────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                child: _diaryTab(),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 }
 
 // ⬇️ SOSTITUISCI la vecchia classe con questa versione “cliccabile”

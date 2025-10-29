@@ -38,12 +38,13 @@ class EditClaimPage extends StatefulWidget with ChatBotExtensions {
 
   final String title;
 
-  // tool del ClaimFormPane (come nel Create)
+  // Tool del ClaimFormPane (nuovo schema)
   @override
   List<ToolSpec> get toolSpecs => [ClaimFormPane.fillTool, ClaimFormPane.setTool];
 
-  ClaimFormPane _delegate() => ClaimFormPane(
-        user: user, token: token, sdk: sdk, entityId: entityId);
+  // Delegate per widgetBuilders/hostCallbacks
+  ClaimFormPane _delegate() =>
+      ClaimFormPane(user: user, token: token, sdk: sdk, entityId: entityId);
 
   @override
   Map<String, ChatWidgetBuilder> get extraWidgetBuilders =>
@@ -77,85 +78,137 @@ class _EditClaimPageState extends State<EditClaimPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       );
 
-  // mapping Sinistro -> initialValues del form
-  Map<String, String> _claimToInitialMap(Sinistro s) {
-    String _fmt(DateTime? d) =>
-        (d == null) ? '' : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-    return {
-      'esercizio'                : s.esercizio.toString(),
-      'numero_sinistro'          : s.numeroSinistro,
-      'numero_sinistro_compagnia': s.numeroSinistroCompagnia ?? '',
-      'numero_polizza'           : s.numeroPolizza ?? '',
-      'compagnia'                : s.compagnia ?? '',
-      'rischio'                  : s.rischio ?? '',
-      'intermediario'            : s.intermediario ?? '',
-      'descrizione_assicurato'   : s.descrizioneAssicurato ?? '',
-      'data_avvenimento'         : _fmt(s.dataAvvenimento),
-      'citta'                    : s.citta ?? '',
-      'indirizzo'                : s.indirizzo ?? '',
-      'cap'                      : s.cap ?? '',
-      'provincia'                : s.provincia ?? '',
-      'codice_stato'             : s.codiceStato ?? '',
-      'targa'                    : s.targa ?? '',
-      'dinamica'                 : s.dinamica ?? '',
-      'stato_compagnia'          : s.statoCompagnia ?? '',
-      'data_apertura'            : _fmt(s.dataApertura),
-      'data_chiusura'            : _fmt(s.dataChiusura),
-    };
+  // Formatter dd/MM/yyyy
+  String _fmtDate(DateTime? d) {
+    if (d == null) return '';
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yy = d.year.toString();
+    return '$dd/$mm/$yy';
   }
 
-  DateTime? _parseIt(String s) {
+  DateTime? _parseDate(String s) {
     final t = s.trim();
     if (t.isEmpty) return null;
-    // dd/MM/yyyy
     final p = t.split('/');
     if (p.length == 3) {
       try {
         final d = int.parse(p[0]), m = int.parse(p[1]), y = int.parse(p[2]);
         return DateTime(y, m, d);
-      } catch (_) {}
+      } catch (_) {
+        return null;
+      }
     }
-    // fallback ISO
-    try { return DateTime.parse(t); } catch (_) { return null; }
+    try {
+      return DateTime.parse(t);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int? _parseInt(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return null;
+    return int.tryParse(t);
+  }
+
+  // Mappa Sinistro (nuovo schema) -> initialValues del form (nuove chiavi)
+  Map<String, String> _claimToInitialMap(Sinistro s) {
+    return {
+      'esercizio'          : s.esercizio.toString(),
+      'numero_sinistro'    : s.numeroSinistro,
+      'compagnia'          : s.compagnia ?? '',
+      'numero_contratto'   : s.numeroContratto ?? '',
+      'rischio'            : s.rischio ?? '',
+      'descrizione_evento' : s.descrizioneEvento ?? '',
+      'data_accadimento'   : _fmtDate(s.dataAccadimento),
+      'data_denuncia'      : _fmtDate(s.dataDenuncia),
+      'danno_stimato'      : s.dannoStimato ?? '',
+      'importo_riservato'  : s.importoRiservato ?? '',
+      'importo_liquidato'  : s.importoLiquidato ?? '',
+      'stato'              : s.stato ?? '',
+      'indirizzo_evento'   : s.indirizzoEvento ?? '',
+      'cap'                : s.cap ?? '',
+      'citta'              : s.citta ?? '',
+    };
   }
 
   Future<void> _onSavePressed() async {
-    final s = _paneKey.currentState;
-    if (s == null) return;
+    final pane = _paneKey.currentState;
+    if (pane == null) return;
 
-    final m = s.model;
-    if ((m['esercizio'] ?? '').trim().isEmpty ||
-        (m['numero_sinistro'] ?? '').trim().isEmpty ||
-        (m['data_avvenimento'] ?? '').trim().isEmpty) {
+    final m = pane.model; // chiavi del nuovo schema
+
+    // Obbligatori minimi (coerenti con Create)
+    final esercizioStr = (m['esercizio'] ?? '').trim();
+    final numeroSinistro = (m['numero_sinistro'] ?? '').trim();
+    final dataAccStr = (m['data_accadimento'] ?? '').trim();
+
+    if (esercizioStr.isEmpty || numeroSinistro.isEmpty || dataAccStr.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Compila i campi obbligatori (*).')),
       );
       return;
     }
 
-    final upd = Sinistro(
-      esercizio: int.tryParse((m['esercizio'] ?? '').trim()) ?? 0,
-      numeroSinistro: (m['numero_sinistro'] ?? '').trim(),
-      numeroSinistroCompagnia: (m['numero_sinistro_compagnia'] ?? '').trim().isEmpty
-          ? null : m['numero_sinistro_compagnia']!.trim(),
-      numeroPolizza: (m['numero_polizza'] ?? '').trim().isEmpty
-          ? null : m['numero_polizza']!.trim(),
-      compagnia: (m['compagnia'] ?? '').trim().isEmpty ? null : m['compagnia']!.trim(),
-      rischio: (m['rischio'] ?? '').trim().isEmpty ? null : m['rischio']!.trim(),
-      intermediario: (m['intermediario'] ?? '').trim().isEmpty ? null : m['intermediario']!.trim(),
-      descrizioneAssicurato: (m['descrizione_assicurato'] ?? '').trim().isEmpty
-          ? null : m['descrizione_assicurato']!.trim(),
-      dataAvvenimento: _parseIt(m['data_avvenimento'] ?? '') ?? DateTime.now(),
-      citta: (m['citta'] ?? '').trim().isEmpty ? null : m['citta']!.trim(),
-      indirizzo: (m['indirizzo'] ?? '').trim().isEmpty ? null : m['indirizzo']!.trim(),
-      cap: (m['cap'] ?? '').trim().isEmpty ? null : m['cap']!.trim(),
-      provincia: (m['provincia'] ?? '').trim().isEmpty ? null : m['provincia']!.trim(),
-      codiceStato: (m['codice_stato'] ?? '').trim().isEmpty ? null : m['codice_stato']!.trim(),
-      targa: (m['targa'] ?? '').trim().isEmpty ? null : m['targa']!.trim(),
-      dinamica: (m['dinamica'] ?? '').trim().isEmpty ? null : m['dinamica']!.trim(),
-      statoCompagnia: (m['stato_compagnia'] ?? '').trim().isEmpty ? null : m['stato_compagnia']!.trim(),
-      dataApertura: _parseIt(m['data_apertura'] ?? ''),
-      dataChiusura: _parseIt(m['data_chiusura'] ?? ''),
+    final esercizio = _parseInt(esercizioStr);
+    final dataAccadimento = _parseDate(dataAccStr);
+    final dataDenuncia = _parseDate(m['data_denuncia'] ?? '');
+
+    if (esercizio == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Esercizio non valido (usa cifre intere).')),
+      );
+      return;
+    }
+    if (dataAccadimento == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Data accadimento non valida (gg/mm/aaaa).')),
+      );
+      return;
+    }
+
+    // Stato: se presente, deve essere tra i 4 ammessi
+    const statiAmmessi = {
+      'Aperto',
+      'Chiuso',
+      'Senza Seguito',
+      'In Valutazione',
+    };
+    final stato = (m['stato'] ?? '').trim();
+    if (stato.isNotEmpty && !statiAmmessi.contains(stato)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seleziona uno stato valido.')),
+      );
+      return;
+    }
+
+    String? nn(String k) {
+      final v = (m[k] ?? '').trim();
+      return v.isEmpty ? null : v;
+    }
+
+    // Costruisci Sinistro con SOLO i campi del nuovo schema
+    final updated = Sinistro(
+      esercizio: esercizio,
+      numeroSinistro: numeroSinistro,
+      dataAccadimento: dataAccadimento,
+      // denormalizzazioni/contesto
+      compagnia: nn('compagnia'),
+      numeroContratto: nn('numero_contratto'),
+      rischio: nn('rischio'),
+      // evento/descrizione
+      descrizioneEvento: nn('descrizione_evento'),
+      dataDenuncia: dataDenuncia,
+      indirizzoEvento: nn('indirizzo_evento'),
+      cap: nn('cap'),
+      citta: nn('citta'),
+      // economici
+      dannoStimato: nn('danno_stimato'),
+      importoRiservato: nn('importo_riservato'),
+      importoLiquidato: nn('importo_liquidato'),
+      // stato
+      stato: nn('stato'),
     );
 
     try {
@@ -164,13 +217,13 @@ class _EditClaimPageState extends State<EditClaimPage> {
         widget.entityId,
         widget.contractId,
         widget.claimId,
-        upd,
+        updated,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sinistro aggiornato.')),
       );
-      await widget.onUpdated(widget.claimId, upd);
+      await widget.onUpdated(widget.claimId, updated);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -195,12 +248,22 @@ class _EditClaimPageState extends State<EditClaimPage> {
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Text(widget.title,
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                  Text(
+                    widget.title,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                  ),
                   const Spacer(),
-                  OutlinedButton(onPressed: widget.onCancel, style: _cancelStyle, child: const Text('Annulla')),
+                  OutlinedButton(
+                    onPressed: widget.onCancel,
+                    style: _cancelStyle,
+                    child: const Text('Annulla'),
+                  ),
                   const SizedBox(width: 8),
-                  ElevatedButton(onPressed: _onSavePressed, style: _saveStyle, child: const Text('Salva')),
+                  ElevatedButton(
+                    onPressed: _onSavePressed,
+                    style: _saveStyle,
+                    child: const Text('Salva'),
+                  ),
                 ],
               ),
             ),
@@ -219,9 +282,9 @@ class _EditClaimPageState extends State<EditClaimPage> {
                 token: widget.token,
                 sdk: widget.sdk,
                 entityId: widget.entityId,
-                initialValues: initial,                      // ⬅️ prefill campi
-                initialContractId: widget.contractId,        // ⬅️ contratto preselezionato
-                lockContract: true,                          // ⬅️ non modificabile
+                initialValues: initial,               // prefill con nuove chiavi
+                initialContractId: widget.contractId, // contratto preselezionato
+                lockContract: true,                   // contratto non modificabile
               ),
             ),
           ),

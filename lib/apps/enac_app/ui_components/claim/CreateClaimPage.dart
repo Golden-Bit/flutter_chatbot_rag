@@ -33,11 +33,11 @@ class CreateClaimPage extends StatefulWidget with ChatBotExtensions {
 
   final String title;
 
-  // ChatBotExtensions: esponiamo i tool del ClaimFormPane
+  // Espone i tool del ClaimFormPane (nuovo schema)
   @override
   List<ToolSpec> get toolSpecs => [ClaimFormPane.fillTool, ClaimFormPane.setTool];
 
-  // “delegate” di servizio per widgetBuilders/hostCallbacks
+  // “delegate” per widgetBuilders/hostCallbacks
   ClaimFormPane _delegate() =>
       ClaimFormPane(user: user, token: token, sdk: sdk, entityId: entityId);
 
@@ -58,6 +58,14 @@ class _CreateClaimPageState extends State<CreateClaimPage> {
 
   final _paneKey = GlobalKey<ClaimFormPaneState>();
   final DateFormat _fmt = DateFormat('dd/MM/yyyy');
+
+  // Stati ammessi (per validazione opzionale)
+  static const _kStatiAmmessi = <String>{
+    'Aperto',
+    'Chiuso',
+    'Senza Seguito',
+    'In Valutazione',
+  };
 
   ButtonStyle get _cancelStyle => OutlinedButton.styleFrom(
         foregroundColor: Colors.grey.shade800,
@@ -147,7 +155,7 @@ class _CreateClaimPageState extends State<CreateClaimPage> {
   }
 
   /*──────────────────────────────────────────────────────────────*/
-  /*  Salvataggio                                                 */
+  /*  Salvataggio (nuovo schema)                                  */
   /*──────────────────────────────────────────────────────────────*/
   Future<void> _onCreatePressed() async {
     final pane = _paneKey.currentState;
@@ -162,13 +170,13 @@ class _CreateClaimPageState extends State<CreateClaimPage> {
       return;
     }
 
-    final m = pane.model; // Map<String,String>
+    final m = pane.model; // Map<String,String> dal ClaimFormPane (nuovo schema)
 
-    // Minimi obbligatori
+    // Minimi obbligatori del nuovo schema
     final requiredFields = {
-      'esercizio': m['esercizio'] ?? '',
-      'numero_sinistro': m['numero_sinistro'] ?? '',
-      'data_avvenimento': m['data_avvenimento'] ?? '',
+      'esercizio'       : m['esercizio'] ?? '',
+      'numero_sinistro' : m['numero_sinistro'] ?? '',
+      'data_accadimento': m['data_accadimento'] ?? '',
     };
     final missing = requiredFields.entries
         .where((e) => e.value.trim().isEmpty)
@@ -184,9 +192,8 @@ class _CreateClaimPageState extends State<CreateClaimPage> {
     }
 
     final esercizio = _parseInt(m['esercizio'] ?? '');
-    final dataAvv = _parseDate(m['data_avvenimento'] ?? '');
-    final dataApertura = _parseDate(m['data_apertura'] ?? '');
-    final dataChiusura = _parseDate(m['data_chiusura'] ?? '');
+    final dataAccadimento = _parseDate(m['data_accadimento'] ?? '');
+    final dataDenuncia = _parseDate(m['data_denuncia'] ?? '');
 
     if (esercizio == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -194,12 +201,22 @@ class _CreateClaimPageState extends State<CreateClaimPage> {
       );
       return;
     }
-    if (dataAvv == null) {
+    if (dataAccadimento == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Data avvenimento non valida. Usa gg/mm/aaaa.')));
+          content: Text('Data accadimento non valida. Usa gg/mm/aaaa.')));
       return;
     }
 
+    // Stato (se presente) deve essere tra i 4 ammessi
+    final stato = (m['stato'] ?? '').trim();
+    if (stato.isNotEmpty && !_kStatiAmmessi.contains(stato)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seleziona uno stato valido.')),
+      );
+      return;
+    }
+
+    // utility: null se stringa vuota
     String? nn(String k) {
       final v = (m[k] ?? '').trim();
       return v.isEmpty ? null : v;
@@ -209,23 +226,23 @@ class _CreateClaimPageState extends State<CreateClaimPage> {
       final sinistro = Sinistro(
         esercizio: esercizio,
         numeroSinistro: (m['numero_sinistro'] ?? '').trim(),
-        numeroSinistroCompagnia: nn('numero_sinistro_compagnia'),
-        numeroPolizza: nn('numero_polizza'),
+        dataAccadimento: dataAccadimento,           // obbligatoria
+        // opzionali denorm/contesto
+        numeroContratto: nn('numero_contratto'),
         compagnia: nn('compagnia'),
         rischio: nn('rischio'),
-        intermediario: nn('intermediario'),
-        descrizioneAssicurato: nn('descrizione_assicurato'),
-        dataAvvenimento: dataAvv,
-        citta: nn('citta'),
-        indirizzo: nn('indirizzo'),
+        // evento/descrizione
+        descrizioneEvento: nn('descrizione_evento'),
+        dataDenuncia: dataDenuncia,
+        indirizzoEvento: nn('indirizzo_evento'),
         cap: nn('cap'),
-        provincia: nn('provincia'),
-        codiceStato: nn('codice_stato'),
-        targa: nn('targa'),
-        dinamica: nn('dinamica'),
-        statoCompagnia: nn('stato_compagnia'),
-        dataApertura: dataApertura,
-        dataChiusura: dataChiusura,
+        citta: nn('citta'),
+        // economici
+        dannoStimato: nn('danno_stimato'),
+        importoRiservato: nn('importo_riservato'),
+        importoLiquidato: nn('importo_liquidato'),
+        // stato
+        stato: nn('stato'),
       );
 
       final userId = widget.user.username;

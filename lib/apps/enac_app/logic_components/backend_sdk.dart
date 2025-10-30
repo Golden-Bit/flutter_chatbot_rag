@@ -175,7 +175,7 @@ class UnitaVendita {
 
 class Amministrativi {
   final DateTime effetto;
-  final DateTime dataEmissione;
+  final DateTime? dataEmissione;
   final DateTime? ultimaRataPagata;
   final String frazionamento; // "annuale" (stringa)
   final bool compresoFirma;
@@ -191,7 +191,7 @@ class Amministrativi {
 
   Amministrativi({
     required this.effetto,
-    required this.dataEmissione,
+    this.dataEmissione,
     this.ultimaRataPagata,
     this.frazionamento = 'annuale',
     this.compresoFirma = false,
@@ -208,7 +208,7 @@ class Amministrativi {
 
   factory Amministrativi.fromJson(Map<String, dynamic> json) => Amministrativi(
         effetto: DateTime.parse(json['Effetto']),
-        dataEmissione: DateTime.parse(json['DataEmissione']),
+        dataEmissione: _parseDateOpt(json['DataEmissione']),
         // ⬇️ tutti gli opzionali ora sono "opt parse" (safe se assenti)
         ultimaRataPagata: _parseDateOpt(json['UltRataPagata']),
         frazionamento: json['Frazionamento'] ?? 'annuale',
@@ -228,13 +228,16 @@ class Amministrativi {
     // Campi obbligatori sempre presenti
     final m = <String, dynamic>{
       'Effetto': _dateToIsoOpt(effetto),
-      'DataEmissione': _dateToIsoOpt(dataEmissione),
+      //'DataEmissione': _dateToIsoOpt(dataEmissione),
       'Frazionamento': frazionamento,
       'CompresoFirma': compresoFirma,
       'Scadenza': _dateToIsoOpt(scadenza),
       'ModalitaIncasso': modalitaIncasso,
     };
-
+    // Opzionali: serializza solo se valorizzati
+    if (dataEmissione != null) {
+      m['DataEmissione'] = _dateToIsoOpt(dataEmissione);
+    }
     // ⬇️ Aggiungi SOLO se valorizzati (evita chiavi con null)
     if (ultimaRataPagata != null) {
       m['UltRataPagata'] = _dateToIsoOpt(ultimaRataPagata);
@@ -1448,6 +1451,11 @@ Future<List<Map<String, dynamic>>> viewEntityContracts(
         'compagnia'     : c.identificativi.compagnia,
         'numero_polizza': c.identificativi.numeroPolizza,
         'ramo'          : c.identificativi.ramo,
+        // ► Rischio/Prodotto: preferisci RamiEl.Descrizione, fallback a Ramo
+        'rischio'       : c.ramiEl?.descrizione ?? c.identificativi.ramo,
+        'Rischio'       : c.ramiEl?.descrizione ?? c.identificativi.ramo, // alias utile
+        'prodotto'      : c.ramiEl?.descrizione,
+        'Prodotto'      : c.ramiEl?.descrizione,                          // alias utile
         'decorrenza'    : _dateToIsoOpt(amm?.effetto),
         'scadenza'      : _dateToIsoOpt(amm?.scadenza),
         'premio'        : premi?.premio,

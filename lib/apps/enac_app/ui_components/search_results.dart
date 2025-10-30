@@ -50,6 +50,7 @@ String _takeS(Map<String, dynamic> v, List<String> keys) {
   return '';
 }
 
+
 String? _takeSOpt(Map<String, dynamic> v, List<String> keys) {
   for (final k in keys) {
     final val = v[k];
@@ -552,7 +553,7 @@ class _SearchResultsPanelState extends State<SearchResultsPanel> {
 
     final compagnia = _takeS(v, ['compagnia', 'Compagnia', 'company', 'Company']);
     final numPol    = _takeS(v, ['numero_polizza', 'NumeroPolizza', 'policy_number', 'PolicyNumber']);
-    final ramo      = _takeS(v, ['ramo', 'Ramo', 'linea', 'product', 'Prodotto']);
+    final rischio   = _takeS(v, ['rischio','Rischio','prodotto','Prodotto','ramo','Ramo','linea','product','Product']);
     final contraente= _takeS(v, ['contraente', 'Contraente', 'intestatario', 'Intestatario', 'cliente', 'Cliente']);
     final stato     = _takeS(v, ['stato', 'Stato', 'status', 'Status']);
     final premio    = _takeS(v, ['premio', 'Premio', 'premio_annuo', 'PremioAnnuo', 'premium']);
@@ -625,7 +626,7 @@ class _SearchResultsPanelState extends State<SearchResultsPanel> {
               child: Padding(
                 padding: const EdgeInsets.only(top: 4.0, left: 10),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _kv('RAMO', ramo),
+                  _kv('RISCHIO', rischio),
                   const SizedBox(height: 6),
                   _kv('STATO', stato),
                   const SizedBox(height: 6),

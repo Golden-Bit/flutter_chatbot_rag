@@ -477,11 +477,11 @@ void _applyFilters() {
 Widget _buildModelSelector() {
   // elenco completo dei modelli supportati
   const models = <String>[
-    //'gpt-5',
-    //'gpt-5-mini',
-    //'gpt-5-nano',
-    //'gpt-5-chat-latest',
-    //'gpt-5-codex',
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-5-nano',
+    'gpt-5-chat-latest',
+    'gpt-5-codex',
     'gpt-4.1',
     'gpt-4.1-mini',
     'gpt-4.1-nano',

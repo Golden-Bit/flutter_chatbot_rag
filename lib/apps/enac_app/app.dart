@@ -463,7 +463,7 @@ return Container(
       const Divider(),
       row('Cliente',   _ClientSection.cliente),
       row('Polizze', _ClientSection.contratti),
-      row('Sato Pagamenti',    _ClientSection.titoli),
+      row('Stato Pagamenti',    _ClientSection.titoli),
 row('Sinistri',  _ClientSection.sinistri),              // ← niente chevron
 row('Documenti', _ClientSection.documenti,              // ← badge fisso a 0
     trailing: _docBadge(0),

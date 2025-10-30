@@ -275,7 +275,7 @@ int _dueCount(String scope, int days) {
 
   Widget _entitiesHeader() => Row(
         children: [
-          const Text('Elenco degli Assicurati',
+          const Text('Elenco degli Utenti',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
           const Spacer(),
           TextButton.icon(

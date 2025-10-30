@@ -112,6 +112,7 @@ flutter:
   assets:
     - assets/config.json
     - assets/examples_app_assets/enac-logo-bianco.png
+    - assets/examples_app_assets/enac-logo-blu.png
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

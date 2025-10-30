@@ -89,26 +89,26 @@ class _EditContractPageState extends State<EditContractPage> {
     if (s == 'APP0' || s.contains('NULLO')) return 'APP0';
     if (s == 'APP€' || s.contains('PREMIO')) return 'APP€';
     return (['COND', 'APP0', 'APP€'].contains(s)) ? s : 'COND';
-    }
+  }
 
   String _normSiNoFromRinnovo(String? raw) {
     final s = (raw ?? '').trim().toLowerCase();
-    const yes = {'sì','si','yes','y','1','true','t','tacito','tacito rinnovo'};
-    const no  = {'no','n','0','false','f','non tacito'};
+    const yes = {'sì', 'si', 'yes', 'y', '1', 'true', 't', 'tacito', 'tacito rinnovo'};
+    const no = {'no', 'n', '0', 'false', 'f', 'non tacito'};
     if (yes.contains(s)) return 'Sì';
-    if (no.contains(s))  return 'No';
+    if (no.contains(s)) return 'No';
     // fallback: stringa non riconosciuta ⇒ lascio vuoto (verrà richiesto)
     return (s.isEmpty) ? '' : 'Sì';
   }
 
   /* ───────────── mapping ContrattoOmnia8 → initialValues per il form ───────────── */
   Map<String, String> _contractToInitialMap(ContrattoOmnia8 c) {
-    final id  = c.identificativi;
+    final id = c.identificativi;
     final amm = c.amministrativi;
     final prem = c.premi;
     final rin = c.rinnovo;
-    final uv  = c.unitaVendita;
-    final op  = c.operativita;
+    final uv = c.unitaVendita;
+    final op = c.operativita;
 
     // Preferisco il rischio da ramiEl.descrizione; fallback a identificativi.tipo
     final rischio = (c.ramiEl?.descrizione?.trim().isNotEmpty ?? false)
@@ -117,34 +117,34 @@ class _EditContractPageState extends State<EditContractPage> {
 
     return {
       // Identificativi
-      'tipo'              : _normTipo(id.tpCar),
-      'rischio'           : rischio,
-      'compagnia'         : id.compagnia,
-      'numero'            : id.numeroPolizza,
+      'tipo': _normTipo(id.tpCar),
+      'rischio': rischio,
+      'compagnia': id.compagnia,
+      'numero': id.numeroPolizza,
 
       // Importi
-      'premio_imponibile' : _num(prem?.netto),
-      'imposte'           : _num(prem?.imposte),
-      'premio_lordo'      : _num(prem?.premio),
+      'premio_imponibile': _num(prem?.netto),
+      'imposte': _num(prem?.imposte),
+      'premio_lordo': _num(prem?.premio),
 
       // Amministrativi / date
-      'fraz'              : (amm?.frazionamento ?? '').toString(),
-      'effetto'           : _d(amm?.effetto),
-      'scadenza'          : _d(amm?.scadenza),
+      'fraz': (amm?.frazionamento ?? '').toString(),
+      'effetto': _d(amm?.effetto),
+      'scadenza': _d(amm?.scadenza),
       'scadenza_copertura': _d(amm?.scadenzaCopertura),
-      'data_emissione'    : _d(amm?.dataEmissione),
+      'data_emissione': _d(amm?.dataEmissione), // ora FACOLTATIVA
 
       // Varie
-      'giorni_mora'       : (rin?.giorniMora ?? '').toString(),
+      'giorni_mora': (rin?.giorniMora ?? '').toString(),
 
       // Broker
-      'broker'            : (uv?.intermediario ?? '').toString(),
-      'broker_indirizzo'  : (uv?.puntoVendita ?? '').toString(),
+      'broker': (uv?.intermediario ?? '').toString(),
+      'broker_indirizzo': (uv?.puntoVendita ?? '').toString(),
 
       // Rinnovo
-      'tacito_rinnovo'    : _normSiNoFromRinnovo(rin?.rinnovo),
-      'disdetta'          : (rin?.disdetta ?? '').toString(),
-      'proroga'           : (rin?.proroga ?? '').toString(),
+      'tacito_rinnovo': _normSiNoFromRinnovo(rin?.rinnovo),
+      'disdetta': (rin?.disdetta ?? '').toString(),
+      'proroga': (rin?.proroga ?? '').toString(),
 
       // Regolazione al termine del periodo (Sì/No)
       'regolazione_fine_periodo': (op?.regolazione ?? false) ? 'Sì' : 'No',
@@ -206,47 +206,53 @@ class _EditContractPageState extends State<EditContractPage> {
 
   /* ───────────────────────── Salvataggio ───────────────────────── */
   Future<void> _onSavePressed() async {
-    final pane = _paneKey.currentState; if (pane == null) return;
+    final pane = _paneKey.currentState;
+    if (pane == null) return;
     final m = pane.model;
 
     String t(String k) => (m[k] ?? '').trim();
     DateTime? pd(String k) {
-      final s = t(k); if (s.isEmpty) return null;
-      try { return _fmt.parseStrict(s); } catch (_) { return null; }
+      final s = t(k);
+      if (s.isEmpty) return null;
+      try {
+        return _fmt.parseStrict(s);
+      } catch (_) {
+        return null;
+      }
     }
+
     String moneyStr(String k) {
       final s = t(k);
       if (s.isEmpty) return '0.00';
       final d = double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ??
-          double.tryParse(s) ?? 0.0;
+          double.tryParse(s) ??
+          0.0;
       return d.toStringAsFixed(2);
     }
+
     bool yesNo(String k) {
       final s = t(k).toLowerCase();
       return s == 'sì' || s == 'si' || s == 'true' || s == '1';
     }
 
-    // Validazioni: SOLO campi del capitolato
+    // Validazioni: SOLO campi del capitolato (data_emissione NON è più obbligatoria)
     final requiredFields = {
-      'tipo'               : t('tipo'),
-      'rischio'            : t('rischio'),
-      'compagnia'          : t('compagnia'),
-      'numero'             : t('numero'),
-      'premio_imponibile'  : t('premio_imponibile'),
-      'imposte'            : t('imposte'),
-      'premio_lordo'       : t('premio_lordo'),
-      'fraz'               : t('fraz'),
-      'effetto'            : t('effetto'),
-      'scadenza'           : t('scadenza'),
-      'scadenza_copertura' : t('scadenza_copertura'),
-      'data_emissione'     : t('data_emissione'),
-      'tacito_rinnovo'     : t('tacito_rinnovo'),
+      'tipo': t('tipo'),
+      'rischio': t('rischio'),
+      'compagnia': t('compagnia'),
+      'numero': t('numero'),
+      'premio_imponibile': t('premio_imponibile'),
+      'imposte': t('imposte'),
+      'premio_lordo': t('premio_lordo'),
+      'fraz': t('fraz'),
+      'effetto': t('effetto'),
+      'scadenza': t('scadenza'),
+      'scadenza_copertura': t('scadenza_copertura'),
+      // 'data_emissione': t('data_emissione'), // ← FACOLTATIVA
+      'tacito_rinnovo': t('tacito_rinnovo'),
     };
 
-    final missing = requiredFields.entries
-        .where((e) => e.value.isEmpty)
-        .map((e) => e.key)
-        .toList();
+    final missing = requiredFields.entries.where((e) => e.value.isEmpty).map((e) => e.key).toList();
 
     if (missing.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -255,14 +261,23 @@ class _EditContractPageState extends State<EditContractPage> {
       return;
     }
 
-    final effetto  = pd('effetto');
+    final effetto = pd('effetto');
     final scadenza = pd('scadenza');
-    final scCop    = pd('scadenza_copertura');
-    final emesso   = pd('data_emissione');
+    final scCop = pd('scadenza_copertura');
+    final emesso = pd('data_emissione'); // può essere null
 
-    if (effetto == null || scadenza == null || scCop == null || emesso == null) {
+    // Date obbligatorie: effetto, scadenza, scadenza copertura
+    if (effetto == null || scadenza == null || scCop == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Verifica il formato delle date (gg/mm/aaaa).')),
+      );
+      return;
+    }
+
+    // Se l'utente ha inserito data_emissione ma il formato è errato, segnala.
+    if (t('data_emissione').isNotEmpty && emesso == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Formato "data emissione" non valido (gg/mm/aaaa).')),
       );
       return;
     }
@@ -270,41 +285,41 @@ class _EditContractPageState extends State<EditContractPage> {
     final updated = ContrattoOmnia8(
       identificativi: Identificativi(
         // “Rischio” nel campo tipo per compatibilità con le view
-        tipo          : t('rischio'),
+        tipo: t('rischio'),
         // “Tipo” (COND | APP0 | APP€) nel tpCar
-        tpCar         : t('tipo'),
-        ramo          : '', // non richiesto
-        compagnia     : t('compagnia'),
-        numeroPolizza : t('numero'),
+        tpCar: t('tipo'),
+        ramo: '', // non richiesto
+        compagnia: t('compagnia'),
+        numeroPolizza: t('numero'),
       ),
       // Broker & indirizzo
       unitaVendita: UnitaVendita(
-        intermediario : t('broker'),
-        puntoVendita  : t('broker_indirizzo'),
+        intermediario: t('broker'),
+        puntoVendita: t('broker_indirizzo'),
       ),
       amministrativi: Amministrativi(
-        effetto           : effetto,
-        scadenza          : scadenza,
-        dataEmissione     : emesso,
-        frazionamento     : t('fraz'),
-        scadenzaCopertura : scCop,
+        effetto: effetto,
+        scadenza: scadenza,
+        dataEmissione: emesso, // può essere null
+        frazionamento: t('fraz'),
+        scadenzaCopertura: scCop,
       ),
       premi: Premi(
-        netto   : moneyStr('premio_imponibile'),
-        imposte : moneyStr('imposte'),
-        premio  : moneyStr('premio_lordo'),
+        netto: moneyStr('premio_imponibile'),
+        imposte: moneyStr('imposte'),
+        premio: moneyStr('premio_lordo'),
       ),
       rinnovo: Rinnovo(
-        rinnovo    : t('tacito_rinnovo'), // "Sì" | "No"
-        disdetta   : t('disdetta'),
-        proroga    : t('proroga'),
-        giorniMora : t('giorni_mora'),
+        rinnovo: t('tacito_rinnovo'), // "Sì" | "No"
+        disdetta: t('disdetta'),
+        proroga: t('proroga'),
+        giorniMora: t('giorni_mora'),
       ),
       operativita: Operativita(
         regolazione: yesNo('regolazione_fine_periodo'),
         parametriRegolazione: ParametriRegolazione(
           inizio: effetto,
-          fine  : scadenza,
+          fine: scadenza,
         ),
       ),
       ramiEl: RamiEl(descrizione: t('rischio')),
@@ -313,8 +328,8 @@ class _EditContractPageState extends State<EditContractPage> {
     try {
       final resp = await widget.sdk.updateContract(
         widget.user.username, // userId
-        widget.entityId,      // entityId
-        widget.contractId,    // contractId
+        widget.entityId, // entityId
+        widget.contractId, // contractId
         updated,
       );
       if (!mounted) return;
@@ -323,8 +338,9 @@ class _EditContractPageState extends State<EditContractPage> {
       await widget.onUpdated(resp);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Errore aggiornamento contratto: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Errore aggiornamento contratto: $e')),
+      );
     }
   }
 }

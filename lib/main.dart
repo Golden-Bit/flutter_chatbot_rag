@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
     Locale('en', 'US'),
     Locale('es', 'ES'),
   ],
-      title: 'Boxed-AI',
+      title: 'ENAC Assistant',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         textTheme: GoogleFonts.interTextTheme().copyWith(

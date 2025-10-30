@@ -1259,7 +1259,7 @@ class ChatBotPageState extends State<ChatBotPage> {
 // ────────────────────────────────────────────────────────────────
 //  CONFIG DI DEFAULT (usata quando apri una chat “vergine”)
 // ────────────────────────────────────────────────────────────────
-  static const String _defaultModel = 'gpt-4o'; // cambia se ti serve
+  static const String _defaultModel = 'gpt-4.1'; // cambia se ti serve
 
   static const _prefsKeyPending = 'kb_pending_jobs';
 // ──────────────────────────────────────────────────────────────────
@@ -2703,7 +2703,7 @@ class ChatBotPageState extends State<ChatBotPage> {
   double _avatarIconOpacity = 1.0;
 
   String _selectedModel =
-      "gpt-4o"; // Variabile per il modello selezionato, di default GPT-4O
+      "gpt-4.1"; // Variabile per il modello selezionato, di default GPT-4O
   int? _buttonHoveredIndex; // Variabile per i pulsanti principali
   int? hoveredIndex; // Variabile per le chat salvate
 

@@ -133,7 +133,11 @@ class _CreateContractPageState extends State<CreateContractPage> {
     DateTime? pd(String k) {
       final s = t(k);
       if (s.isEmpty) return null;
-      try { return _fmt.parseStrict(s); } catch (_) { return null; }
+      try {
+        return _fmt.parseStrict(s);
+      } catch (_) {
+        return null;
+      }
     }
 
     String moneyStr(String k) {
@@ -141,7 +145,8 @@ class _CreateContractPageState extends State<CreateContractPage> {
       if (s.isEmpty) return '0.00';
       // virgola o punto come separatore decimale
       final d = double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ??
-          double.tryParse(s) ?? 0.0;
+          double.tryParse(s) ??
+          0.0;
       return d.toStringAsFixed(2);
     }
 
@@ -151,6 +156,7 @@ class _CreateContractPageState extends State<CreateContractPage> {
     }
 
     // ── Validazione: SOLO i campi del capitolato ──
+    // NB: "data_emissione" NON è più obbligatoria.
     final requiredFields = {
       'tipo'               : t('tipo'),
       'rischio'            : t('rischio'),
@@ -163,7 +169,7 @@ class _CreateContractPageState extends State<CreateContractPage> {
       'effetto'            : t('effetto'),
       'scadenza'           : t('scadenza'),
       'scadenza_copertura' : t('scadenza_copertura'),
-      'data_emissione'     : t('data_emissione'),
+      // 'data_emissione'   : t('data_emissione'), // ← rimosso dai required
       'tacito_rinnovo'     : t('tacito_rinnovo'),
     };
 
@@ -182,11 +188,19 @@ class _CreateContractPageState extends State<CreateContractPage> {
     final effetto  = pd('effetto');
     final scadenza = pd('scadenza');
     final scCop    = pd('scadenza_copertura');
-    final emesso   = pd('data_emissione');
+    final emesso   = pd('data_emissione'); // può essere null
 
-    if (effetto == null || scadenza == null || scCop == null || emesso == null) {
+    // Le tre date principali restano obbligatorie; "data_emissione" è facoltativa
+    if (effetto == null || scadenza == null || scCop == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Verifica il formato delle date (gg/mm/aaaa).')),
+      );
+      return;
+    }
+    // Se l’utente ha inserito qualcosa in "data_emissione" ma non parse-abile, segnaliamolo
+    if (t('data_emissione').isNotEmpty && emesso == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Data Emissione non valida (usa gg/mm/aaaa) oppure lascia vuoto.')),
       );
       return;
     }
@@ -211,7 +225,7 @@ class _CreateContractPageState extends State<CreateContractPage> {
       amministrativi: Amministrativi(
         effetto           : effetto,
         scadenza          : scadenza,
-        dataEmissione     : emesso,
+        dataEmissione     : emesso,                 // ← può essere null
         frazionamento     : t('fraz'),
         scadenzaCopertura : scCop,
       ),

@@ -140,7 +140,7 @@ Future<void> _handleRedirectOrLocalToken() async {
     // Navigo sostituendo la pagina corrente
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
+      MaterialPageRoute(builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
     ));
   }
 
@@ -224,7 +224,7 @@ Future<void> _onSocialPressed(String providerName) async {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
         return;
@@ -282,12 +282,12 @@ Future<void> _onSocialPressed(String providerName) async {
       return Scaffold(
         backgroundColor: Colors.white,
         body: Center(
-          child: Image.network(
+          child: appIcon /*Image.network(
             'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
             width: 120,
             height: 120,
             fit: BoxFit.contain,
-          ),
+          ),*/
         ),
       );
     }

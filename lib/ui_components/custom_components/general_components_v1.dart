@@ -18,7 +18,7 @@ dynamic fullLogo = // Titolo a sinistra
 dynamic smallFullLogo = // Titolo a sinistra
     Image.network(
   //'https://static.wixstatic.com/media/63b1fb_3e1530fd4a2e479983c1b3cd9f379290~mv2.png',
-   '', // 'https://static-00.iconduck.com/assets.00/openai-icon-2021x2048-4rpe5x7n.png',
+  '', // 'https://static-00.iconduck.com/assets.00/openai-icon-2021x2048-4rpe5x7n.png',
   height: 32, // Imposta l'altezza desiderata per il logo
   fit: BoxFit.contain,
   isAntiAlias: true,
@@ -45,5 +45,5 @@ dynamic assistantAvatar = CircleAvatar(
   ),
 );
 
-//String assistantName = "boxed-ai";
 String assistantName = "ENAC-Assistant";
+//String assistantName = "BoxedAI-Assistant";

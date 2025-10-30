@@ -247,7 +247,7 @@ int _dueCount(String scope, int days) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: Colors.blue, width: 3),
         borderRadius: BorderRadius.circular(2),
       ),
       padding: padding,

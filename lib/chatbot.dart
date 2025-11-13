@@ -2840,9 +2840,9 @@ class ChatBotPageState extends State<ChatBotPage> {
             )),
         "ToolEventWidget": _wrap2((data, onReply) =>
             ToolEventCard(data: data)), // non serve onReply qui
-        /*"JSRunnerWidget":
-            _wrap2((data, onReply) => JSRunnerWidgetTool(jsonData: data)),*/
-        /*"AutoSequenceWidget": (data, onReply, pageCbs, hostCbs) =>
+        "JSRunnerWidget":
+            _wrap2((data, onReply) => JSRunnerWidgetTool(jsonData: data)),
+        "AutoSequenceWidget": (data, onReply, pageCbs, hostCbs) =>
             AutoSequenceWidgetTool(
               jsonData: data,
               onReply: (txt, {meta}) {
@@ -2855,7 +2855,7 @@ class ChatBotPageState extends State<ChatBotPage> {
                   pageCbs.sendReply(txt); // messaggio normale
                 }
               },
-            ),*/
+            ),
         "NButtonWidget": _wrap2(
             (data, onReply) => NButtonWidget(data: data, onReply: onReply)),
         /*"RadarChart": _wrap2((data, onReply) =>

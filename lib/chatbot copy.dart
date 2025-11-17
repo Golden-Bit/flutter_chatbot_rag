@@ -1259,7 +1259,7 @@ class ChatBotPageState extends State<ChatBotPage> {
 // ────────────────────────────────────────────────────────────────
 //  CONFIG DI DEFAULT (usata quando apri una chat “vergine”)
 // ────────────────────────────────────────────────────────────────
-  static const String _defaultModel = 'gpt-4o'; // cambia se ti serve
+  static const String _defaultModel = 'gpt-4.1'; // cambia se ti serve
 
   static const _prefsKeyPending = 'kb_pending_jobs';
 // ──────────────────────────────────────────────────────────────────
@@ -2703,7 +2703,7 @@ class ChatBotPageState extends State<ChatBotPage> {
   double _avatarIconOpacity = 1.0;
 
   String _selectedModel =
-      "gpt-4o"; // Variabile per il modello selezionato, di default GPT-4O
+      "gpt-4.1"; // Variabile per il modello selezionato, di default GPT-4O
   int? _buttonHoveredIndex; // Variabile per i pulsanti principali
   int? hoveredIndex; // Variabile per le chat salvate
 
@@ -2822,7 +2822,7 @@ class ChatBotPageState extends State<ChatBotPage> {
 
 // Mappa di funzioni: un widget ID -> funzione che crea il Widget corrispondente
   Map<String, ChatWidgetBuilder> get _internalWidgetMap => {
-        "ShowChatVarsWidget": _wrap2((data, onReply) => ShowChatVarsWidgetTool(
+        /*"ShowChatVarsWidget": _wrap2((data, onReply) => ShowChatVarsWidgetTool(
               jsonData: data,
               getVars: () =>
                   _chatVars, // ← mappa che contiene tutte le chatVars
@@ -2830,7 +2830,7 @@ class ChatBotPageState extends State<ChatBotPage> {
         "ChatVarsWidget": _wrap2((data, onReply) => ChatVarsWidgetTool(
               jsonData: data,
               applyPatch: _applyChatVars, // callback definita al § 1.4
-            )),
+            )),*/
         "FileUploadWidget": _wrap2((data, onReply) => FileUploadWidget(
               info: FileUploadInfo.fromJson(data),
               onDownload: () {
@@ -2858,14 +2858,14 @@ class ChatBotPageState extends State<ChatBotPage> {
             ),
         "NButtonWidget": _wrap2(
             (data, onReply) => NButtonWidget(data: data, onReply: onReply)),
-        "RadarChart": _wrap2((data, onReply) =>
+        /*"RadarChart": _wrap2((data, onReply) =>
             RadarChartWidgetTool(jsonData: data, onReply: onReply)),
         "TradingViewAdvancedChart": _wrap2((data, onReply) =>
             TradingViewAdvancedChartWidget(jsonData: data, onReply: onReply)),
         "TradingViewMarketOverview": _wrap2((data, onReply) =>
             TradingViewMarketOverviewWidget(jsonData: data, onReply: onReply)),
         "CustomChartWidget": _wrap2((data, onReply) =>
-            CustomChartWidgetTool(jsonData: data, onReply: onReply)),
+            CustomChartWidgetTool(jsonData: data, onReply: onReply)),*/
         "ChangeChatNameWidget":
             _wrap2((data, onReply) => ChangeChatNameWidgetTool(
                   jsonData: data,
@@ -3294,44 +3294,55 @@ class ChatBotPageState extends State<ChatBotPage> {
 // Funzione di logout
   // Funzione di logout aggiornata
 
-  Future<void> _logout(BuildContext context) async {
-    setState(() {
-      isLoggingOut = true;
-    });
+Future<void> _logout(BuildContext context) async {
+  setState(() {
+    isLoggingOut = true;
+  });
 
-    // 1) Leggi il tipo di login da localStorage
-    final authMethod = html.window.localStorage['auth_method'];
-
-    // 2) Se era "azure", fai prima il logout federato
-    if (authMethod == 'azure') {
-      try {
-        await _apiClient.performAzureLogout();
-        // Se il redirect riesce, il browser verrà spostato su AzureAD → Cognito → SPA.
-        // Non verrà eseguito il codice seguente, perché la pagina cambierà.
-        return;
-      } catch (e) {
-        // Se qualcosa va storto, rimuovi comunque i dati locali e rimaniamo nella UI
-        html.window.localStorage.remove('token');
-        html.window.localStorage.remove('user');
-        html.window.localStorage.remove('auth_method');
-        setState(() {
-          isLoggingOut = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Errore durante il logout federato: $e')),
-        );
-        return;
-      }
-    }
-
-    // 3) Altrimenti (login "standard"), rimuovi semplicemente i token e naviga su /login
+  // Helper: pulizia completa dello storage locale
+  void _clearLocal() {
     html.window.localStorage.remove('token');
     html.window.localStorage.remove('refreshToken');
     html.window.localStorage.remove('user');
     html.window.localStorage.remove('auth_method');
-
-    Navigator.pushReplacementNamed(context, '/login');
+    html.window.localStorage.remove('pending_provider');
   }
+
+  final authMethod = html.window.localStorage['auth_method'];
+
+  try {
+    if (authMethod == 'azure') {
+      // Logout federato Azure: pulisco e poi redirigo a /logout Cognito→Azure→SPA
+      _clearLocal();
+      await _apiClient.performAzureLogout();
+      return; // il browser verrà rediretto
+    }
+
+    if (authMethod == 'google') {
+      // Logout federato Google: pulisco e poi redirigo a /logout Cognito→SPA
+      _clearLocal();
+      await _apiClient.performGoogleLogout();
+      return; // il browser verrà rediretto
+    }
+
+    // Login standard o metodo non noto -> solo pulizia e ritorno alla login
+    _clearLocal();
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, '/login');
+    }
+  } catch (e) {
+    // Se qualcosa va storto (es. rete), resto nella UI ma l’utente è localmente sloggato
+    setState(() {
+      isLoggingOut = false;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Errore durante il logout: $e')),
+      );
+    }
+  }
+}
+
 
   Future<void> _loadChatHistory() async {
     try {

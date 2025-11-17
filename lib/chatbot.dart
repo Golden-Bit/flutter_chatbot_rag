@@ -3261,7 +3261,7 @@ class ChatBotPageState extends State<ChatBotPage> {
         "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://127.0.0.1:8777",
         "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
-        //"chatbot_nlp_api": "http://127.0.0.1:8888"
+        //"chatbot_nlp_api": "http://127.0.0.1:8111"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];
     } catch (e) {
@@ -7284,6 +7284,7 @@ Future<void> _logout(BuildContext context) async {
       int _toolDepth = 0; // { … }
       bool _inQuotes = false;
       bool _escapeNextChar = false;
+      bool _parsingToolJson = false; // NEW: siamo dentro un JSON di tool che può continuare fra chunk
 
       // Funzione locale che processa un chunk di testo
 // -----------------------------------------------------------------------------
@@ -7311,105 +7312,204 @@ Future<void> _logout(BuildContext context) async {
       /// Consuma il chunk e intercetta TUTTI gli eventi tool.{start|end}.
       /// Ritorna `true` se *almeno un carattere* apparteneva ad un JSON-evento
       /// (così il chiamante non lo passerà a `processChunk`).
-      bool _maybeHandleToolEvent(String chunk) {
-        bool somethingHandled = false;
+      /// Consuma il chunk, estrae tutti gli eventi tool.{start|end}
+      /// e restituisce SOLO il testo "normale" (senza JSON) da mostrare.
+      String _handleToolEventsAndStrip(String chunk) {
+        final plain = StringBuffer();
+        int i = 0;
 
-        /*─────────────────────────────────────────────────────────*/
-        void _feed(int codeUnit) {
-          final String c = String.fromCharCode(codeUnit);
-          _toolBuf.write(c);
+        // Helper: estrae il testo da un evento NON-tool
+        String _extractTextFromEvent(Map<String, dynamic> evt) {
+          final data = evt['data'];
+          if (data == null) return '';
 
-          /*── 1. escape & stringhe JSON ─────────────────────────*/
-          if (_escapeNextChar) {
-            _escapeNextChar = false;
-            return;
-          }
-          if (c == r'\') {
-            _escapeNextChar = true;
-            return;
-          }
-          if (c == '"') _inQuotes = !_inQuotes;
-          if (_inQuotes) return;
+          final buf = StringBuffer();
 
-          /*── 2. bilanciamento graffe ───────────────────────────*/
-          if (c == '{') _toolDepth++;
-          if (c == '}') _toolDepth--;
-
-          /*── 3. JSON completo  (_toolDepth == 0) ───────────────*/
-          if (_toolDepth == 0) {
-            final String rawJson = _toolBuf.toString().trim();
-            _toolBuf.clear(); // reset buffer
-
-            if (rawJson.isEmpty) return;
-            Map<String, dynamic>? evt;
-            try {
-              evt = jsonDecode(rawJson) as Map<String, dynamic>;
-            } catch (_) {
-              return; // non era JSON valido
+          void walk(dynamic node) {
+            if (node is Map) {
+              node.forEach((key, value) {
+                // raccogliamo tutti i campi 'text' (tipico dei chunk LLM)
+                if (key == 'text' && value is String) {
+                  buf.write(value);
+                } else {
+                  walk(value);
+                }
+              });
+            } else if (node is List) {
+              for (final v in node) {
+                walk(v);
+              }
             }
-            if (evt == null || evt['event'] == null) return;
+          }
 
-            somethingHandled = true; // → gestito
+          walk(data);
+          return buf.toString();
+        }
 
-            final String runId = evt['run_id'] as String;
-            final String name = evt['name'] as String? ?? 'tool';
+        // Quando abbiamo chiuso un JSON completo in _toolBuf
+        void _handleCompleteToolJson() {
+          final rawJson = _toolBuf.toString().trim();
+          _toolBuf.clear();
 
-            switch (evt['event']) {
-              /*──────────── on_tool_start ────────────*/
-              case 'on_tool_start':
-                // stub già creato? esci
-                if (_inFlightTools.contains(runId)) break;
+          if (rawJson.isEmpty) return;
 
-                _inFlightTools.add(runId);
+          Map<String, dynamic>? evt;
+          try {
+            evt = jsonDecode(rawJson) as Map<String, dynamic>;
+          } catch (_) {
+            // Non era JSON valido → non lo rimettiamo nel testo
+            return;
+          }
+          if (evt == null || evt['event'] == null) return;
 
-                final String placeholder = "[TOOL_PLACEHOLDER_$runId]";
+          final String eventName = evt['event'] as String;
+          final String runId = (evt['run_id'] ?? '') as String;
+          final String name = evt['name'] as String? ?? 'tool';
 
-                _toolEvents[runId] = {
-                  'name': name,
-                  'input': evt['data']?['input'] ?? {},
-                  'isRunning': true,
-                  'placeholder': placeholder,
-                };
+          switch (eventName) {
+            /*──────────── on_tool_start ────────────*/
+            case 'on_tool_start':
+              if (_inFlightTools.contains(runId)) break;
 
-                // ① placeholder nel testo visibile
-                displayOutput.write(placeholder);
+              _inFlightTools.add(runId);
 
-                // ② card provvisoria
-                (messages.last['widgetDataList'] ??= <dynamic>[]).add({
-                  "_id": runId,
-                  "widgetId": "ToolEventWidget",
-                  "jsonData": _toolEvents[runId],
-                  "placeholder": placeholder,
-                });
+              final String placeholder = "[TOOL_PLACEHOLDER_$runId]";
 
-                // ③ refresh
-                setState(
-                    () => messages.last['content'] = displayOutput.toString());
-                break;
+              _toolEvents[runId] = {
+                'name': name,
+                'input': evt['data']?['input'] ?? {},
+                'isRunning': true,
+                'placeholder': placeholder,
+              };
 
-              /*──────────── on_tool_end ──────────────*/
-              case 'on_tool_end':
-                final existing = _toolEvents[runId];
-                if (existing == null) break;
+              // ① placeholder nel testo visibile
+              displayOutput.write(placeholder);
 
-                existing['output'] = evt['data']?['output'];
-                existing['isRunning'] = false;
+              // ② card provvisoria
+              (messages.last['widgetDataList'] ??= <dynamic>[]).add({
+                "_id": runId,
+                "widgetId": "ToolEventWidget",
+                "jsonData": _toolEvents[runId],
+                "placeholder": placeholder,
+              });
 
-                // invalida cache → ricrea la card con output
-                _widgetCache.remove(runId);
-                setState(() {});
-                break;
+              // ③ refresh
+              setState(() {
+                messages.last['content'] = displayOutput.toString();
+              });
+              break;
+
+            /*──────────── on_tool_end ──────────────*/
+            case 'on_tool_end':
+              final existing = _toolEvents[runId];
+              if (existing == null) break;
+
+              existing['output'] = evt['data']?['output'];
+              existing['isRunning'] = false;
+
+              _widgetCache.remove(runId);
+              setState(() {});
+              break;
+
+            /*──────────── altri eventi (LLM, chain, ecc.) ─────────────*/
+            default:
+              // Qui proviamo a estrarre il testo dal JSON e aggiungerlo al buffer
+              final txt = _extractTextFromEvent(evt);
+              if (txt.isNotEmpty) {
+                plain.write(txt);
+              }
+          }
+        }
+
+        // 1) Se eravamo già dentro un JSON dal chunk precedente,
+        //    continuiamo a leggerlo finché non chiude.
+        if (_parsingToolJson) {
+          for (; i < chunk.length && _parsingToolJson; i++) {
+            final String c = chunk[i];
+            _toolBuf.write(c);
+
+            if (_escapeNextChar) {
+              _escapeNextChar = false;
+              continue;
+            }
+            if (c == r'\') {
+              _escapeNextChar = true;
+              continue;
+            }
+            if (c == '"') {
+              _inQuotes = !_inQuotes;
+            }
+            if (_inQuotes) continue;
+
+            if (c == '{') _toolDepth++;
+            if (c == '}') _toolDepth--;
+
+            if (_toolDepth == 0) {
+              _parsingToolJson = false;
+              _handleCompleteToolJson();
+              i++; // oltre la '}'
+              break;
             }
           }
         }
 
-        /*── 4. feed carattere per carattere ─────────────────────*/
-        for (final cu in chunk.codeUnits) {
-          _feed(cu);
+        // 2) Scansiona il resto del chunk alla ricerca di nuovi JSON di evento
+        while (i < chunk.length) {
+          // Cerca l'inizio di un JSON evento: {"event":
+          final int start = chunk.indexOf('{"event":', i);
+          if (start == -1) {
+            // Nessun altro JSON nel resto del chunk → tutto testo normale
+            plain.write(chunk.substring(i));
+            break;
+          }
+
+          // Testo "normale" prima del JSON
+          if (start > i) {
+            plain.write(chunk.substring(i, start));
+          }
+
+          // Inizia un nuovo JSON di evento
+          _parsingToolJson = true;
+          _toolBuf.clear();
+          _toolDepth = 0;
+          _inQuotes = false;
+          _escapeNextChar = false;
+
+          i = start;
+          for (; i < chunk.length && _parsingToolJson; i++) {
+            final String c = chunk[i];
+            _toolBuf.write(c);
+
+            if (_escapeNextChar) {
+              _escapeNextChar = false;
+              continue;
+            }
+            if (c == r'\') {
+              _escapeNextChar = true;
+              continue;
+            }
+            if (c == '"') {
+              _inQuotes = !_inQuotes;
+            }
+            if (_inQuotes) continue;
+
+            if (c == '{') _toolDepth++;
+            if (c == '}') _toolDepth--;
+
+            if (_toolDepth == 0) {
+              _parsingToolJson = false;
+              _handleCompleteToolJson();
+              i++; // oltre la '}'
+              break;
+            }
+          }
+          // Se _parsingToolJson è ancora true alla fine del for,
+          // il JSON continua nel prossimo chunk → non aggiungiamo altro a plain.
         }
 
-        return somethingHandled;
+        return plain.toString();
       }
+
 
 // -----------------------------------------------------------------------------
       void processChunk(String chunk) {
@@ -7577,12 +7677,14 @@ Future<void> _logout(BuildContext context) async {
               _scheduleCreditsRefresh(); // NON blocca lo stream
             }
 
-            // Processa il chunk (token per token)
-            final handled = _maybeHandleToolEvent(chunkString);
+            // 1) gestisci EVENTI TOOL e rimuovi i JSON dal chunk
+            final cleaned = _handleToolEventsAndStrip(chunkString);
 
-            if (!handled) {
-              processChunk(chunkString);
+            // 2) se resta del testo "normale", processalo come prima
+            if (cleaned.isNotEmpty) {
+              processChunk(cleaned);
             }
+
 
             // Continua a leggere
             readChunk();

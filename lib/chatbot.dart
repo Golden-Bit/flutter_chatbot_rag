@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:io';
+// ignore: avoid_web_libraries_in_flutter
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'package:boxed_ai/services/lang_auto.dart';
@@ -4882,41 +4883,50 @@ Future<void> _logout(BuildContext context) async {
                                         // ❷ spinge SEMPRE l’icona del menu all’estrema destra
                                         const Spacer(),
                                         // Icona di espansione/contrazione a destra
-                                        IconButton(
-                                          icon: _appReady
-                                              ? SvgPicture.network(
-                                                  'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
-                                                  width: 24,
-                                                  height: 24,
-                                                  color: Colors.grey)
-                                              : const SizedBox(
-                                                  width: 24,
-                                                  height: 24,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                          strokeWidth: 2)),
-                                          onPressed: _appReady
-                                              ? () {
-                                                  setState(() {
-                                                    isExpanded = !isExpanded;
-                                                    if (isExpanded) {
-                                                      sidebarWidth =
-                                                          MediaQuery.of(context)
-                                                                      .size
-                                                                      .width <
-                                                                  600
-                                                              ? MediaQuery.of(
-                                                                      context)
-                                                                  .size
-                                                                  .width
-                                                              : 300.0;
-                                                    } else {
-                                                      sidebarWidth = 0.0;
-                                                    }
-                                                  });
-                                                }
-                                              : () {},
-                                        ),
+Semantics(
+  // LABEL UNIVOCA PER AUTOMAZIONE / ACCESSIBILITÀ
+  label: 'sidebar-toggle-1',
+  button: true,
+  child: IconButton(
+    // KEY STABILE PER IDENTIFICARE IL PULSANTE NEI TEST
+    key: const ValueKey('sidebar-toggle-1'),
+
+    // TOOLTIP/ARIA-LABEL USABILE DA PLAYWRIGHT
+    tooltip: 'chiudi sidebar',
+
+    icon: _appReady
+        ? SvgPicture.network(
+            'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey,
+            // LABEL DELL'ICONA
+            semanticsLabel: 'sidebar-toggle-icon-1',
+          )
+        : const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+
+    onPressed: _appReady
+        ? () {
+            setState(() {
+              isExpanded = !isExpanded;
+              if (isExpanded) {
+                sidebarWidth =
+                    MediaQuery.of(context).size.width < 600
+                        ? MediaQuery.of(context).size.width
+                        : 300.0;
+              } else {
+                sidebarWidth = 0.0;
+              }
+            });
+          }
+        : () {},
+  ),
+)
+
                                       ],
                                     ),
                                   ),
@@ -5498,37 +5508,47 @@ Future<void> _logout(BuildContext context) async {
                                 children: [
                                   if (sidebarWidth == 0.0) ...[
                                     if (widget.hasSidebar)
-                                      IconButton(
-                                        icon: _appReady
-                                            ? SvgPicture.network(
-                                                'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
-                                                width: 24,
-                                                height: 24,
-                                                color: Colors.grey)
-                                            : const SizedBox(
-                                                width: 24,
-                                                height: 24,
-                                                child: CircularProgressIndicator(
-                                                    strokeWidth:
-                                                        2)), //const Icon(Icons.menu,
-                                        //color: Colors.black),
-                                        onPressed: _appReady
-                                            ? () {
-                                                setState(() {
-                                                  isExpanded = true;
-                                                  sidebarWidth = MediaQuery.of(
-                                                                  context)
-                                                              .size
-                                                              .width <
-                                                          600
-                                                      ? MediaQuery.of(context)
-                                                          .size
-                                                          .width
-                                                      : 300.0;
-                                                });
-                                              }
-                                            : () {},
-                                      ),
+Semantics(
+  // LABEL UNIVOCA PER AUTOMAZIONE / ACCESSIBILITÀ
+  label: 'sidebar-toggle-2',
+  button: true,
+  child: IconButton(
+    // KEY STABILE PER I TEST E2E
+    key: const ValueKey('sidebar-toggle-2'),
+
+    // TOOLTIP / ARIA-LABEL USABILE DA PLAYWRIGHT
+    tooltip: 'apri sidebar',
+
+    icon: _appReady
+        ? SvgPicture.network(
+            'https://raw.githubusercontent.com/Golden-Bit/boxed-ai-assets/refs/heads/main/icons/Element3.svg',
+            width: 24,
+            height: 24,
+            color: Colors.grey,
+            // LABEL DELL'ICONA PER ACCESSIBILITÀ / AUTOMAZIONE
+            semanticsLabel: 'sidebar-toggle-icon-2',
+          )
+        : const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+            ),
+          ), //const Icon(Icons.menu,
+          //color: Colors.black),
+
+    onPressed: _appReady
+        ? () {
+            setState(() {
+              isExpanded = true;
+              sidebarWidth = MediaQuery.of(context).size.width < 600
+                  ? MediaQuery.of(context).size.width
+                  : 300.0;
+            });
+          }
+        : () {},
+  ),
+),
                                     const SizedBox(width: 8),
                                     if (widget.showTopBarLogo) fullLogo,
                                   ],

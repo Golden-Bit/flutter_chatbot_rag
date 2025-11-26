@@ -1,6 +1,5 @@
 import 'dart:html' as html;
-import 'dart:ui' as ui;
-
+import 'dart:ui' as ui;import 'dart:ui_web' as ui;
 import 'package:flutter/widgets.dart';
 
 /// Tipi di serie supportati in Lightweight Charts v4.

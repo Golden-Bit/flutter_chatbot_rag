@@ -1797,6 +1797,474 @@ String get edit_knowledge_box {
         return 'Stop reading';
     }
   }
+
+    // ========= Usage / Analisi utilizzo =========
+
+  String get usage_analysis_title {
+    switch (language) {
+      case Language.italian:
+        return 'Analisi utilizzo';
+      case Language.spanish:
+        return 'Análisis de uso';
+      case Language.english:
+      default:
+        return 'Usage analysis';
+    }
+  }
+
+  String get usage_refresh {
+    switch (language) {
+      case Language.italian:
+        return 'Aggiorna';
+      case Language.spanish:
+        return 'Actualizar';
+      case Language.english:
+      default:
+        return 'Refresh';
+    }
+  }
+
+  // Stato attività
+  String get usage_status_pending {
+    switch (language) {
+      case Language.italian:
+        return 'In attesa';
+      case Language.spanish:
+        return 'En espera';
+      case Language.english:
+      default:
+        return 'Pending';
+    }
+  }
+
+  String get usage_status_running {
+    switch (language) {
+      case Language.italian:
+        return 'In esecuzione';
+      case Language.spanish:
+        return 'En ejecución';
+      case Language.english:
+      default:
+        return 'Running';
+    }
+  }
+
+  String get usage_status_completed {
+    switch (language) {
+      case Language.italian:
+        return 'Completata';
+      case Language.spanish:
+        return 'Completada';
+      case Language.english:
+      default:
+        return 'Completed';
+    }
+  }
+
+  String get usage_status_error {
+    switch (language) {
+      case Language.italian:
+        return 'Errore';
+      case Language.spanish:
+        return 'Error';
+      case Language.english:
+      default:
+        return 'Error';
+    }
+  }
+
+  String get usage_status_unknown {
+    switch (language) {
+      case Language.italian:
+        return 'Sconosciuto';
+      case Language.spanish:
+        return 'Desconocido';
+      case Language.english:
+      default:
+        return 'Unknown';
+    }
+  }
+
+  // Tipo attività
+  String get usage_type_upload {
+    switch (language) {
+      case Language.italian:
+        return 'Upload';
+      case Language.spanish:
+        return 'Subida';
+      case Language.english:
+      default:
+        return 'Upload';
+    }
+  }
+
+  String get usage_type_chat {
+    switch (language) {
+      case Language.italian:
+        return 'Chat';
+      case Language.spanish:
+        return 'Chat';
+      case Language.english:
+      default:
+        return 'Chat';
+    }
+  }
+
+  String get usage_type_unknown {
+    switch (language) {
+      case Language.italian:
+        return 'Sconosciuto';
+      case Language.spanish:
+        return 'Desconocido';
+      case Language.english:
+      default:
+        return 'Unknown';
+    }
+  }
+
+  // Filtri
+  String get usage_filter_from {
+    switch (language) {
+      case Language.italian:
+        return 'Dal';
+      case Language.spanish:
+        return 'Desde';
+      case Language.english:
+      default:
+        return 'From';
+    }
+  }
+
+  String get usage_filter_to {
+    switch (language) {
+      case Language.italian:
+        return 'Al';
+      case Language.spanish:
+        return 'Hasta';
+      case Language.english:
+      default:
+        return 'To';
+    }
+  }
+
+  String get usage_filter_any {
+    switch (language) {
+      case Language.italian:
+        return 'Qualsiasi';
+      case Language.spanish:
+        return 'Cualquiera';
+      case Language.english:
+      default:
+        return 'Any';
+    }
+  }
+
+  String get usage_filter_type {
+    switch (language) {
+      case Language.italian:
+        return 'Tipo';
+      case Language.spanish:
+        return 'Tipo';
+      case Language.english:
+      default:
+        return 'Type';
+    }
+  }
+
+  String get usage_filter_status {
+    switch (language) {
+      case Language.italian:
+        return 'Stato';
+      case Language.spanish:
+        return 'Estado';
+      case Language.english:
+      default:
+        return 'Status';
+    }
+  }
+
+  String get usage_filter_select_placeholder {
+    switch (language) {
+      case Language.italian:
+        return 'Seleziona';
+      case Language.spanish:
+        return 'Seleccionar';
+      case Language.english:
+      default:
+        return 'Select';
+    }
+  }
+
+  // Campo ricerca
+  String get usage_search_label {
+    switch (language) {
+      case Language.italian:
+        return 'Cerca';
+      case Language.spanish:
+        return 'Buscar';
+      case Language.english:
+      default:
+        return 'Search';
+    }
+  }
+
+  String get usage_search_hint {
+    switch (language) {
+      case Language.italian:
+        return 'Testo in payload/preview/metadata';
+      case Language.spanish:
+        return 'Texto en payload/preview/metadata';
+      case Language.english:
+      default:
+        return 'Text in payload/preview/metadata';
+    }
+  }
+
+  String get usage_search_clear {
+    switch (language) {
+      case Language.italian:
+        return 'Pulisci';
+      case Language.spanish:
+        return 'Limpiar';
+      case Language.english:
+      default:
+        return 'Clear';
+    }
+  }
+
+  // Pulsanti filtri
+  String get usage_button_apply {
+    switch (language) {
+      case Language.italian:
+        return 'Applica';
+      case Language.spanish:
+        return 'Aplicar';
+      case Language.english:
+      default:
+        return 'Apply';
+    }
+  }
+
+  String get usage_button_reset {
+    switch (language) {
+      case Language.italian:
+        return 'Reset';
+      case Language.spanish:
+        return 'Restablecer';
+      case Language.english:
+      default:
+        return 'Reset';
+    }
+  }
+
+  // Nessuna attività
+  String get usage_no_activities {
+    switch (language) {
+      case Language.italian:
+        return 'Nessuna attività trovata nel periodo selezionato.';
+      case Language.spanish:
+        return 'No se encontraron actividades en el período seleccionado.';
+      case Language.english:
+      default:
+        return 'No activities found in the selected period.';
+    }
+  }
+
+  // Footer
+  String get usage_period_total_prefix {
+    switch (language) {
+      case Language.italian:
+        return 'Totale stimato periodo:';
+      case Language.spanish:
+        return 'Total estimado del período:';
+      case Language.english:
+      default:
+        return 'Estimated total for the period:';
+    }
+  }
+
+  String get usage_period_total_suffix_activities {
+    switch (language) {
+      case Language.italian:
+        return 'attività';
+      case Language.spanish:
+        return 'actividades';
+      case Language.english:
+      default:
+        return 'activities';
+    }
+  }
+
+  // Errori
+  String get usage_error_date_prefix {
+    switch (language) {
+      case Language.italian:
+        return 'Errore selezione data:';
+      case Language.spanish:
+        return 'Error al seleccionar fecha:';
+      case Language.english:
+      default:
+        return 'Error selecting date:';
+    }
+  }
+
+  String get usage_error_load_prefix {
+    switch (language) {
+      case Language.italian:
+        return 'Errore nel caricamento:';
+      case Language.spanish:
+        return 'Error al cargar:';
+      case Language.english:
+      default:
+        return 'Error loading:';
+    }
+  }
+
+  // Dettaglio attività
+  String get usage_detail_title {
+    switch (language) {
+      case Language.italian:
+        return 'Dettaglio attività';
+      case Language.spanish:
+        return 'Detalle de la actividad';
+      case Language.english:
+      default:
+        return 'Activity details';
+    }
+  }
+
+  String get usage_detail_activity_id {
+    switch (language) {
+      case Language.italian:
+        return 'ID attività';
+      case Language.spanish:
+        return 'ID de la actividad';
+      case Language.english:
+      default:
+        return 'Activity ID';
+    }
+  }
+
+  String get usage_detail_user {
+    switch (language) {
+      case Language.italian:
+        return 'Utente';
+      case Language.spanish:
+        return 'Usuario';
+      case Language.english:
+      default:
+        return 'User';
+    }
+  }
+
+  String get usage_detail_type {
+    switch (language) {
+      case Language.italian:
+        return 'Tipo';
+      case Language.spanish:
+        return 'Tipo';
+      case Language.english:
+      default:
+        return 'Type';
+    }
+  }
+
+  String get usage_detail_status {
+    switch (language) {
+      case Language.italian:
+        return 'Stato';
+      case Language.spanish:
+        return 'Estado';
+      case Language.english:
+      default:
+        return 'Status';
+    }
+  }
+
+  String get usage_detail_cost {
+    switch (language) {
+      case Language.italian:
+        return 'Costo stimato';
+      case Language.spanish:
+        return 'Costo estimado';
+      case Language.english:
+      default:
+        return 'Estimated cost';
+    }
+  }
+
+  String get usage_detail_start {
+    switch (language) {
+      case Language.italian:
+        return 'Inizio';
+      case Language.spanish:
+        return 'Inicio';
+      case Language.english:
+      default:
+        return 'Start';
+    }
+  }
+
+  String get usage_detail_end {
+    switch (language) {
+      case Language.italian:
+        return 'Fine';
+      case Language.spanish:
+        return 'Fin';
+      case Language.english:
+      default:
+        return 'End';
+    }
+  }
+
+  String get usage_detail_metadata {
+    switch (language) {
+      case Language.italian:
+        return 'Metadata';
+      case Language.spanish:
+        return 'Metadata';
+      case Language.english:
+      default:
+        return 'Metadata';
+    }
+  }
+
+  String get usage_detail_payload {
+    switch (language) {
+      case Language.italian:
+        return 'Payload';
+      case Language.spanish:
+        return 'Payload';
+      case Language.english:
+      default:
+        return 'Payload';
+    }
+  }
+
+  String get usage_detail_response_preview {
+    switch (language) {
+      case Language.italian:
+        return 'Anteprima risposta';
+      case Language.spanish:
+        return 'Vista previa de la respuesta';
+      case Language.english:
+      default:
+        return 'Response preview';
+    }
+  }
+
+String get view_content {
+  switch (language) {
+    case Language.italian:
+      return 'Visualizza';
+    case Language.spanish:
+      return 'Ver';
+    case Language.english:
+    default:
+      return 'View';
+  }
+}
+
 }
 
 

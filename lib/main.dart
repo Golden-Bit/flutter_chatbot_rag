@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
     Locale('en', 'US'),
     Locale('es', 'ES'),
   ],
-      title: 'Boxed-AI',
+      title: 'Boxed-AI', //'Boxed-AI',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         textTheme: GoogleFonts.interTextTheme().copyWith(

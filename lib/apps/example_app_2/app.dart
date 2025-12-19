@@ -146,6 +146,7 @@ class _ChatPanelDemoPageState extends State<ChatPanelDemoPage> {
         user: widget.user,
         token: widget.token,
         leftChild: _leftChildOf(_current),
+        
       ),
     );
   }

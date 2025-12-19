@@ -2044,34 +2044,45 @@ void _uploadFileForContextAsync(String contextPath) async {
                       itemCount: _filteredContexts.length +
                           1, // Aggiungiamo una card in più
                       itemBuilder: (context, index) {
-                        if (index == 0) {
-                          return GestureDetector(
-                            onTap:
-                                _showCreateContextDialog, // Apre il dialog per creare il contesto
-                            child: Card(
-                              color: Colors.blue, // Sfondo grigio
-                              elevation: 6,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  localizations.create_new_knowledge_box,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white, // Testo bianco
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }
+if (index == 0) {
+  const createSemId = 'kbox-create'; // id stabile per Playwright
+
+  return Semantics(
+    label: createSemId,
+    button: true,
+    child: Tooltip(
+      message: createSemId,
+      child: InkWell(
+        onTap: _showCreateContextDialog,
+        borderRadius: BorderRadius.circular(8),
+        child: Card(
+          color: Colors.blue, // identico a prima
+          elevation: 6,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Center(
+            child: Text(
+              localizations.create_new_knowledge_box,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white, // identico a prima
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 
 // Dopo questa parte, lascia il resto invariato
                         final contextMetadata = _filteredContexts[index -
                             1]; // Offset perché il primo è la scheda grigia
-
+final kboxId = contextMetadata.path;          // id stabile della KB
+final menuSemId = 'kbox-menu-$kboxId';        // id semantic per Playwright
                         Map<String, dynamic>? metadata =
                             contextMetadata.customMetadata;
                         List<Widget> metadataWidgets = [];
@@ -2196,50 +2207,82 @@ void _uploadFileForContextAsync(String contextPath) async {
                                 ),
                               ),
                             ), // MENU ⋮ IN BASSO A DESTRA
-                            Positioned(
-                              bottom: 8,
-                              right: 8,
-                              child: Theme(
-                                data: Theme.of(context).copyWith(
-                                  popupMenuTheme: PopupMenuThemeData(
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(16)),
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                child: PopupMenuButton<String>(
-                                  tooltip: 'Azioni',
-                                  offset: const Offset(0,
-                                      -8), // apre leggermente sopra il bottone
-                                  onSelected: (value) {
-                                    if (value == 'delete') {
-                                      _deleteContext(contextMetadata.path);
-                                    } else if (value == 'upload') {
-                                      _uploadFileForContextAsync(
-                                          contextMetadata.path);
-                                    } else if (value == 'edit') {
-                                      _showEditContextDialog(contextMetadata);
-                                    }
-                                  },
-                                  itemBuilder: (BuildContext context) =>
-                                      <PopupMenuEntry<String>>[
-                                    PopupMenuItem<String>(
-                                      value: 'upload',
-                                      child: Text(localizations.upload_file),
-                                    ),
-                                    PopupMenuItem<String>(
-                                      value: 'edit',
-                                      child: Text(localizations.edit),
-                                    ),
-                                    PopupMenuItem<String>(
-                                      value: 'delete',
-                                      child: Text(localizations.delete),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
+Positioned(
+  bottom: 8,
+  right: 8,
+  child: Theme(
+    data: Theme.of(context).copyWith(
+      popupMenuTheme: PopupMenuThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        color: Colors.white,
+      ),
+    ),
+    child: Semantics(
+      // ✅ Identificatore accessibile (Playwright: getByRole(..., {name: ...}))
+      label: menuSemId,
+      button: true,
+      child: PopupMenuButton<String>(
+        // utile lato Flutter test, ma su web conta soprattutto Semantics/tooltip
+        key: ValueKey(menuSemId),
+
+        // ✅ spesso finisce nel DOM come aria-label/tooltip a seconda del renderer
+        tooltip: menuSemId,
+
+        // ✅ icona tre pallini esplicita (non dipende dal default)
+        icon: const Icon(Icons.more_vert, color: Colors.black),
+
+        offset: const Offset(0, -8), // apre leggermente sopra il bottone
+
+        onSelected: (value) {
+          if (value == 'view') {
+            // ✅ stessa identica azione del tap sulla card
+            _showFilesForContextDialog(contextMetadata.path);
+          } else if (value == 'upload') {
+            _uploadFileForContextAsync(contextMetadata.path);
+          } else if (value == 'edit') {
+            _showEditContextDialog(contextMetadata);
+          } else if (value == 'delete') {
+            _deleteContext(contextMetadata.path);
+          }
+        },
+
+        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            value: 'view',
+            child: Semantics(
+              label: '$menuSemId:view',
+              child: Text(localizations.view_content),
+            ),
+          ),
+          PopupMenuItem<String>(
+            value: 'upload',
+            child: Semantics(
+              label: '$menuSemId:upload',
+              child: Text(localizations.upload_file),
+            ),
+          ),
+          PopupMenuItem<String>(
+            value: 'edit',
+            child: Semantics(
+              label: '$menuSemId:edit',
+              child: Text(localizations.edit),
+            ),
+          ),
+          PopupMenuItem<String>(
+            value: 'delete',
+            child: Semantics(
+              label: '$menuSemId:delete',
+              child: Text(localizations.delete),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
+
                           ]),
                         );
                       },

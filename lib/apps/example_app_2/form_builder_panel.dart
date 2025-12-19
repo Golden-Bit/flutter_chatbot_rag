@@ -36,6 +36,31 @@ class FillCommand {
   final int fieldDelayMs; // ritardo tra campi
 }
 
+num _readNum(dynamic v, num def) {
+  if (v == null) return def;
+  if (v is num) return v;
+  if (v is String) {
+    final parsed = num.tryParse(v.trim());
+    if (parsed != null) return parsed;
+  }
+  return def;
+}
+
+bool _readBool(dynamic v, bool def) {
+  if (v == null) return def;
+  if (v is bool) return v;
+  if (v is String) {
+    final s = v.toLowerCase().trim();
+    if (s == 'true' || s == '1' || s == 'yes' || s == 'si' || s == 'sì') {
+      return true;
+    }
+    if (s == 'false' || s == '0' || s == 'no') {
+      return false;
+    }
+  }
+  return def;
+}
+
 /// =======================================================
 /// Modello di schema form (campi, pulsanti, tema)
 /// =======================================================
@@ -464,9 +489,14 @@ class _FillFormFieldsWidgetState extends State<FillFormFieldsWidget> {
     _values = vals ?? {};
     _error = err;
 
-    _animate = (widget.jsonData['animate'] as bool?) ?? true;
-    _charDelay = ((widget.jsonData['char_delay_ms'] as num?)?.toInt() ?? 18).clamp(1, 200);
-    _fieldDelay = ((widget.jsonData['field_delay_ms'] as num?)?.toInt() ?? 60).clamp(0, 800);
+_animate    = _readBool(widget.jsonData['animate'], true);
+_charDelay  = _readNum(widget.jsonData['char_delay_ms'], 18)
+                .clamp(1, 200)
+                .toInt();
+_fieldDelay = _readNum(widget.jsonData['field_delay_ms'], 60)
+                .clamp(0, 800)
+                .toInt();
+
 
     if (firstTime && _values.isNotEmpty && err == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

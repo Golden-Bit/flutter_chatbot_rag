@@ -19,10 +19,18 @@ class GeneralSettingsContent extends StatefulWidget {
 }
 
 class _GeneralSettingsContentState extends State<GeneralSettingsContent> {
-  String _theme = 'Sistema';
-  bool _showCode = true;
-  bool _showFollowUp = true;
-  String _language = 'Rilevamento automatico';
+  // —————————————————— STATO COMMENTATO (TEMA / TOGGLE / LINGUA) ——————————————————
+  //
+  // Tutte le seguenti variabili di stato sono state commentate
+  // per rendere non visibili:
+  // 1) Il selettore di TEMA
+  // 2) I due TOGGLE
+  // 3) La selezione LINGUA con RILEVAMENTO AUTOMATICO
+
+  // String _theme = 'Sistema';
+  // bool _showCode = true;
+  // bool _showFollowUp = true;
+  // String _language = 'Rilevamento automatico';
 
   @override
   Widget build(BuildContext context) {
@@ -31,42 +39,42 @@ class _GeneralSettingsContentState extends State<GeneralSettingsContent> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ——————————————————— Tema ———————————————————
-          _buildLabel('Tema'),
-          _buildDropdown(
-            value: _theme,
-            items: ['Chiaro', 'Scuro', 'Sistema'],
-            onChanged: (v) => setState(() => _theme = v!),
-          ),
-          const SizedBox(height: 24),
+          // ——————————————————— Tema (COMMENTATO, NON VISIBILE) ———————————————————
+          // _buildLabel('Tema'),
+          // _buildDropdown(
+          //   value: _theme,
+          //   items: ['Chiaro', 'Scuro', 'Sistema'],
+          //   onChanged: (v) => setState(() => _theme = v!),
+          // ),
+          // const SizedBox(height: 24),
 
-          // ——————————————————— Switch vari ———————————————————
-          _buildSwitchRow(
-            'Mostra sempre il codice quando usi lo strumento di analisi dei dati',
-            _showCode,
-            (v) => setState(() => _showCode = v),
-          ),
-          const SizedBox(height: 12),
-          _buildSwitchRow(
-            'Mostra i suggerimenti di follow‑up nelle chat',
-            _showFollowUp,
-            (v) => setState(() => _showFollowUp = v),
-          ),
-          const SizedBox(height: 24),
+          // ——————————————————— Switch vari (COMMENTATI, NON VISIBILI) ———————————————————
+          // _buildSwitchRow(
+          //   'Mostra sempre il codice quando usi lo strumento di analisi dei dati',
+          //   _showCode,
+          //   (v) => setState(() => _showCode = v),
+          // ),
+          // const SizedBox(height: 12),
+          // _buildSwitchRow(
+          //   'Mostra i suggerimenti di follow-up nelle chat',
+          //   _showFollowUp,
+          //   (v) => setState(() => _showFollowUp = v),
+          // ),
+          // const SizedBox(height: 24),
 
-          // ——————————————————— Lingua ———————————————————
-          _buildLabel('Lingua'),
-          _buildDropdown(
-            value: _language,
-            items: [
-              'Italiano',
-              'Inglese (US)',
-              'Inglese (UK)',
-              'Rilevamento automatico'
-            ],
-            onChanged: (v) => setState(() => _language = v!),
-          ),
-          const SizedBox(height: 24),
+          // ——————————————————— Lingua (COMMENTATA, NON VISIBILE) ———————————————————
+          // _buildLabel('Lingua'),
+          // _buildDropdown(
+          //   value: _language,
+          //   items: [
+          //     'Italiano',
+          //     'Inglese (US)',
+          //     'Inglese (UK)',
+          //     'Rilevamento automatico'
+          //   ],
+          //   onChanged: (v) => setState(() => _language = v!),
+          // ),
+          // const SizedBox(height: 24),
 
           // ——————————————————— Gestione archivio ———————————————————
           _buildActionRow(

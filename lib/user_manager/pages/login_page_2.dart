@@ -131,7 +131,7 @@ void _setError(String msg) => _errorMessage = msg;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => ChatBotPage(user: user, token: token), // //HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (context) => ChatBotPage(user: user, token: token), //ChatPanelDemoPage(user: user, token: token), // //HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
       } catch (e) {

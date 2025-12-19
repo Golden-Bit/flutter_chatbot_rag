@@ -47,3 +47,4 @@ dynamic assistantAvatar = CircleAvatar(
 
 //String assistantName = "ENAC-Assistant";
 String assistantName = "BoxedAI-Assistant";
+//String assistantName = "Assistant";

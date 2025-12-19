@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:boxed_ai/context_api_sdk.dart';
+import 'package:boxed_ai/utilities/localization.dart'; // ⬅️ IMPORT LOCALIZZAZIONI
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -22,21 +23,29 @@ Color _statusColor(ActivityStatusDart s) {
   }
 }
 
-String _statusLabel(ActivityStatusDart s) {
+String _statusLabel(ActivityStatusDart s, AppLocalizations loc) {
   switch (s) {
-    case ActivityStatusDart.pending:   return 'In attesa';
-    case ActivityStatusDart.running:   return 'In esecuzione';
-    case ActivityStatusDart.completed: return 'Completata';
-    case ActivityStatusDart.error:     return 'Errore';
-    default:                           return 'Sconosciuto';
+    case ActivityStatusDart.pending:
+      return loc.usage_status_pending;
+    case ActivityStatusDart.running:
+      return loc.usage_status_running;
+    case ActivityStatusDart.completed:
+      return loc.usage_status_completed;
+    case ActivityStatusDart.error:
+      return loc.usage_status_error;
+    default:
+      return loc.usage_status_unknown;
   }
 }
 
-String _typeLabel(ActivityTypeDart t) {
+String _typeLabel(ActivityTypeDart t, AppLocalizations loc) {
   switch (t) {
-    case ActivityTypeDart.uploadAsync:  return 'Upload';
-    case ActivityTypeDart.streamEvents: return 'Chat';
-    default:                            return 'Sconosciuto';
+    case ActivityTypeDart.uploadAsync:
+      return loc.usage_type_upload;
+    case ActivityTypeDart.streamEvents:
+      return loc.usage_type_chat;
+    default:
+      return loc.usage_type_unknown;
   }
 }
 
@@ -138,6 +147,7 @@ class _UsageDialogState extends State<UsageDialog> {
   // ========== DatePicker SAFE ==========
   // useRootNavigator: true per evitare l’overlay “grigio” bloccato
   Future<void> _pickDate({required bool isStart}) async {
+    final loc = LocalizationProvider.of(context);
     try {
       final firstDate = DateTime(2023, 1, 1);
       final lastDate  = DateTime.now();
@@ -186,7 +196,7 @@ class _UsageDialogState extends State<UsageDialog> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Errore selezione data: $e');
+      setState(() => _error = '${loc.usage_error_date_prefix} $e');
     }
   }
 
@@ -200,6 +210,8 @@ class _UsageDialogState extends State<UsageDialog> {
 
   Future<void> _fetch({bool reset = false}) async {
     if (_loading) return;
+
+    final loc = LocalizationProvider.of(context);
 
     setState(() {
       _loading = true;
@@ -240,7 +252,8 @@ class _UsageDialogState extends State<UsageDialog> {
         _hasMore    = _items.length < resp.total;
       });
     } catch (e) {
-      setState(() => _error = 'Errore nel caricamento: $e');
+      if (!mounted) return;
+      setState(() => _error = '${loc.usage_error_load_prefix} $e');
     } finally {
       if (!mounted) return;
       setState(() {
@@ -264,6 +277,8 @@ class _UsageDialogState extends State<UsageDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = LocalizationProvider.of(context);
+
     // Limitiamo SEMPRE l’altezza massima del dialog al 90% dello schermo:
     final media = MediaQuery.of(context);
     final maxDialogHeight = media.size.height * 0.9;
@@ -289,9 +304,9 @@ class _UsageDialogState extends State<UsageDialog> {
                 mainAxisSize: MainAxisSize.max, // occupa tutta l’altezza disponibile
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildTitle(context),
+                  _buildTitle(context, loc),
                   const SizedBox(height: 16),
-                  _buildFilters(context, isPhone: isPhone),
+                  _buildFilters(context, isPhone: isPhone, loc: loc),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     _ErrorBanner(text: _error!),
@@ -300,7 +315,7 @@ class _UsageDialogState extends State<UsageDialog> {
 
                   // ⬇️ La LISTA ora usa Expanded: prende tutto lo spazio residuo e scorre
                   Expanded(
-                    child: _buildListArea(context, isPhone: isPhone),
+                    child: _buildListArea(context, isPhone: isPhone, loc: loc),
                   ),
 
                   const SizedBox(height: 8),
@@ -310,7 +325,7 @@ class _UsageDialogState extends State<UsageDialog> {
                     child: Align(
                       alignment: Alignment.centerRight,
                       child: Text(
-                        'Totale stimato periodo: ${_niceMoney(_totalCost)} · ${_totalCount} attività',
+                        '${loc.usage_period_total_prefix} ${_niceMoney(_totalCost)} · $_totalCount ${loc.usage_period_total_suffix_activities}',
                         style: const TextStyle(fontSize: 13, color: Colors.black87),
                       ),
                     ),
@@ -324,25 +339,25 @@ class _UsageDialogState extends State<UsageDialog> {
     );
   }
 
-  Widget _buildTitle(BuildContext context) {
+  Widget _buildTitle(BuildContext context, AppLocalizations loc) {
     return Row(
       children: [
         const Icon(Icons.bar_chart_rounded, size: 24, color: Colors.black87),
         const SizedBox(width: 8),
         Text(
-          'Analisi utilizzo',
+          loc.usage_analysis_title,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
         ),
         const Spacer(),
         IconButton(
-          tooltip: 'Aggiorna',
+          tooltip: loc.usage_refresh,
           icon: const Icon(Icons.refresh_rounded, size: 20),
           onPressed: () => _fetch(reset: true),
         ),
         IconButton(
-          tooltip: 'Chiudi',
+          tooltip: loc.close,
           icon: const Icon(Icons.close, size: 20),
           onPressed: () => Navigator.of(context, rootNavigator: true).maybePop(),
         ),
@@ -351,34 +366,49 @@ class _UsageDialogState extends State<UsageDialog> {
   }
 
   // ====== Filtri con layout reattivo ======
-  Widget _buildFilters(BuildContext context, {required bool isPhone}) {
+  Widget _buildFilters(
+    BuildContext context, {
+    required bool isPhone,
+    required AppLocalizations loc,
+  }) {
     String fmt(DateTime? d) =>
-        d == null ? 'Seleziona' : DateFormat('dd MMM y', 'it_IT').format(d);
+        d == null ? loc.usage_filter_select_placeholder
+                  : DateFormat('dd MMM y', 'it_IT').format(d);
 
     final fields = <Widget>[
-      _DateField(label: 'Dal', text: fmt(_startDate), onTap: () => _pickDate(isStart: true)),
-      _DateField(label: 'Al',  text: fmt(_endDate),  onTap: () => _pickDate(isStart: false)),
+      _DateField(
+        label: loc.usage_filter_from,
+        text: fmt(_startDate),
+        onTap: () => _pickDate(isStart: true),
+      ),
+      _DateField(
+        label: loc.usage_filter_to,
+        text: fmt(_endDate),
+        onTap: () => _pickDate(isStart: false),
+      ),
 
       // ▼▼▼  MENU COERENTI CON POPUP DELL’APP (showMenu + PopupMenuItem) ▼▼▼
       _MenuField<String>(
-        label: 'Tipo',
+        label: loc.usage_filter_type,
         value: _typeFilter,
-        hint: 'Qualsiasi',
-        items: const [
-          _MenuChoice('UPLOAD_ASYNC',  'Upload'),
-          _MenuChoice('STREAM_EVENTS', 'Chat'),
+        hint: loc.usage_filter_any,
+        anyLabel: loc.usage_filter_any,
+        items: [
+          _MenuChoice('UPLOAD_ASYNC',  loc.usage_type_upload),
+          _MenuChoice('STREAM_EVENTS', loc.usage_type_chat),
         ],
         onSelected: (v) => setState(() => _typeFilter = v),
       ),
       _MenuField<String>(
-        label: 'Stato',
+        label: loc.usage_filter_status,
         value: _statusFilter,
-        hint: 'Qualsiasi',
-        items: const [
-          _MenuChoice('PENDING',   'In attesa'),
-          _MenuChoice('RUNNING',   'In esecuzione'),
-          _MenuChoice('COMPLETED', 'Completata'),
-          _MenuChoice('ERROR',     'Errore'),
+        hint: loc.usage_filter_any,
+        anyLabel: loc.usage_filter_any,
+        items: [
+          _MenuChoice('PENDING',   loc.usage_status_pending),
+          _MenuChoice('RUNNING',   loc.usage_status_running),
+          _MenuChoice('COMPLETED', loc.usage_status_completed),
+          _MenuChoice('ERROR',     loc.usage_status_error),
         ],
         onSelected: (v) => setState(() => _statusFilter = v),
       ),
@@ -386,6 +416,7 @@ class _UsageDialogState extends State<UsageDialog> {
       _SearchField(
         controller: _searchCtrl,
         onSubmitted: (_) => _fetch(reset: true),
+        loc: loc,
       ),
     ];
 
@@ -400,12 +431,12 @@ class _UsageDialogState extends State<UsageDialog> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
-          child: const Text('Applica'),
+          child: Text(loc.usage_button_apply),
         ),
         const SizedBox(width: 8),
         TextButton(
           onPressed: _resetFilters,
-          child: const Text('Reset'),
+          child: Text(loc.usage_button_reset),
         ),
       ],
     );
@@ -461,25 +492,32 @@ class _UsageDialogState extends State<UsageDialog> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
-                child: const Text('Applica'),
+                child: Text(loc.usage_button_apply),
               ),
             ),
             const SizedBox(width: 8),
-            TextButton(onPressed: _resetFilters, child: const Text('Reset')),
+            TextButton(
+              onPressed: _resetFilters,
+              child: Text(loc.usage_button_reset),
+            ),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildListArea(BuildContext context, {required bool isPhone}) {
+  Widget _buildListArea(
+    BuildContext context, {
+    required bool isPhone,
+    required AppLocalizations loc,
+  }) {
     // NIENTE altezza fissa qui: il parent fornisce lo spazio via Expanded.
     if (_initialLoad && _loading) {
       return const Center(child: CircularProgressIndicator());
     }
 
     if (_items.isEmpty) {
-      return const Center(child: Text('Nessuna attività trovata nel periodo selezionato.'));
+      return Center(child: Text(loc.usage_no_activities));
     }
 
     return Container(
@@ -512,6 +550,7 @@ class _UsageDialogState extends State<UsageDialog> {
               child: _ActivityCard(
                 record: it,
                 onTap: () => _openDetail(it),
+                loc: loc,
               ),
             );
           },
@@ -536,12 +575,15 @@ class _UsageDialogState extends State<UsageDialog> {
 
     if (!mounted) return;
 
+    final loc = LocalizationProvider.of(context);
+
     await showDialog(
       context: context,
       useRootNavigator: true,
       builder: (ctx) => _ActivityDetailDialog(
         record: detail ?? base,
         errorText: err?.toString(),
+        loc: loc,
       ),
     );
   }
@@ -554,10 +596,12 @@ class _ActivityCard extends StatelessWidget {
   const _ActivityCard({
     required this.record,
     required this.onTap,
+    required this.loc,
   });
 
   final ActivityRecord record;
   final VoidCallback onTap;
+  final AppLocalizations loc;
 
   @override
   Widget build(BuildContext context) {
@@ -567,7 +611,7 @@ class _ActivityCard extends StatelessWidget {
         ?? record.activityId;
 
     final subtitle = [
-      _typeLabel(record.type),
+      _typeLabel(record.type, loc),
       if (record.startTime != null) _niceDateTime(record.startTime),
     ].join(' · ');
 
@@ -617,7 +661,7 @@ class _ActivityCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _StatusChip(status: record.status),
+                  _StatusChip(status: record.status, loc: loc),
                   const SizedBox(height: 8),
                   if (trailingText.isNotEmpty)
                     Text(trailingText, style: const TextStyle(fontSize: 12, color: Colors.black54)),
@@ -632,8 +676,9 @@ class _ActivityCard extends StatelessWidget {
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status});
+  const _StatusChip({required this.status, required this.loc});
   final ActivityStatusDart status;
+  final AppLocalizations loc;
 
   @override
   Widget build(BuildContext context) {
@@ -646,7 +691,7 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        _statusLabel(status),
+        _statusLabel(status, loc),
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c),
       ),
     );
@@ -654,9 +699,15 @@ class _StatusChip extends StatelessWidget {
 }
 
 class _SearchField extends StatelessWidget {
-  const _SearchField({required this.controller, required this.onSubmitted});
+  const _SearchField({
+    required this.controller,
+    required this.onSubmitted,
+    required this.loc,
+  });
+
   final TextEditingController controller;
   final ValueChanged<String> onSubmitted;
+  final AppLocalizations loc;
 
   @override
   Widget build(BuildContext context) {
@@ -665,14 +716,14 @@ class _SearchField extends StatelessWidget {
       textInputAction: TextInputAction.search,
       onSubmitted: onSubmitted,
       decoration: InputDecoration(
-        labelText: 'Cerca',
-        hintText: 'Testo in payload/preview/metadata',
+        labelText: loc.usage_search_label,
+        hintText: loc.usage_search_hint,
         isDense: true,
         prefixIcon: const Icon(Icons.search),
         suffixIcon: (controller.text.isEmpty)
             ? null
             : IconButton(
-                tooltip: 'Pulisci',
+                tooltip: loc.usage_search_clear,
                 icon: const Icon(Icons.clear),
                 onPressed: () {
                   controller.clear();
@@ -860,9 +911,15 @@ class _ErrorBanner extends StatelessWidget {
 
 // ===== Dettaglio attività =====
 class _ActivityDetailDialog extends StatelessWidget {
-  const _ActivityDetailDialog({required this.record, this.errorText});
+  const _ActivityDetailDialog({
+    required this.record,
+    this.errorText,
+    required this.loc,
+  });
+
   final ActivityRecord record;
   final String? errorText;
+  final AppLocalizations loc;
 
   @override
   Widget build(BuildContext context) {
@@ -887,44 +944,51 @@ class _ActivityDetailDialog extends StatelessWidget {
                     Icon(_typeIcon(record.type), color: Colors.black87),
                     const SizedBox(width: 8),
                     Text(
-                      'Dettaglio attività',
+                      loc.usage_detail_title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
                     ),
                     const Spacer(),
                     IconButton(
-                      tooltip: 'Chiudi',
+                      tooltip: loc.close,
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.of(context, rootNavigator: true).maybePop(),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                _StatusChip(status: record.status),
+                _StatusChip(status: record.status, loc: loc),
                 const SizedBox(height: 12),
 
                 if (errorText != null) _ErrorBanner(text: errorText!),
 
-                _kv('ID attività', record.activityId),
-                _kv('Utente', record.userId),
-                _kv('Tipo', _typeLabel(record.type)),
-                _kv('Stato', _statusLabel(record.status)),
-                _kv('Costo stimato', record.costUsd != null ? _niceMoney(record.costUsd!) : '—'),
-                _kv('Inizio', _niceDateTime(record.startTime)),
-                _kv('Fine', _niceDateTime(record.endTime)),
+                _kv(loc.usage_detail_activity_id, record.activityId),
+                _kv(loc.usage_detail_user,       record.userId),
+                _kv(loc.usage_detail_type,       _typeLabel(record.type, loc)),
+                _kv(loc.usage_detail_status,     _statusLabel(record.status, loc)),
+                _kv(
+                  loc.usage_detail_cost,
+                  record.costUsd != null ? _niceMoney(record.costUsd!) : '—',
+                ),
+                _kv(loc.usage_detail_start, _niceDateTime(record.startTime)),
+                _kv(loc.usage_detail_end,   _niceDateTime(record.endTime)),
                 const SizedBox(height: 8),
 
-                _sectionTitle('Metadata'),
+                _sectionTitle(loc.usage_detail_metadata),
                 _monospaceBox(_prettyJson(record.metadata)),
                 const SizedBox(height: 12),
 
-                _sectionTitle('Payload'),
+                _sectionTitle(loc.usage_detail_payload),
                 _monospaceBox(_prettyJson(record.payload)),
                 const SizedBox(height: 12),
 
-                _sectionTitle('Anteprima risposta'),
-                _monospaceBox((record.responsePreview ?? '').isEmpty ? '—' : record.responsePreview!),
+                _sectionTitle(loc.usage_detail_response_preview),
+                _monospaceBox(
+                  (record.responsePreview ?? '').isEmpty
+                      ? '—'
+                      : record.responsePreview!,
+                ),
               ],
             ),
           ),

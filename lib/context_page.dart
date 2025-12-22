@@ -713,6 +713,22 @@ bool _isActivePerCtx(PerContextStatusDto pc) {
   String _displayName(ContextMetadata ctx) =>
       ctx.customMetadata?['display_name'] ?? ctx.path;
 
+      String _slugifyForSemantics(String raw) {
+  var s = raw.trim().toLowerCase();
+
+  // spazi multipli -> "-"
+  s = s.replaceAll(RegExp(r'\s+'), '-');
+
+  // tieni solo [a-z0-9-_]
+  s = s.replaceAll(RegExp(r'[^a-z0-9\-_]'), '');
+
+  // compatta eventuali "---"
+  s = s.replaceAll(RegExp(r'-{2,}'), '-');
+
+  // evita stringa vuota
+  return s.isEmpty ? 'unnamed' : s;
+}
+
   bool _isLoading =
       false; // Variabile di stato per indicare il caricamento generale
   String? _loadingContext; // Contesto corrente per l'upload
@@ -2081,8 +2097,15 @@ if (index == 0) {
 // Dopo questa parte, lascia il resto invariato
                         final contextMetadata = _filteredContexts[index -
                             1]; // Offset perché il primo è la scheda grigia
-final kboxId = contextMetadata.path;          // id stabile della KB
-final menuSemId = 'kbox-menu-$kboxId';        // id semantic per Playwright
+final kboxName = (contextMetadata.customMetadata?['display_name'] ?? '')
+    .toString()
+    .trim();
+
+// fallback per KB “vecchie” senza display_name
+final kboxNameOrPath = kboxName.isNotEmpty ? kboxName : contextMetadata.path;
+
+// ✅ ID basato sul NOME (normalizzato)
+final menuSemId = 'kbox-menu-${_slugifyForSemantics(kboxNameOrPath)}';
                         Map<String, dynamic>? metadata =
                             contextMetadata.customMetadata;
                         List<Widget> metadataWidgets = [];

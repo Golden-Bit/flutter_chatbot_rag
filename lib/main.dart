@@ -48,7 +48,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => LoginPage(),
         '/register': (context) => RegistrationPage(),
       },
-      showSemanticsDebugger: true,
+      showSemanticsDebugger: false,
     );
   }
 }

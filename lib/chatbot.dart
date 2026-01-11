@@ -3259,9 +3259,11 @@ class ChatBotPageState extends State<ChatBotPage> {
       //final data = jsonDecode(response);
       final data = {
         "backend_api": "https://teatek-llm.theia-innovation.com/user-backend",
-        "nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
+        //"nlp_api": "https://teatek-llm.theia-innovation.com/llm-core",
         //"nlp_api": "http://127.0.0.1:8777",
-        "chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+        "nlp_api": "http://34.77.241.172:8100/llm-core",
+        //"chatbot_nlp_api": "https://teatek-llm.theia-innovation.com/llm-rag",
+        "chatbot_nlp_api": "http://34.77.241.172:8080/llm-rag",
         //"chatbot_nlp_api": "http://127.0.0.1:8111"
       };
       _nlpApiUrl = data['chatbot_nlp_api'];

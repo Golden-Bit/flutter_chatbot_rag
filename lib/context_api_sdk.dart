@@ -132,6 +132,70 @@ class ActivitiesListResponse {
 // PAYMENTS ▸ Models & enums
 // ───────────────────────────────────────────────────────────────────────────
 
+/// Request per POST /payments/whitelist
+class PaymentsWhitelistPatchRequest {
+  final List<String>? replace;
+  final List<String> add;
+  final List<String> remove;
+
+  const PaymentsWhitelistPatchRequest({
+    this.replace,
+    this.add = const [],
+    this.remove = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        if (replace != null) 'replace': replace,
+        'add': add,
+        'remove': remove,
+      };
+}
+
+/// Response generica per GET/POST /payments/whitelist
+/// (LLM-RAG restituisce il JSON della Payments API, quindi teniamola robusta)
+
+class PaymentsWhitelistResponse {
+  final List<String> whitelist;
+  final String? file;
+
+  // campi “opzionali” che possono esserci in risposta (es. added/removed/replaced)
+  final List<String>? added;
+  final List<String>? removed;
+  final bool? replaced;
+
+  /// raw contiene tutto il payload originale (per non perdere info)
+  final Map<String, dynamic> raw;
+
+  const PaymentsWhitelistResponse({
+    required this.whitelist,
+    this.file,
+    this.added,
+    this.removed,
+    this.replaced,
+    required this.raw,
+  });
+
+  factory PaymentsWhitelistResponse.fromJson(Map<String, dynamic> j) {
+    List<String> _asStringList(dynamic v) {
+      if (v is List) return v.map((e) => e.toString()).toList();
+      return const [];
+    }
+
+    return PaymentsWhitelistResponse(
+      whitelist: _asStringList(j['whitelist']),
+      file: j['file']?.toString(),
+      added: j.containsKey('added') ? _asStringList(j['added']) : null,
+      removed: j.containsKey('removed') ? _asStringList(j['removed']) : null,
+      replaced: j['replaced'] is bool ? j['replaced'] as bool : null,
+      raw: j,
+    );
+  }
+
+  /// Utile per debugging/console: restituisce l'intero payload originale.
+  Map<String, dynamic> toJson() => raw;
+}
+
+
 /// Stato piano corrente (GET /payments/current_plan)
 class CurrentPlanResponse {
   final String subscriptionId;
@@ -1084,6 +1148,8 @@ class InteractionCost {
 
 // SDK per le API
 class ContextApiSdk {
+  String? whitelistAdminKey; // usata per /payments/whitelist (X-API-Key)
+
   String? baseUrl;
 
   // Carica la configurazione dal file config.json
@@ -1101,6 +1167,18 @@ class ContextApiSdk {
     };
     baseUrl = data['chatbot_nlp_api']; // Carichiamo la chiave 'chatbot_nlp_api'
   }
+Map<String, String> _whitelistHeaders({String? adminKeyOverride}) {
+  final k = (adminKeyOverride ?? whitelistAdminKey ?? '').trim();
+  if (k.isEmpty) {
+    throw ApiException(
+      'Admin key mancante: passa adminKeyOverride o imposta sdk.whitelistAdminKey',
+    );
+  }
+  return {
+    'Content-Type': 'application/json',
+    'X-API-Key': k,
+  };
+}
 
 Future<ContextMetadata> createContext(
   String contextNameUuid,
@@ -2190,6 +2268,43 @@ Future<CurrentPlanResponse?> getCurrentPlanOrNull(String token) async {
     }
     throw ApiException('Errore /payments/credits: ${res.body}');
   }
+/// GET /payments/whitelist  (admin-key only)
+Future<PaymentsWhitelistResponse> getPaymentsWhitelist({String? adminKey}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/payments/whitelist');
+  final res = await http.get(uri, headers: _whitelistHeaders(adminKeyOverride: adminKey));
+
+  if (res.statusCode == 200) {
+    return PaymentsWhitelistResponse.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  // 403 -> key errata/mancante
+  // 500 -> server non configurato
+  // 502 -> payments api non raggiungibile
+  throw ApiException('Errore GET /payments/whitelist (status=${res.statusCode}): ${res.body}');
+}
+
+/// POST /payments/whitelist  (admin-key only)
+Future<PaymentsWhitelistResponse> patchPaymentsWhitelist(
+  PaymentsWhitelistPatchRequest body, {
+  String? adminKey,
+}) async {
+  if (baseUrl == null) await loadConfig();
+
+  final uri = Uri.parse('$baseUrl/payments/whitelist');
+  final res = await http.post(
+    uri,
+    headers: _whitelistHeaders(adminKeyOverride: adminKey),
+    body: jsonEncode(body.toJson()),
+  );
+
+  if (res.statusCode == 200) {
+    return PaymentsWhitelistResponse.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  throw ApiException('Errore POST /payments/whitelist (status=${res.statusCode}): ${res.body}');
+}
 
   /// POST /payments/checkout  → può tornare "checkout" o "portal_redirect"
   Future<CheckoutOrPortal> createCheckoutSessionVariant({

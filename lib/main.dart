@@ -1,3 +1,4 @@
+import 'package:boxed_ai/admin_console/admin_console_page.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:boxed_ai/user_manager/pages/login_page_1.dart';
@@ -7,10 +8,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_langdetect/flutter_langdetect.dart' as langdetect;
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-    // Per Web (e in generale): carica i profili una volta
+  // Per Web (e in generale): carica i profili una volta
   if (kIsWeb) {
     await langdetect.initLangDetect(); // carica i profili dal package
   }
@@ -26,17 +27,17 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-        localizationsDelegates: const [
-    GlobalMaterialLocalizations.delegate,
-    GlobalWidgetsLocalizations.delegate,
-    GlobalCupertinoLocalizations.delegate,
-  ],
-  supportedLocales: const [
-    Locale('it', 'IT'),
-    Locale('en', 'US'),
-    Locale('es', 'ES'),
-  ],
-      title: 'Boxed-AI', //'Boxed-AI',
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('it', 'IT'),
+        Locale('en', 'US'),
+        Locale('es', 'ES'),
+      ],
+      title: 'Boxed-AI',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         textTheme: GoogleFonts.interTextTheme().copyWith(
@@ -47,6 +48,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/login': (context) => LoginPage(),
         '/register': (context) => RegistrationPage(),
+        '/admin_console': (context) => const AdminConsolePage(),
       },
       showSemanticsDebugger: false,
     );

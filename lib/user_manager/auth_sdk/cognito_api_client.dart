@@ -16,6 +16,9 @@ import 'package:http/http.dart' as http;
 
 import 'models/sign_in_request.dart';
 import 'models/sign_in_response.dart';
+import 'models/admin_user_search_request.dart';
+import 'models/admin_user_search_response.dart';
+import 'models/admin_user_detail_response.dart';
 
 // --- ECCEZIONI TIPIZZATE ---
 
@@ -28,8 +31,7 @@ abstract class CognitoException implements Exception {
 
 /// Eccezione di ripiego quando il messaggio AWS non è riconosciuto
 class UnknownCognitoException extends CognitoException {
-  const UnknownCognitoException(
-      [String m = 'Si è verificato un errore inatteso'])
+  const UnknownCognitoException([String m = 'Si è verificato un errore inatteso'])
       : super(m);
 }
 
@@ -68,9 +70,8 @@ class LimitExceeded extends CognitoException {
 typedef ErrorSetter = void Function(String);
 
 void showCognitoError(State state, ErrorSetter setError, Object e) {
-  final msg = (e is CognitoException)
-      ? e.message
-      : 'Si è verificato un errore inatteso';
+  final msg =
+      (e is CognitoException) ? e.message : 'Si è verificato un errore inatteso';
   // setState solo per il rebuild
   state.setState(() => setError(msg));
 }
@@ -97,18 +98,54 @@ CognitoException _parseError(String rawBody) {
   return const UnknownCognitoException(); // concrete fallback
 }
 
-/*class UserNotConfirmedException implements Exception {
-  final String message;
-  UserNotConfirmedException([this.message = 'Utente non confermato']);
-  @override
-  String toString() => message;
-}*/
-
 class CognitoApiClient {
-  // Imposta qui il tuo endpoint base; ad esempio, se la tua API
-  // gira in locale su http://localhost:8000:
-  static const String baseUrl = 'https://teatek-llm.theia-innovation.com/auth';
-  //static const String baseUrl = 'http://127.0.0.1:8001/auth';
+  /// Base URL di default del servizio Auth.
+  ///
+  /// Nota: il backend usa root_path="/auth", quindi la base tipica è ".../auth".
+  static const String defaultBaseUrl =
+      'https://teatek-llm.theia-innovation.com/auth';
+
+  /// Base URL effettivamente usata dall'istanza (override possibile via costruttore).
+  final String baseUrl;
+
+  /// Admin API key per chiamare gli endpoint /v1/admin/* (header: X-API-Key).
+  ///
+  /// ⚠️ WARNING: su Flutter Web/Mobile, includere una admin key nel client è rischioso
+  /// (l'app può essere ispezionata). Usala solo in contesti interni/strumenti admin.
+  final String? adminApiKey;
+
+  CognitoApiClient({String? baseUrl, this.adminApiKey})
+      : baseUrl = (baseUrl ?? defaultBaseUrl).replaceAll(RegExp(r'/+$'), '');
+
+  // -------------------------------------------------------------------------
+  // Helpers HTTP
+  // -------------------------------------------------------------------------
+
+  Map<String, String> _jsonHeaders({String? xApiKey}) => {
+        'Content-Type': 'application/json',
+        if (xApiKey != null && xApiKey.trim().isNotEmpty)
+          'X-API-Key': xApiKey.trim(),
+      };
+
+  String _extractDetail(String rawBody) {
+    try {
+      final body = jsonDecode(rawBody);
+      final d = body is Map ? body['detail'] : null;
+      final msg = (d ?? rawBody).toString();
+      return msg;
+    } catch (_) {
+      return rawBody;
+    }
+  }
+
+  String _requireAdminKey(String? keyOverride) {
+    final k = (keyOverride ?? adminApiKey ?? '').trim();
+    if (k.isEmpty) {
+      throw Exception(
+          'Admin API key mancante. Passa adminApiKey al costruttore o come parametro al metodo.');
+    }
+    return k;
+  }
 
   // Variabile per salvare l'ultimo access token e la sua scadenza
   String? lastAccessToken;
@@ -163,17 +200,13 @@ class CognitoApiClient {
       html.window.localStorage['auth_method'] = 'standard';
       return signInResponse;
     } else {
-      final body = response.body;
-      // Cognito trasmette "UserNotConfirmedException" nel campo detail
-      throw _parseError(response.body); // ✅ restituisce la classe giusta
+      throw _parseError(response.body);
     }
   }
 
   Future<SignUpResponse> signUp(SignUpRequest request) async {
-    // Costruiamo la URL dell’endpoint
     final url = Uri.parse('$baseUrl/v1/user/signup');
 
-    // Eseguiamo la POST
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
@@ -181,12 +214,9 @@ class CognitoApiClient {
     );
 
     if (response.statusCode == 200) {
-      // Parsing JSON
       final jsonBody = jsonDecode(response.body);
-      // Creiamo un SignUpResponse dal JSON
       return SignUpResponse.fromJson(jsonBody);
     } else {
-      // UsernameExistsException, InvalidPasswordException, ecc. :contentReference[oaicite:0]{index=0}
       throw _parseError(response.body);
     }
   }
@@ -234,7 +264,6 @@ class CognitoApiClient {
     );
 
     if (response.statusCode == 200) {
-      // Esempio di risposta: { "CodeDeliveryDetails": {...}, "ResponseMetadata": {...} }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
       throw Exception('Errore forgotPassword: ${response.body}');
@@ -252,7 +281,6 @@ class CognitoApiClient {
     );
 
     if (response.statusCode == 200) {
-      // Esempio di risposta: { "ResponseMetadata": {...}, ... }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
       throw Exception('Errore confirmForgotPassword: ${response.body}');
@@ -321,28 +349,11 @@ class CognitoApiClient {
     if (response.statusCode == 200) {
       final jsonBody = jsonDecode(response.body);
       final signInResponse = SignInResponse.fromJson(jsonBody);
-      // Aggiorna l'access token e la scadenza
       lastAccessToken = signInResponse.accessToken;
       lastExpiration = _getExpirationFromToken(signInResponse.accessToken!);
       return signInResponse;
     } else {
       throw Exception('Errore refreshToken: ${response.body}');
-    }
-  }
-
-  /// Metodo per ottenere l'ultimo token valido.
-  /// Se l'ultimo access token è scaduto, lo aggiorna tramite refreshToken.
-  Future<String> getLastValidToken() async {
-    if (lastAccessToken == null) throw Exception('Nessun token disponibile');
-    final remaining = getRemainingTime(lastAccessToken!);
-    if (remaining > 0) {
-      return lastAccessToken!;
-    } else {
-      // Il token è scaduto, aggiorna tramite refreshToken
-      // NOTA: In questa implementazione non salviamo username e password, quindi è necessario passare username e refreshToken
-      // Qui assumiamo che l'utente abbia già eseguito il login e abbia ottenuto refreshToken in altro modo
-      throw Exception(
-          'Il token è scaduto e non è disponibile un refresh token per aggiornarlo.');
     }
   }
 
@@ -352,7 +363,6 @@ class CognitoApiClient {
     final response = await http.get(url);
 
     if (response.statusCode == 200) {
-      // Il backend risponde con {"auth_url": "<URL>"}
       final Map<String, dynamic> data = jsonDecode(response.body);
       return data['auth_url'] as String;
     } else {
@@ -379,8 +389,6 @@ class CognitoApiClient {
 
     if (response.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(response.body);
-      // Il backend risponde con {"access_token": "...", "id_token": "...", "refresh_token": "...", ...}
-      // Al termine del login Azure AD:
       html.window.localStorage['auth_method'] = 'azure';
       return Token.fromJson(data);
     } else {
@@ -400,22 +408,17 @@ class CognitoApiClient {
     }
   }
 
-// SDK – performAzureLogout
-Future<void> performAzureLogout() async {
-  // pulizia locale completa
-  html.window.localStorage.remove('token');
-  html.window.localStorage.remove('refreshToken');
-  html.window.localStorage.remove('user');
-  html.window.localStorage.remove('auth_method');
-  html.window.localStorage.remove('pending_provider');
+  // SDK – performAzureLogout
+  Future<void> performAzureLogout() async {
+    html.window.localStorage.remove('token');
+    html.window.localStorage.remove('refreshToken');
+    html.window.localStorage.remove('user');
+    html.window.localStorage.remove('auth_method');
+    html.window.localStorage.remove('pending_provider');
 
-  final logoutUrl = await getAzureLogoutUrl();
-  html.window.location.href = logoutUrl; // Azure → Cognito → SPA
-}
-
-// ===============================
-// ======  GOOGLE — LOGIN  =======
-// ===============================
+    final logoutUrl = await getAzureLogoutUrl();
+    html.window.location.href = logoutUrl; // Azure → Cognito → SPA
+  }
 
   /// Restituisce l'URL di login Hosted UI forzato sul provider Google
   Future<String> getGoogleLoginUrl() async {
@@ -430,22 +433,12 @@ Future<void> performAzureLogout() async {
     }
   }
 
-  /// Avvia il login con Google: salva il provider "pendente" e reindirizza il browser.
-  /// (Utile in Flutter Web; su mobile puoi aprire in browser esterno/deeplink).
   Future<void> startGoogleLogin() async {
-    // memorizzo il provider scelto: servirà alla callback per sapere quale endpoint di exchange chiamare
     html.window.localStorage['pending_provider'] = 'google';
-
     final authUrl = await getGoogleLoginUrl();
-    html.window.location.href = authUrl; // redirect alla Hosted UI
+    html.window.location.href = authUrl;
   }
 
-// ===============================
-// ===  GOOGLE — EXCHANGE CODE ===
-// ===============================
-
-  /// Scambia il code (ritornato su redirect_uri) con i token Cognito.
-  /// Imposta 'auth_method'='google' sul successo (coerente con Azure).
   Future<Token> exchangeGoogleCodeForTokens(String code) async {
     final url = Uri.parse('$baseUrl/v1/user/social/google/exchange-token');
     final payload = jsonEncode({'code': code});
@@ -459,30 +452,21 @@ Future<void> performAzureLogout() async {
     if (response.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(response.body);
 
-      // Se vuoi allinearti alla gestione "sessione SDK" come per signIn():
-      // salva access token e scadenza (opzionale ma consigliato)
       try {
         final accessToken = (data['access_token'] as String?) ?? '';
         if (accessToken.isNotEmpty) {
           lastAccessToken = accessToken;
           lastExpiration = _getExpirationFromToken(accessToken);
         }
-      } catch (_) {/* no-op */}
+      } catch (_) {}
 
-      // marca il metodo di autenticazione
       html.window.localStorage['auth_method'] = 'google';
-
       return Token.fromJson(data);
     } else {
       throw Exception('Errore exchangeGoogleCodeForTokens: ${response.body}');
     }
   }
 
-// ===============================
-// ======  GOOGLE — LOGOUT  ======
-// ===============================
-
-  /// Restituisce l'URL di logout Cognito (post-logout verso la SPA).
   Future<String> getGoogleLogoutUrl() async {
     final url = Uri.parse('$baseUrl/v1/user/social/google/logout-url');
     final response = await http.get(url);
@@ -495,19 +479,110 @@ Future<void> performAzureLogout() async {
     }
   }
 
-  /// Esegue il logout "app": pulizia storage + redirect all'URL di logout Cognito.
-  /// (Google non ha un RP-initiated logout standard; invalidiamo la sessione Cognito).
-// SDK – performGoogleLogout
-Future<void> performGoogleLogout() async {
-  // pulizia locale completa
-  html.window.localStorage.remove('token');
-  html.window.localStorage.remove('refreshToken');
-  html.window.localStorage.remove('user');
-  html.window.localStorage.remove('auth_method');
-  html.window.localStorage.remove('pending_provider');
+  // SDK – performGoogleLogout
+  Future<void> performGoogleLogout() async {
+    html.window.localStorage.remove('token');
+    html.window.localStorage.remove('refreshToken');
+    html.window.localStorage.remove('user');
+    html.window.localStorage.remove('auth_method');
+    html.window.localStorage.remove('pending_provider');
 
-  final logoutUrl = await getGoogleLogoutUrl();
-  html.window.location.href = logoutUrl; // Cognito → SPA
-}
+    final logoutUrl = await getGoogleLogoutUrl();
+    html.window.location.href = logoutUrl; // Cognito → SPA
+  }
 
+  // ===============================
+  // ======  ADMIN — OPERATIONS =====
+  // ===============================
+
+  /// Admin: conferma la signup di un utente.
+  /// Endpoint: POST /v1/admin/confirm-signup
+  /// Header richiesto: X-API-Key
+  Future<Map<String, dynamic>> adminConfirmSignup({
+    required String username,
+    String? adminKey,
+  }) async {
+    final k = _requireAdminKey(adminKey);
+    final url = Uri.parse('$baseUrl/v1/admin/confirm-signup');
+    final response = await http.post(
+      url,
+      headers: _jsonHeaders(xApiKey: k),
+      body: jsonEncode({'username': username}),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Errore adminConfirmSignup: ${_extractDetail(response.body)}');
+  }
+
+  /// Admin: legge lo schema attributi del pool.
+  /// Endpoint: GET /v1/admin/attribute-schema
+  /// Header richiesto: X-API-Key
+  Future<List<dynamic>> adminGetAttributeSchema({String? adminKey}) async {
+    final k = _requireAdminKey(adminKey);
+    final url = Uri.parse('$baseUrl/v1/admin/attribute-schema');
+    final response = await http.get(url, headers: _jsonHeaders(xApiKey: k));
+
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body);
+      if (body is List) return body;
+      return [body];
+    }
+    throw Exception('Errore adminGetAttributeSchema: ${_extractDetail(response.body)}');
+  }
+
+  /// Admin: endpoint per aggiornare schema attributi (backend può rispondere 501).
+  /// Endpoint: POST /v1/admin/update-attribute-schema
+  /// Header richiesto: X-API-Key
+  Future<Map<String, dynamic>> adminUpdateAttributeSchema({String? adminKey}) async {
+    final k = _requireAdminKey(adminKey);
+    final url = Uri.parse('$baseUrl/v1/admin/update-attribute-schema');
+    final response = await http.post(url, headers: _jsonHeaders(xApiKey: k));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Errore adminUpdateAttributeSchema: ${_extractDetail(response.body)}');
+  }
+
+  /// Admin: ricerca utenti (ListUsers).
+  /// Endpoint: POST /v1/admin/users/search
+  /// Header richiesto: X-API-Key
+  Future<AdminUserSearchResponse> adminSearchUsers(
+    AdminUserSearchRequest request, {
+    String? adminKey,
+  }) async {
+    final k = _requireAdminKey(adminKey);
+    final url = Uri.parse('$baseUrl/v1/admin/users/search');
+    final response = await http.post(
+      url,
+      headers: _jsonHeaders(xApiKey: k),
+      body: jsonEncode(request.toJson()),
+    );
+
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return AdminUserSearchResponse.fromJson(body);
+    }
+    throw Exception('Errore adminSearchUsers: ${_extractDetail(response.body)}');
+  }
+
+  /// Admin: dettaglio utente.
+  /// Accetta user_ref come: username, sub, email.
+  /// Endpoint: GET /v1/admin/users/{user_ref}
+  /// Header richiesto: X-API-Key
+  Future<AdminUserDetailResponse> adminGetUser(
+    String userRef, {
+    String? adminKey,
+  }) async {
+    final k = _requireAdminKey(adminKey);
+    final url = Uri.parse('$baseUrl/v1/admin/users/$userRef');
+    final response = await http.get(url, headers: _jsonHeaders(xApiKey: k));
+
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return AdminUserDetailResponse.fromJson(body);
+    }
+    throw Exception('Errore adminGetUser: ${_extractDetail(response.body)}');
+  }
 }

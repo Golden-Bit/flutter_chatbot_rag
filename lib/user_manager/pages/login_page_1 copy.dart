@@ -3,8 +3,10 @@ import 'dart:html' as html;
 
 //import 'package:boxed_ai/apps/example_app_2/app.dart';
 //import 'package:boxed_ai/apps/example_app_3/app.dart';
+import 'package:boxed_ai/apps/example_app_2/app.dart';
 import 'package:flutter/material.dart';
-import 'package:boxed_ai/apps/enac_app/app.dart';
+import 'package:boxed_ai/apps/brokerpiu_app/app.dart';
+//import 'package:boxed_ai/apps/enac/app.dart';
 import 'package:boxed_ai/chatbot.dart';
 import 'package:boxed_ai/ui_components/custom_components/general_components_v1.dart';
 import 'package:boxed_ai/user_manager/auth_sdk/cognito_api_client.dart';
@@ -38,72 +40,81 @@ class _LoginPageState extends State<LoginPage> {
  /// 1) Controlla se esiste `token` in localStorage; se sì, prova a usare GetUserInfo.
   /// 2) Se non c'è token o non è valido, controlla se nella URL è presente `code=...`.
   ///    Se `code` esiste, chiama exchangeAzureCodeForTokens e procedi al login.
-  Future<void> _handleRedirectOrLocalToken() async {
-    final storedToken = html.window.localStorage['token'];
-    final storedRefresh = html.window.localStorage['refreshToken'];
+Future<void> _handleRedirectOrLocalToken() async {
+  final storedToken = html.window.localStorage['token'];
+  final storedRefresh = html.window.localStorage['refreshToken'];
 
-    // 1) Se ho token e refresh token salvati, provo a recuperarli
-    if (storedToken != null && storedRefresh != null) {
-      try {
-        final token = Token(
-          accessToken: storedToken,
-          refreshToken: storedRefresh,
-        );
+  // 1) Se ho token e refresh token salvati, provo a recuperarli
+  if (storedToken != null && storedRefresh != null) {
+    try {
+      final token = Token(
+        accessToken: storedToken,
+        refreshToken: storedRefresh,
+      );
 
-        // Provo a leggere le info utente
-        final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
-        final userInfo = await _apiClient.getUserInfo(userInfoRequest);
+      final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
+      final userInfo = await _apiClient.getUserInfo(userInfoRequest);
 
-        // Se vanno a buon fine, navigo direttamente
-        _navigateToChatBot(userInfo: userInfo, token: token);
-        return;
-      } catch (_) {
-        // Se fallisce, cadremo al “non ho token valido” e proveremo il redirect
-      }
+      _navigateToChatBot(userInfo: userInfo, token: token);
+      return;
+    } catch (_) {
+      // Token scaduto o non valido: proseguo con controllo "code"
     }
+  }
 
-    // 2) Se non ho un token valido, controllo se nella URL del browser c'è “?code=...”
-    final urlSearch = html.window.location.search; // es. "?code=a55463c9-..."
-    if (urlSearch!.startsWith('?code=')) {
-      // Estraggo il valore di code
-      final code = Uri.parse(html.window.location.href).queryParameters['code'];
-      if (code != null && code.isNotEmpty) {
+  // 2) Se non ho un token valido, controllo se nella URL del browser c'è “?code=...”
+  final url = Uri.parse(html.window.location.href);
+  final code = url.queryParameters['code'];
+  if (code != null && code.isNotEmpty) {
+    try {
+      // Scelgo quale exchange usare in base al provider pendente
+      final provider = html.window.localStorage['pending_provider'];
+      Token token;
+
+      if (provider == 'google') {
+        token = await _apiClient.exchangeGoogleCodeForTokens(code);
+      } else if (provider == 'azure') {
+        token = await _apiClient.exchangeAzureCodeForTokens(code);
+      } else {
+        // Fallback: se non so il provider, provo prima Google poi Azure
         try {
-          // Scambio il code per i token Cognito
-          final token = await _apiClient.exchangeAzureCodeForTokens(code);
-
-          // Memorizzo in localStorage
-          html.window.localStorage['token'] = token.accessToken;
-          if (token.refreshToken != null) {
-            html.window.localStorage['refreshToken'] = token.refreshToken!;
-          }
-
-          // Ora richiedo GetUserInfo per recuperare l'utente
-          final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
-          final userInfo = await _apiClient.getUserInfo(userInfoRequest);
-
-          // Pulisco la querystring dalla URL per evitare di rifare login se ricarico
-          html.window.history.replaceState(null, 'LoggedIn', html.window.location.pathname);
-
-          // Navigo a ChatBotPage
-          _navigateToChatBot(userInfo: userInfo, token: token);
-          return;
-        } catch (e) {
-          // Se lo scambio code/token fallisce, mostro un errore
-          setState(() {
-            _isCheckingToken = false;
-            _errorMessage = 'Errore durante login federato: $e';
-          });
-          return;
+          token = await _apiClient.exchangeGoogleCodeForTokens(code);
+        } catch (_) {
+          token = await _apiClient.exchangeAzureCodeForTokens(code);
         }
       }
-    }
 
-    // 3) Nessun token valido e nessun code in URL → mostro la UI di login
-    setState(() {
-      _isCheckingToken = false;
-    });
+      // Salvo i token in localStorage
+      html.window.localStorage['token'] = token.accessToken;
+      if (token.refreshToken != null) {
+        html.window.localStorage['refreshToken'] = token.refreshToken!;
+      }
+
+      // Ripulisco lo stato "pendente" e la querystring
+      html.window.localStorage.remove('pending_provider');
+      html.window.history.replaceState(null, 'LoggedIn', html.window.location.pathname);
+
+      // Chiamo GetUserInfo e navigo
+      final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
+      final userInfo = await _apiClient.getUserInfo(userInfoRequest);
+
+      _navigateToChatBot(userInfo: userInfo, token: token);
+      return;
+    } catch (e) {
+      setState(() {
+        _isCheckingToken = false;
+        _errorMessage = 'Errore durante login federato: $e';
+      });
+      return;
+    }
   }
+
+  // 3) Nessun token valido e nessun code in URL → mostro la UI di login
+  setState(() {
+    _isCheckingToken = false;
+  });
+}
+
 
   /// Dato `userInfo` e `token`, istanzia il modello User e naviga alla ChatBotPage
   void _navigateToChatBot({
@@ -131,34 +142,47 @@ class _LoginPageState extends State<LoginPage> {
     // Navigo sostituendo la pagina corrente
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
+      MaterialPageRoute(builder: (_) => ChatBotPage(user: user, token: token), //ChatPanelDemoPage(user: user, token: token), //ChatBotPage(user: user, token: token)), //HomeScaffold(user: user, token: token)), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token),
     ));
   }
 
   /// Quando l'utente clicca “Continua con Microsoft”, recupero l'URL di login da backend
   /// e ridirigo il browser verso quell'endpoint (Hosted UI Cognito → Azure AD).
-  Future<void> _onSocialPressed(String providerName) async {
-    if (providerName != 'Microsoft') {
-      // Per ora gestiamo solo Microsoft; per gli altri (Google/Apple) metti un fallback
-      debugPrint('Provider non gestito: $providerName');
-      return;
-    }
-    setState(() {
-      _errorMessage = '';
-      _isLoading = true;
-    });
-    try {
+Future<void> _onSocialPressed(String providerName) async {
+  setState(() {
+    _errorMessage = '';
+    _isLoading = true;
+  });
+
+  try {
+    if (providerName == 'Microsoft') {
+      // Salvo provider pendente per la callback
+      html.window.localStorage['pending_provider'] = 'azure';
       final loginUrl = await _apiClient.getAzureLoginUrl();
-      // Effettuo il redirect del browser intero verso Cognito Hosted UI
-      html.window.location.href = loginUrl;
-      // Non serve fare altro: verrà richiamato initState alla redirect
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Errore Invio al login federato: $e';
-        _isLoading = false;
-      });
+      html.window.location.href = loginUrl; // redirect alla Hosted UI
+      return; // initState verrà rilanciato al ritorno
     }
+
+    if (providerName == 'Google') {
+      // Salvo provider pendente per la callback
+      html.window.localStorage['pending_provider'] = 'google';
+      final loginUrl = await _apiClient.getGoogleLoginUrl();
+      html.window.location.href = loginUrl; // redirect alla Hosted UI
+      return; // initState verrà rilanciato al ritorno
+    }
+
+    // altri provider non ancora gestiti
+    debugPrint('Provider non gestito: $providerName');
+    setState(() {
+      _isLoading = false;
+    });
+  } catch (e) {
+    setState(() {
+      _errorMessage = 'Errore Invio al login federato: $e';
+      _isLoading = false;
+    });
   }
+}
 
   Future<void> _checkLocalStorageAndNavigate() async {
     final storedToken = html.window.localStorage['token'];
@@ -202,7 +226,7 @@ class _LoginPageState extends State<LoginPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => HomeScaffold(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
+            builder: (_) => ChatBotPage(user: user, token: token), //ChatPanelDemoPage(user: user, token: token), //ChatBotPage(user: user, token: token), // HomeScaffold(user: user, token: token), //DualPaneChatPage(user: user, token: token)), //ChatBotPage(user: user, token: token), //ChatBotPage(user: user, token: token),
           ),
         );
         return;
@@ -260,12 +284,12 @@ class _LoginPageState extends State<LoginPage> {
       return Scaffold(
         backgroundColor: Colors.white,
         body: Center(
-          child: Image.network(
+          child: appIcon /*Image.network(
             'https://static.wixstatic.com/media/63b1fb_396f7f30ead14addb9ef5709847b1c17~mv2.png',
             width: 120,
             height: 120,
             fit: BoxFit.contain,
-          ),
+          ),*/
         ),
       );
     }

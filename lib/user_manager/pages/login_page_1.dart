@@ -30,9 +30,31 @@ class _LoginPageState extends State<LoginPage> {
   String _errorMessage = '';
   bool _isCheckingToken = true; 
 
-  @override
+  
+  /// Ritorna true se l'URL corrente indica che stiamo lavorando in /admin_console.
+  /// (hash strategy: `/#/admin_console`, path strategy: `/admin_console`)
+  bool _isAdminConsoleUrl() {
+    final href = html.window.location.href;
+    final hash = html.window.location.hash; // es: "#/admin_console"
+    final path = html.window.location.pathname; // es: "/admin_console"
+
+    return href.contains('/admin_console') ||
+        hash.contains('/admin_console') ||
+        path!.contains('/admin_console');
+  }
+
+@override
   void initState() {
     super.initState();
+
+    // Se stiamo aprendo direttamente l'Admin Console, NON facciamo auto-login
+    // con il token JWT utente (altrimenti dopo pochi secondi può rimpiazzare
+    // la route /admin_console e riportarci alla home/chat).
+    if (_isAdminConsoleUrl()) {
+      _isCheckingToken = false;
+      return;
+    }
+
     //_checkLocalStorageAndNavigate();
     _handleRedirectOrLocalToken();
   }
@@ -41,6 +63,19 @@ class _LoginPageState extends State<LoginPage> {
   /// 2) Se non c'è token o non è valido, controlla se nella URL è presente `code=...`.
   ///    Se `code` esiste, chiama exchangeAzureCodeForTokens e procedi al login.
 Future<void> _handleRedirectOrLocalToken() async {
+  // Se siamo in /admin_console, non avviare alcun auto-login/redirect basato su JWT utente.
+  // Questo evita che, con token presenti in cache, la LoginPage rimpiazzi la route admin dopo alcuni secondi.
+  if (_isAdminConsoleUrl()) {
+    if (mounted) {
+      setState(() {
+        _isCheckingToken = false;
+      });
+    } else {
+      _isCheckingToken = false;
+    }
+    return;
+  }
+
   final storedToken = html.window.localStorage['token'];
   final storedRefresh = html.window.localStorage['refreshToken'];
 
@@ -54,6 +89,18 @@ Future<void> _handleRedirectOrLocalToken() async {
 
       final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
       final userInfo = await _apiClient.getUserInfo(userInfoRequest);
+
+      // Se nel frattempo siamo finiti in /admin_console, NON redirigere.
+      if (_isAdminConsoleUrl() || !mounted) {
+        if (mounted) {
+          setState(() {
+            _isCheckingToken = false;
+          });
+        } else {
+          _isCheckingToken = false;
+        }
+        return;
+      }
 
       _navigateToChatBot(userInfo: userInfo, token: token);
       return;
@@ -98,6 +145,18 @@ Future<void> _handleRedirectOrLocalToken() async {
       final userInfoRequest = GetUserInfoRequest(accessToken: token.accessToken);
       final userInfo = await _apiClient.getUserInfo(userInfoRequest);
 
+      // Se nel frattempo siamo finiti in /admin_console, NON redirigere.
+      if (_isAdminConsoleUrl() || !mounted) {
+        if (mounted) {
+          setState(() {
+            _isCheckingToken = false;
+          });
+        } else {
+          _isCheckingToken = false;
+        }
+        return;
+      }
+
       _navigateToChatBot(userInfo: userInfo, token: token);
       return;
     } catch (e) {
@@ -121,6 +180,9 @@ Future<void> _handleRedirectOrLocalToken() async {
     required Map<String, dynamic> userInfo,
     required Token token,
   }) {
+    // Se nel frattempo siamo in Admin Console o il widget non è più montato, non navigare.
+    if (!mounted || _isAdminConsoleUrl()) return;
+
     // Estraggo Username
     final username = userInfo['Username'] as String? ?? '';
     // Estraggo email dal campo UserAttributes

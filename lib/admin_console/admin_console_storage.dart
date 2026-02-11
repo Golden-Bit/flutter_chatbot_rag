@@ -32,7 +32,7 @@ class AdminConsoleStorage {
   // ───────────────────────────────────────────────────────────────────────────
   static String get defaultAuthBaseUrl => CognitoApiClient.defaultBaseUrl;
 
-  static const String defaultRagBaseUrl = 'http://34.77.241.172:8080/llm-rag';
+  static const String defaultRagBaseUrl = 'https://teatek-llm.theia-innovation.com/llm-rag';
 
   static AdminConsoleSettings defaults() {
     return const AdminConsoleSettings(

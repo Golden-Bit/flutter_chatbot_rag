@@ -94,7 +94,7 @@ class _AdminConsolePageState extends State<AdminConsolePage>
     // Defaults + localStorage (URL servizi)
     final authDefault = CognitoApiClient.defaultBaseUrl;
     final ragDefault =
-        'http://34.77.241.172:8080/llm-rag'; // coerente col tuo ContextApiSdk.loadConfig()
+        'https://teatek-llm.theia-innovation.com/llm-rag'; // coerente col tuo ContextApiSdk.loadConfig()
 
     _authBaseUrlC.text = html.window.localStorage[_kAuthBaseUrlLS] ?? authDefault;
     _ragBaseUrlC.text = html.window.localStorage[_kRagBaseUrlLS] ?? ragDefault;

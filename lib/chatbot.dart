@@ -59,6 +59,7 @@ import 'dart:html' as html; // download CSV
 import 'package:collection/collection.dart';
 import 'dart:async';
 import 'package:boxed_ai/user_manager/state/billing_globals.dart';
+import 'package:boxed_ai/bug_report/bug_report_dialog.dart';
 
 /// ➊  Chiave che descrive come il messaggio deve apparire nella UI
 ///     'normal'      → si vede subito (default)
@@ -924,6 +925,12 @@ class ChatBotPageState extends State<ChatBotPage> {
 // Nuova flag per mostrare/nascondere il FloatingActionButton
   bool _showScrollToBottomButton = false;
   bool isLoggingOut = false;
+
+
+
+  void _openBugReportDialog() {
+  BugReportDialog.open(context);
+}
 // ──────────────────────────────────────────────
 //  Retry sulla risposta dell’agente
 // ──────────────────────────────────────────────
@@ -5598,6 +5605,23 @@ Semantics(
                                 );
                               },
                             ),
+
+                            const SizedBox(width: 4),
+Semantics(
+  label: 'bug-report-button',
+  button: true,
+  child: IconButton(
+    key: const ValueKey('bug-report-button'),
+    tooltip: 'Segnala un bug',
+    icon: Icon(
+      Icons.bug_report_outlined,
+      // coerente con le icone "soft" della tua topbar
+      color: Theme.of(context).iconTheme.color?.withOpacity(0.70) ?? Colors.grey,
+    ),
+    onPressed: _openBugReportDialog,
+  ),
+),
+
                             if (widget.showUserMenu)
                               Theme(
                                   data: Theme.of(context).copyWith(

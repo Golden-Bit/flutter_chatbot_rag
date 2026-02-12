@@ -60,6 +60,7 @@ import 'package:collection/collection.dart';
 import 'dart:async';
 import 'package:boxed_ai/user_manager/state/billing_globals.dart';
 import 'package:boxed_ai/bug_report/bug_report_dialog.dart';
+import 'package:boxed_ai/bug_report/bug_report_launcher.dart';
 
 /// ➊  Chiave che descrive come il messaggio deve apparire nella UI
 ///     'normal'      → si vede subito (default)
@@ -5618,7 +5619,15 @@ Semantics(
       // coerente con le icone "soft" della tua topbar
       color: Theme.of(context).iconTheme.color?.withOpacity(0.70) ?? Colors.grey,
     ),
-    onPressed: _openBugReportDialog,
+    onPressed: () async {
+  final ok = await BugReportLauncher.openNewTab();
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Impossibile aprire la pagina debug.')),
+    );
+  }
+},
+
   ),
 ),
 

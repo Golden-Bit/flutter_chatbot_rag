@@ -32,6 +32,47 @@
   <title>Boxed-AI</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- 🔧 FIX: purge Service Worker + cache per risolvere icone mancanti (alcune sì/alcune no) -->
+  <script>
+    (async function () {
+      const PURGE_VERSION = '2026-02-12-1'; // <-- cambia questo valore quando vuoi forzare un nuovo purge
+      const KEY_DONE = 'sw_cache_purge_done_' + PURGE_VERSION;
+      const KEY_RELOAD = 'sw_cache_purge_reloaded_' + PURGE_VERSION;
+
+      // Se già fatto, non ripetere
+      if (localStorage.getItem(KEY_DONE) === '1') return;
+
+      try {
+        // 1) Unregister di tutti i service worker sul tuo origin
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+
+        // 2) Cancella tutte le Cache Storage (font/manifest inclusi)
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+
+        // marca completato
+        localStorage.setItem(KEY_DONE, '1');
+
+        // 3) Reload UNA sola volta (evita loop)
+        if (sessionStorage.getItem(KEY_RELOAD) !== '1') {
+          sessionStorage.setItem(KEY_RELOAD, '1');
+
+          // aggiunge un parametro per evitare cache HTTP del browser
+          const u = new URL(window.location.href);
+          u.searchParams.set('__purge', Date.now().toString());
+          window.location.replace(u.toString());
+        }
+      } catch (e) {
+        console.warn('SW/cache purge failed:', e);
+      }
+    })();
+  </script>
+
   <!-- Include PDF.js library for enhanced PDF rendering -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.worker.min.js"></script>
